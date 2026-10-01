@@ -62,11 +62,41 @@ var tide_v: int = -1
 var dreason: String = ""
 var caught: bool = false
 var stroke_mark: int = -1
+# Gu-Welt-Inhalte
+var gname: String = ""        # Wilde Gu: Name der Gu-Art bzw. Id des Unsterblichen Gu
+var igu: PackedStringArray = PackedStringArray()   # besessene Unsterbliche Gu (Lore.IGU-Ids)
+var fig: String = ""          # Schlüssel einzigartiger Figuren und Ehrwürdiger
+var ow: bool = false          # Fremdweltdämon
+var hx: float = -1.0          # Revier (Ödbestien) bzw. Bindung (Himmelsfragment)
+var hy: float = -1.0
+var notrib: bool = false      # Himmelsfragment einverleibt: keine Drangsale mehr
+# abgeleitet, nicht gespeichert
+var beh: int = -1             # Tierverhalten GuData.B_*
+var aqua: bool = false
+var ldr: Unit = null          # Rudelführer
+var km_cd: float = 0.0
+var heal_cd: float = 0.0
+var pb: float = 1.0           # Kultivierungs-Faktor durch einen Ort
+var pb_t: float = -1.0
+var lure_t: float = -1.0
+var lx: float = 0.0
+var ly: float = 0.0
+var duel_t: float = -1.0
+var ig_atk: float = 1.0
+var ig_hp: float = 1.0
+var ig_sp: float = 1.0
+var ig_cult: float = 1.0
+var ig_rng: float = 1.0
+var igf: int = 0
 
 
 func pname() -> String:
 	if k == "p":
-		return sur + " " + given
+		return given if sur == "" else sur + " " + given
+	if gname != "":
+		if sp == "wildimm":
+			return Lore.igu_name(gname)
+		return "Wilder " + gname
 	return str(GuData.SPEC[sp]["n"])
 
 
@@ -79,14 +109,15 @@ func to_dict() -> Dictionary:
 		"rank": rank, "stage": stage, "prog": prog, "apt": apt, "path": path, "align": align, "gus": Array(gus), "sur": sur, "given": given,
 		"kills": kills, "job": job, "hp": hp, "mhp": mhp, "atk": atk, "rng": rng, "aoe": aoe, "awk": awk, "luck": luck, "rogue": rogue,
 		"next_trib": next_trib, "title": title, "militia": militia, "col_clan": col_clan, "swim": swim, "fly": fly, "speed": speed,
-		"phys_x": phys_x, "hungry": hungry, "tide": tide, "tide_v": tide_v}
+		"phys_x": phys_x, "hungry": hungry, "tide": tide, "tide_v": tide_v,
+		"gname": gname, "igu": Array(igu), "fig": fig, "ow": ow, "hx": hx, "hy": hy, "notrib": notrib}
 
 
 static func from_dict(d: Dictionary) -> Unit:
 	var u: Unit = Unit.new()
 	for key: String in d.keys():
-		if key == "gus":
-			u.gus = PackedStringArray(d[key])
+		if key == "gus" or key == "igu":
+			u.set(key, PackedStringArray(d[key]))
 		elif key in ["id", "race", "vil", "clan", "rank", "stage", "path", "align", "kills", "col_clan", "tide_v"]:
 			u.set(key, int(d[key]))
 		else:

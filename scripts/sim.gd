@@ -34,8 +34,27 @@ var shake: float = 0.0
 var terr_dirty: bool = true
 var presim: bool = false
 var sp_count: Dictionary = {}
+var places: Array[Place] = []
+var next_pid: int = 1
+var wild_igu: int = 0   # Zahl der wilden Unsterblichen Gu (monatlich gezählt)
+
+# Wirkungen Unsterblicher Gu (Unit.igf)
+const F_REVIVE: int = 1
+const F_REZ: int = 2
+const F_FORTUNE: int = 4
+const F_FIRE: int = 8
+const F_BOLT: int = 16
+const F_LUCK: int = 32
+const F_HEAL: int = 64
+const F_THIEF: int = 128
+const F_STEAL: int = 256
+const F_STONES: int = 512
+const F_REFINE: int = 1024
+const F_DREAM: int = 2048
 var _grid: Array = []
 var _fire_acc: float = 0.0
+var _sand: bool = false
+const MOVE_OFFS: PackedFloat32Array = [0.0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9]
 
 
 func _init() -> void:
@@ -174,16 +193,25 @@ func near_units(x: float, y: float, r: float) -> Array[Unit]:
 	return out
 
 
+## Nächstes Wesen im Umkreis r, das pred erfüllt (läuft direkt über das Raster, ohne Zwischenliste).
 func nearest(u: Unit, r: float, pred: Callable) -> Unit:
 	var best: Unit = null
-	var bd: float = 1e9
-	for o: Unit in near_units(u.x, u.y, r):
-		if o == u:
-			continue
-		var d2: float = (o.x - u.x) * (o.x - u.x) + (o.y - u.y) * (o.y - u.y)
-		if d2 < bd and pred.call(o):
-			bd = d2
-			best = o
+	var bd: float = r * r
+	var x0: int = clampi(int((u.x - r) / GC), 0, GW - 1)
+	var x1: int = clampi(int((u.x + r) / GC), 0, GW - 1)
+	var y0: int = clampi(int((u.y - r) / GC), 0, GH - 1)
+	var y1: int = clampi(int((u.y + r) / GC), 0, GH - 1)
+	for gy: int in range(y0, y1 + 1):
+		for gx: int in range(x0, x1 + 1):
+			for o: Unit in _grid[gy * GW + gx]:
+				if o == u or o.hp <= 0.0:
+					continue
+				var dx: float = o.x - u.x
+				var dy: float = o.y - u.y
+				var d2: float = dx * dx + dy * dy
+				if d2 <= bd and pred.call(o):
+					bd = d2
+					best = o
 	return best
 
 
@@ -214,28 +242,124 @@ func mk_person(x: float, y: float, race: int, p_age: float = 0.0, sur: String = 
 	u.ty = y
 	u.birth = sim_time - p_age * 12.0
 	u.life = GuData.RACE_LIFE[race] * (0.85 + randf() * 0.3)
-	u.sur = sur if sur != "" else rand_sur(region_at(x, y))
+	if sur != "":
+		u.sur = sur
+	elif race >= 4:
+		u.sur = GuData.RACE_SUR[race].pick_random()[0]
+	else:
+		u.sur = rand_sur(region_at(x, y))
 	u.given = given_name()
 	u.think = randf()
 	u.anim = randf() * 10.0
-	u.swim = race == 3
+	u.swim = GuData.RACE_SWIM[race]
 	set_stats(u, true)
 	units.append(u)
 	return u
 
 
 func set_stats(u: Unit, full: bool) -> void:
-	var m: float = GuData.RACE_HP[u.race]
+	var m: float = GuData.RACE_HP[u.race] * u.ig_hp
 	var f: float = 1.0 + 0.15 * u.stage
 	var ratio: float = u.hp / u.mhp if u.mhp > 1.0 else 1.0
 	u.mhp = GuData.HP[u.rank] * m * f
-	u.atk = GuData.ATK[u.rank] * f * (1.12 if u.race == 1 else 1.0)
-	u.rng = GuData.RNG[u.rank]
+	u.atk = GuData.ATK[u.rank] * f * GuData.RACE_ATK[u.race] * u.ig_atk * (1.4 if u.ow else 1.0)
+	u.rng = GuData.RNG[u.rank] * u.ig_rng
 	u.aoe = GuData.AOE[u.rank]
 	u.hp = u.mhp if full else u.mhp * ratio
-	u.speed = GuData.RACE_SP[u.race] * (1.6 if u.rank >= 6 else 1.0 + u.rank * 0.04)
-	if u.rank >= 6:
+	u.speed = GuData.RACE_SP[u.race] * (1.6 if u.rank >= 6 else 1.0 + u.rank * 0.04) * u.ig_sp
+	if u.rank >= 6 or GuData.RACE_FLY[u.race]:
 		u.fly = true
+
+
+## Rechnet die Wirkungen der Unsterblichen Gu eines Wesens in Faktoren und Merker um.
+func apply_igu(u: Unit) -> void:
+	u.ig_atk = 1.0
+	u.ig_hp = 1.0
+	u.ig_sp = 1.0
+	u.ig_cult = 1.0
+	u.ig_rng = 1.0
+	u.igf = 0
+	for id: String in u.igu:
+		var e: Dictionary = Lore.igu(id)
+		if e.is_empty():
+			continue
+		match str(e["fx"]):
+			"revive":
+				u.igf |= F_REVIVE
+			"rez":
+				u.igf |= F_REZ
+			"fortune":
+				u.igf |= F_FORTUNE
+			"str":
+				u.ig_atk *= 1.6
+			"str2":
+				u.ig_atk *= 2.0
+			"hp":
+				u.ig_hp *= 1.5
+			"move":
+				u.ig_sp *= 1.8
+			"wis":
+				u.ig_cult *= 2.2
+			"cult":
+				u.ig_cult *= 2.0
+			"dream":
+				u.ig_cult *= 1.5
+				u.igf |= F_DREAM
+			"range":
+				u.ig_rng *= 1.4
+				u.ig_atk *= 1.2
+			"fire":
+				u.ig_atk *= 1.3
+				u.igf |= F_FIRE
+			"bolt":
+				u.ig_atk *= 1.15
+				u.igf |= F_BOLT
+			"luck":
+				u.igf |= F_LUCK
+			"heal":
+				u.igf |= F_HEAL
+			"thief":
+				u.ig_atk *= 1.1
+				u.igf |= F_THIEF
+			"steal":
+				u.igf |= F_STEAL
+			"stones":
+				u.igf |= F_STONES
+			"refine":
+				u.ig_cult *= 1.3
+				u.igf |= F_REFINE
+			"life":
+				u.ig_hp *= 1.1
+			_:
+				u.ig_atk *= 1.15
+				u.ig_hp *= 1.15
+
+
+## Gibt einem Wesen ein Unsterbliches Gu (Wirkung sofort).
+func give_igu(u: Unit, id: String) -> void:
+	var e: Dictionary = Lore.igu(id)
+	if e.is_empty() or u.k != "p":
+		return
+	match str(e["fx"]):
+		"fetus":
+			if u.rank < 6:
+				if u.rank == 0:
+					awaken(u, true)
+				ascend(u, 6)
+				log_event(u.pname() + " verschmilzt mit dem Souveräner-Unsterblichen-Fötus-Gu und wird zum Gu-Unsterblichen.", "gold", true)
+				pillar(u.x, u.y, GuData.ESS_COL[6])
+			else:
+				u.prog = minf(0.99, u.prog + 0.5)
+			return
+		"life":
+			u.life += 400.0
+	if u.igu.has(id):
+		return
+	u.igu.append(id)
+	if u.igu.size() > 6:
+		u.igu.remove_at(0)
+	apply_igu(u)
+	set_stats(u, false)
 
 
 func mk_animal(x: float, y: float, s: String) -> Unit:
@@ -254,15 +378,44 @@ func mk_animal(x: float, y: float, s: String) -> Unit:
 	u.mhp = S["hp"]
 	u.atk = S["atk"]
 	u.rng = S["range"]
-	u.aoe = 3.5 if s == "ancient" else 0.0
+	u.aoe = float(S.get("aoe", 0.0))
 	u.speed = S["sp"]
 	u.fly = S["fly"]
+	u.swim = bool(S.get("swim", false))
 	u.think = randf()
 	u.anim = randf() * 10.0
 	u.hungry = randf() * 0.5
-	u.rank = 4 if s == "kingwolf" else (8 if s == "ancient" else 0)
-	u.life = 900.0 if s == "ancient" else (60.0 if s == "kingwolf" else 12.0 + randf() * 8.0)
+	u.rank = int(S.get("tier", 0))
+	u.life = 900.0 if u.rank >= 6 else (60.0 + randf() * 20.0 if u.rank >= 3 else 12.0 + randf() * 8.0)
+	init_animal(u)
+	if u.rank >= 6:
+		u.hx = x
+		u.hy = y
 	units.append(u)
+	return u
+
+
+## Abgeleitete Tierwerte (auch nach dem Laden).
+func init_animal(u: Unit) -> void:
+	var S: Dictionary = GuData.SPEC[u.sp]
+	u.beh = int(S.get("beh", GuData.B_SHY))
+	u.aqua = bool(S.get("aqua", false))
+
+
+## Setzt eine Bestie samt Gefolge (Bestienkönige führen Rudel).
+func spawn_beast(x: float, y: float, s: String) -> Unit:
+	var u: Unit = mk_animal(x, y, s)
+	var S: Dictionary = GuData.SPEC[s]
+	if S.has("fol"):
+		var fs: String = S["fol"]
+		for k: int in range(int(S.get("foln", 4))):
+			for t: int in range(6):
+				var fx2: float = x + (randf() - 0.5) * 8.0
+				var fy2: float = y + (randf() - 0.5) * 8.0
+				if passable(u, int(fx2), int(fy2)):
+					var f: Unit = mk_animal(fx2, fy2, fs)
+					f.ldr = u
+					break
 	return u
 
 
@@ -276,6 +429,8 @@ func passable(u: Unit, tx: int, ty: int) -> bool:
 	var t: int = world.tile[ty * W + tx]
 	if t == GuData.WALL:
 		return not laws["walls"] or u.rank >= 6
+	if u.aqua:
+		return t == GuData.DEEP or t == GuData.SHAL
 	if u.fly:
 		return true
 	if t == GuData.DEEP:
@@ -287,11 +442,13 @@ func sp_mul(u: Unit, t: int) -> float:
 	if u.fly:
 		return 1.0
 	if t == GuData.SHAL:
-		return 1.0 if u.swim else 0.55
+		return 1.0 if (u.swim or u.race == 9) else 0.55
 	if t == GuData.MOUNT:
-		return 0.5
-	if t == GuData.HILL or t == GuData.SNOW:
-		return 0.8
+		return 0.8 if u.race == 2 else 0.5
+	if t == GuData.SNOW:
+		return 1.0 if u.race == 5 else 0.8
+	if t == GuData.HILL:
+		return 1.0 if u.race == 2 else 0.8
 	return 1.0
 
 
@@ -299,44 +456,48 @@ func hostile(a: Unit, b: Unit) -> bool:
 	if a == b or b.hp <= 0.0:
 		return false
 	if a.k == "p" and b.k == "p":
-		if a.rogue or b.rogue:
+		if a.rogue or b.rogue or a.ow or b.ow:
+			return true
+		if a.duel_t > sim_time and b.duel_t > sim_time:
 			return true
 		if a.clan < 0 or b.clan < 0 or a.clan == b.clan:
 			return false
 		var c: Clan = clans[a.clan]
 		return c.alive and c.war.has(b.clan)
 	if a.k == "p":
-		var s: String = b.sp
-		if s == "wildgu":
-			return false
-		if b.tide or s == "kingwolf" or s == "ancient":
-			return true
-		if s == "wolf":
-			return b.aggro == a or a.job == "hunt" or a.rank > 0
-		if s == "deer" or s == "boar":
-			return a.job == "hunt" or b.aggro == a
-		return b.aggro == a
+		match b.beh:
+			GuData.B_GU, GuData.B_IGU:
+				return false
+			GuData.B_KING:
+				return true
+			GuData.B_PRED:
+				return b.tide or b.aggro == a or a.job == "hunt" or a.rank > 0
+			GuData.B_PREY, GuData.B_BOAR:
+				return a.job == "hunt" or b.aggro == a
+		return b.tide or b.aggro == a
 	if b.k == "p":
-		var s2: String = a.sp
-		if a.tide or s2 == "kingwolf" or s2 == "ancient":
+		if a.tide or a.beh == GuData.B_KING:
 			return true
-		if s2 == "wolf":
+		if a.beh == GuData.B_PRED:
 			return a.hungry > 0.97 or a.aggro == b
 		return a.aggro == b
-	if b.sp == "wildgu":
+	if b.beh == GuData.B_GU or b.beh == GuData.B_IGU:
 		return false
-	if (a.sp == "wolf" or a.sp == "kingwolf") and b.sp == "deer":
-		return a.hungry > 0.4 or a.sp == "kingwolf"
-	if a.sp == "ancient":
-		return b.sp != "ancient"
+	if a.beh == GuData.B_PRED or (a.beh == GuData.B_KING and a.rank < 6):
+		if b.beh == GuData.B_PREY:
+			return a.hungry > 0.4 or a.beh == GuData.B_KING
+		return a.aggro == b
+	if a.beh == GuData.B_KING:
+		return b.sp != a.sp and b.ldr != a and a.ldr != b
 	return a.aggro == b
 
 
 # ---------------- Clans, Dörfer, Gebäude ----------------
 
-func village_name() -> String:
+func village_name(race: int = 0) -> String:
+	var pre: Array = GuData.RACE_VPRE[clampi(race, 0, GuData.RACE_VPRE.size() - 1)]
 	for k: int in range(20):
-		var n: String = GuData.VPRE[randi() % GuData.VPRE.size()] + GuData.VSUF[randi() % GuData.VSUF.size()]
+		var n: String = (str(pre.pick_random()) if (not pre.is_empty() and randf() < 0.6) else GuData.VPRE[randi() % GuData.VPRE.size()]) + GuData.VSUF[randi() % GuData.VSUF.size()]
 		var used: bool = false
 		for v: Village in villages:
 			if v != null and v.alive and v.name == n:
@@ -346,9 +507,20 @@ func village_name() -> String:
 	return GuData.VPRE[randi() % GuData.VPRE.size()] + GuData.VSUF[randi() % GuData.VSUF.size()]
 
 
-func new_clan(r: int, sur: String) -> Clan:
+func new_clan(r: int, sur: String, race: int = 0) -> Clan:
 	var c: Clan = Clan.new()
-	if r == 4:
+	if race >= 4:
+		var found2: Array = []
+		for a: Array in GuData.RACE_SUR[race]:
+			if a[0] == sur:
+				found2 = a
+		if found2.is_empty():
+			found2 = GuData.RACE_SUR[race].pick_random()
+		c.name = str(found2[0]) + "-" + GuData.RACE_CLAN[race]
+		c.glyph = found2[1]
+		c.kind = "Stamm" if GuData.RACE_CLAN[race].ends_with("stamm") else "Clan"
+		c.sur = found2[0]
+	elif r == 4:
 		var s: Array = GuData.SURN[4].pick_random()
 		c.name = s[0] + "-Sekte"
 		c.glyph = s[1]
@@ -387,6 +559,37 @@ func new_clan(r: int, sur: String) -> Clan:
 	c.region = r
 	clans.append(c)
 	return c
+
+
+## Clan einer Organisation aus Lore.ORGS (fester Name, Siegel, Farbe).
+func new_org_clan(o: Dictionary, r: int) -> Clan:
+	var c: Clan = Clan.new()
+	c.name = o["n"]
+	c.glyph = o["gl"]
+	c.kind = o["k"]
+	c.col = Color(str(o["col"]))
+	c.org = o["id"]
+	c.align = int(o.get("al", 0))
+	c.sur = str(o.get("sur", ""))
+	c.id = clans.size()
+	c.born = year()
+	c.region = r
+	clans.append(c)
+	return c
+
+
+func org_clan(id: String) -> Clan:
+	for c: Clan in clans:
+		if c.alive and c.org == id:
+			return c
+	return null
+
+
+func fig_alive(key: String) -> Unit:
+	for u: Unit in units:
+		if u.hp > 0.0 and u.fig == key:
+			return u
+	return null
 
 
 func can_place(x: int, y: int, w: int, h: int, m: int) -> bool:
@@ -561,7 +764,11 @@ func found_village(u: Unit, clan_id: int) -> bool:
 		c = clans[clan_id]
 	var is_new: bool = c == null
 	if is_new:
-		c = new_clan(world.region[ty * W + tx], u.sur)
+		c = new_clan(world.region[ty * W + tx], u.sur, u.race)
+		if u.rank > 0:
+			c.align = u.align
+		elif randf() < 0.2:
+			c.align = 1
 	var v: Village = Village.new()
 	v.id = villages.size()
 	v.clan = c.id
@@ -569,7 +776,7 @@ func found_village(u: Unit, clan_id: int) -> bool:
 	v.y = ty - 2
 	v.cx = tx + 0.5
 	v.cy = ty + 0.5
-	v.name = village_name()
+	v.name = village_name(u.race)
 	v.race = u.race
 	v.born = year()
 	v.spring = near_feat(tx, ty, 12, GuData.F_SPRING)
@@ -625,7 +832,11 @@ func try_build(v: Village, type: String) -> bool:
 
 func pick_sur(v: Village) -> String:
 	var c: Clan = clans[v.clan]
-	if c.kind != "Sekte":
+	if c.sur != "":
+		return c.sur
+	if v.race >= 4:
+		return GuData.RACE_SUR[v.race].pick_random()[0]
+	if c.kind != "Sekte" and c.org == "":
 		return c.name.replace("Clan ", "").replace("Stamm ", "").replace(" (Zweig)", "")
 	return rand_sur(v.reg)
 
@@ -643,13 +854,16 @@ func awaken(u: Unit, force: bool = false) -> void:
 	if u.apt == "X":
 		u.phys_x = true
 	var r: int = villages[u.vil].reg if u.vil >= 0 else region_at(u.x, u.y)
-	u.path = GuData.REGPATH[r].pick_random()
+	var rp: Array = GuData.RACE_PATHS[u.race]
+	u.path = int(rp.pick_random()) if (not rp.is_empty() and randf() < 0.5) else int(GuData.REGPATH[r].pick_random())
 	u.align = 1 if randf() < 0.3 else 0
+	if u.clan >= 0 and clans[u.clan].align == 1 and randf() < 0.6:
+		u.align = 1
 	u.rank = 1
 	u.stage = 0
 	u.prog = 0.0
 	u.awk = true
-	u.gus = PackedStringArray([GuData.STARTGU[u.path]])
+	u.gus = PackedStringArray([Lore.start_gu(u.path)])
 	u.life += GuData.LIFEB[1]
 	u.job = ""
 	set_stats(u, true)
@@ -658,7 +872,9 @@ func awaken(u: Unit, force: bool = false) -> void:
 
 
 func gain_gu(u: Unit) -> String:
-	var pool: PackedStringArray = GuData.GU_IMM if u.rank >= 6 else (GuData.GU_MID + GuData.GU_LOW if u.rank >= 3 else GuData.GU_LOW)
+	var pool: PackedStringArray = Lore.mgu(u.path) if u.path >= 0 else GuData.GU_LOW
+	if randf() < 0.3:
+		pool = GuData.GU_MID if u.rank >= 3 else GuData.GU_LOW
 	for k: int in range(5):
 		var g: String = pool[randi() % pool.size()]
 		if not u.gus.has(g):
@@ -684,6 +900,11 @@ func cultivate(u: Unit) -> void:
 			rate *= 0.35
 	if u.luck > 0.0:
 		rate *= 2.2
+	rate *= u.ig_cult
+	if u.pb_t > sim_time:
+		rate *= u.pb
+	if u.ow:
+		rate *= 2.5
 	u.prog += rate * (0.7 + randf() * 0.6)
 	if u.prog >= 1.0:
 		u.prog = 0.0
@@ -695,7 +916,7 @@ func stage_up(u: Unit) -> void:
 		return
 	if u.stage < 3:
 		u.stage += 1
-		if randf() < 0.35:
+		if randf() < (0.8 if (u.igf & F_REFINE) else 0.35):
 			gain_gu(u)
 		set_stats(u, false)
 		float_txt(u, GuData.STAGE[u.stage], GuData.ESS_COL[u.rank])
@@ -762,6 +983,8 @@ func ascend(u: Unit, nr: int) -> void:
 func tribulation(u: Unit) -> void:
 	var nm: String = u.pname()
 	u.next_trib = uage(u) + 12.0 + randf() * 16.0
+	if u.notrib:
+		return
 	for k: int in range(6):
 		later(k * 0.25, func() -> void:
 			if u.hp > 0.0:
@@ -771,7 +994,11 @@ func tribulation(u: Unit) -> void:
 			return
 		var ch: float = 0.06 + 0.04 * (u.rank - 6) - (0.05 if u.luck > 0.0 else 0.0)
 		bolt(u.x, u.y, 0.0, true)
-		if randf() < ch:
+		var dies: bool = randf() < ch
+		if dies and use_fortune(u):
+			dies = false
+			log_event(nm + " übersteht die Drangsal dank des Himmelstrotzenden-Glück-Gu.", "gold", true)
+		if dies:
 			u.dreason = "Himmelsdrangsal"
 			u.hp = 0.0
 			log_event(nm + " stirbt in einer Himmelsdrangsal.", "red", true)
@@ -860,6 +1087,8 @@ func capture(v: Village, nc: Clan) -> void:
 # ---------------- Feuer ----------------
 
 func ignite(i: int, v: float) -> void:
+	if presim:
+		return  # In der Vorgeschichte brennt nichts ab (sonst verascht der Zentralkontinent durch Drangsal-Blitze).
 	var t: int = world.tile[i]
 	if t == GuData.DEEP or t == GuData.SHAL or t == GuData.WALL or t == GuData.SNOW:
 		return
@@ -928,6 +1157,11 @@ func hurt(t: Unit, dmg: float, src: Unit) -> void:
 		return
 	t.hp -= dmg
 	t.flash = 0.12
+	if t.hp > 0.0 and (t.igf & F_HEAL) != 0 and t.hp < t.mhp * 0.3 and sim_time >= t.heal_cd:
+		t.hp = t.mhp
+		t.heal_cd = sim_time + 12.0
+		float_txt(t, "Vollständig geheilt", GuData.PATH_COL[10])
+		spark(t.x, t.y - 2.0, GuData.PATH_COL[10], 10, 5.0)
 	if src != null and src != t:
 		t.aggro = src
 		if t.k == "p" and t.st == "work":
@@ -946,14 +1180,62 @@ func on_kill(s: Unit, t: Unit) -> void:
 			if s.prog >= 1.0:
 				s.prog = 0.0
 				stage_up(s)
-		if t.k == "a" and (t.sp == "deer" or t.sp == "boar") and s.vil >= 0:
-			villages[s.vil].food += 7.0 if t.sp == "boar" else 5.0
+		if t.k == "a" and (t.beh == GuData.B_PREY or t.beh == GuData.B_BOAR) and s.vil >= 0:
+			villages[s.vil].food += 7.0 if t.beh == GuData.B_BOAR else 5.0
+		if t.k == "a" and s.rank > 0:
+			var bg: String = str(GuData.SPEC[t.sp].get("gu", ""))
+			if bg != "" and not s.gus.has(bg) and randf() < 0.6:
+				s.gus.append(bg)
+				float_txt(s, "+" + bg, Color("#cfe8ff"))
 		if t.k == "p" and s.clan >= 0:
 			clans[s.clan].kills += 1
-	elif s.sp == "wolf" or s.sp == "kingwolf":
+		if t.k == "p":
+			loot(s, t)
+	elif s.beh == GuData.B_PRED or s.beh == GuData.B_KING:
 		s.hungry = 0.0
 	if t.k == "p" and t.dreason == "":
-		t.dreason = ("getötet von " + s.pname()) if s.k == "p" else ("gerissen von " + str(GuData.SPEC[s.sp]["n"]))
+		t.dreason = "getötet von " + s.pname() if s.k == "p" else "gerissen von " + s.pname()
+
+
+## Beute: Unsterbliche, Dämonische und Diebe nehmen dem Besiegten Unsterbliche Gu, Gu und Lebenszeit ab.
+func loot(s: Unit, t: Unit) -> void:
+	if (s.igf & F_STEAL) != 0:
+		s.life += 10.0
+		float_txt(s, "+10 Jahre", GuData.PATH_COL[41])
+	if (s.igf & F_THIEF) != 0 and t.gus.size() > 0:
+		var g: String = t.gus[randi() % t.gus.size()]
+		if not s.gus.has(g):
+			s.gus.append(g)
+			if s.gus.size() > 9:
+				s.gus.remove_at(1)
+	if t.igu.is_empty() or s.rank < 6:
+		return
+	if not (s.rogue or s.align == 1 or (s.igf & F_THIEF) != 0 or randf() < 0.35):
+		return
+	var cands: PackedStringArray = PackedStringArray()
+	for id: String in t.igu:
+		var fxs: String = str(Lore.igu(id).get("fx", ""))
+		if fxs != "revive" and fxs != "rez":
+			cands.append(id)
+	if cands.is_empty():
+		return
+	var id2: String = cands[randi() % cands.size()]
+	t.igu.remove_at(t.igu.find(id2))
+	give_igu(s, id2)
+	log_event(s.pname() + " erbeutet " + Lore.igu_name(id2) + " von " + t.pname() + ".", "violet", true)
+
+
+## Verbraucht ein Himmelstrotzendes-Glück-Gu (true, wenn vorhanden).
+func use_fortune(u: Unit) -> bool:
+	if (u.igf & F_FORTUNE) == 0:
+		return false
+	for k: int in range(u.igu.size()):
+		if str(Lore.igu(u.igu[k]).get("fx", "")) == "fortune":
+			u.igu.remove_at(k)
+			break
+	apply_igu(u)
+	pillar(u.x, u.y, GuData.PATH_COL[24], 0.8)
+	return true
 
 
 func boom(x: float, y: float, r: float, dmg: float, o: Dictionary = {}) -> void:
@@ -1064,7 +1346,7 @@ func monthly() -> void:
 		if v.lvl == 0 and v.pop >= 10:
 			v.lvl = 1
 		if laws["growth"] and v.pop < v.cap and v.food > v.pop * 0.35 and n_persons < GuData.MAXU:
-			if randf() < minf(0.5, 0.02 * v.adults + 0.03) * float(ad["grow"]):
+			if randf() < minf(0.5, 0.02 * v.adults + 0.03) * float(ad["grow"]) * GuData.RACE_GROW[v.race]:
 				var kid: Unit = mk_person(v.cx + randf() * 2.0 - 1.0, v.cy + 2.5, v.race, 0.0, pick_sur(v))
 				join_village(kid, v)
 				v.food -= 2.0
@@ -1173,6 +1455,7 @@ func monthly() -> void:
 				capture(v, clans[best])
 	if int(sim_time) % 12 == 0:
 		yearly()
+	place_month()
 	nature_spawns()
 	update_leaders()
 	terr_dirty = true
@@ -1213,15 +1496,19 @@ func person_month(u: Unit) -> void:
 			awaken(u)
 	if u.rank > 0:
 		cultivate(u)
-	if u.luck > 0.0:
+	if (u.igf & F_LUCK) != 0:
+		u.luck = 1.0
+	elif u.luck > 0.0:
 		u.luck = maxf(0.0, u.luck - 1.0 / 48.0)
+	if (u.igf & F_STONES) != 0 and u.vil >= 0:
+		villages[u.vil].stones += 2.0
 	if u.rank >= 6 and u.rank < 9 and laws["trib"] and a >= u.next_trib:
 		tribulation(u)
 	if u.rank >= 2 and u.align == 1 and not u.rogue and randf() < 0.0014:
 		go_rogue(u)
 	if u.rank == 0 and a >= 14.0 and u.vil >= 0 and (u.job == "" or randf() < 0.03):
 		assign_job(u)
-	u.hp = minf(u.mhp, u.hp + u.mhp * 0.1)
+	u.hp = minf(u.mhp, u.hp + u.mhp * (0.35 if u.race == 10 else 0.1))
 
 
 func assign_job(u: Unit) -> void:
@@ -1241,11 +1528,11 @@ func assign_job(u: Unit) -> void:
 
 func animal_month(u: Unit) -> void:
 	var s: String = u.sp
-	if s != "wildgu" and s != "ancient" and uage(u) > u.life:
+	if u.beh != GuData.B_GU and u.beh != GuData.B_IGU and u.rank < 6 and uage(u) > u.life:
 		u.hp = 0.0
 		return
 	u.hp = minf(u.mhp, u.hp + u.mhp * 0.15)
-	if laws["growth"] and s in ["deer", "boar", "wolf", "monkey", "crane"] and randf() < 0.006 and sp_count.get(s, 0) < int(GuData.SPEC[s]["cap"]) / 2:
+	if laws["growth"] and u.rank == 0 and u.beh != GuData.B_GU and u.beh != GuData.B_IGU and u.ldr == null and randf() < 0.006 and sp_count.get(s, 0) < int(GuData.SPEC[s]["cap"]) / 2:
 		mk_animal(u.x + (randf() - 0.5) * 2.0, u.y + (randf() - 0.5) * 2.0, s)
 
 
@@ -1262,9 +1549,11 @@ func nature_spawns() -> void:
 	for u: Unit in units:
 		if u.k == "a" and u.hp > 0.0:
 			sp_count[u.sp] = sp_count.get(u.sp, 0) + 1
+	wild_igu = int(sp_count.get("wildimm", 0))
 	if not laws["growth"]:
 		return
-	var tries: Array = [["deer", [GuData.GRASS, GuData.STEP], [0, 1, 4]], ["boar", [GuData.GRASS], [1, 4]], ["wolf", [GuData.STEP, GuData.SNOW, GuData.GRASS], [0, 1]], ["monkey", [GuData.GRASS], [1, 4, 3]], ["crane", [GuData.GRASS, GuData.SAND], [3, 4]]]
+	var tries: Array = [["deer", [GuData.GRASS, GuData.STEP], [0, 1, 4]], ["boar", [GuData.GRASS], [1, 4]], ["wolf", [GuData.STEP, GuData.SNOW, GuData.GRASS], [0, 1]], ["monkey", [GuData.GRASS], [1, 4, 3]], ["crane", [GuData.GRASS, GuData.SAND], [3, 4]],
+		["white_boar", [GuData.GRASS, GuData.HILL], [1]], ["black_boar", [GuData.GRASS, GuData.HILL], [1]], ["lightning_wolf", [GuData.GRASS], [1]], ["thousand_li_earthwolf_spider", [GuData.GRASS, GuData.SOIL], [1]]]
 	for e: Array in tries:
 		var s: String = e[0]
 		if sp_count.get(s, 0) < int(GuData.SPEC[s]["cap"]) * 0.12 and randf() < 0.25:
@@ -1274,10 +1563,38 @@ func nature_spawns() -> void:
 			if p.x >= 0.0:
 				mk_animal(p.x, p.y, s)
 	if sp_count.get("wildgu", 0) < 50 and randf() < 0.6:
-		var p2: Vector2 = random_tile(func(i: int) -> bool: return (world.tile[i] == GuData.GRASS or world.tile[i] == GuData.HILL) and world.region[i] in [0, 1, 4])
+		var p2: Vector2 = random_tile(func(i: int) -> bool: return (world.tile[i] == GuData.GRASS or world.tile[i] == GuData.HILL or world.tile[i] == GuData.STEP or world.tile[i] == GuData.DES) and world.region[i] != 3)
 		if p2.x >= 0.0:
+			var pth: int = int(GuData.REGPATH[region_at(p2.x, p2.y)].pick_random())
 			for k: int in range(randi_range(1, 3)):
-				mk_animal(p2.x + (randf() - 0.5) * 4.0, p2.y + (randf() - 0.5) * 4.0, "wildgu")
+				spawn_wild_gu(p2.x + (randf() - 0.5) * 4.0, p2.y + (randf() - 0.5) * 4.0, pth)
+
+
+## Wilder sterblicher Gu eines Pfades (Name aus Lore.mgu).
+func spawn_wild_gu(x: float, y: float, pth: int) -> Unit:
+	var g: Unit = mk_animal(x, y, "wildgu")
+	g.path = pth
+	g.gname = Lore.mgu(pth)[randi() % Lore.mgu(pth).size()]
+	return g
+
+
+## Wildes Unsterbliches Gu (id leer = zufällig).
+func spawn_wild_igu(x: float, y: float, id: String = "") -> Unit:
+	if id == "":
+		id = Lore.IGU.pick_random()["id"]
+	var g: Unit = mk_animal(x, y, "wildimm")
+	wild_igu += 1
+	g.gname = id
+	g.path = int(Lore.igu(id).get("p", 0))
+	return g
+
+
+func count_sp(s: String) -> int:
+	var n: int = 0
+	for u: Unit in units:
+		if u.hp > 0.0 and u.sp == s:
+			n += 1
+	return n
 
 
 func yearly() -> void:
@@ -1295,6 +1612,26 @@ func yearly() -> void:
 		var top: Array[Unit] = strongest(1)
 		if not top.is_empty() and top[0].rank >= 7:
 			heavens_will(top[0])
+	if laws["growth"] and randf() < 0.05:
+		wild_beast_king()
+
+
+## Seltene natürliche Bestienkönige und Ödbestien in ihrer Heimatregion.
+func wild_beast_king() -> void:
+	var kings: int = 0
+	for u: Unit in units:
+		if u.k == "a" and u.hp > 0.0 and u.rank >= 3:
+			kings += 1
+	if kings >= 4:
+		return
+	var s: String = ["bk100", "bk100", "bk10000", "stone_monkey_king", "crocodile_king", "earth_chief", "peach_wolf", "turtle_jade_wolf", "flying_bear", "iron_crown_eagle", "moon_demon_bat", "star_desolate_hound", "qi_grand_lion", "desolate"].pick_random()
+	var S: Dictionary = GuData.SPEC[s]
+	var rg: int = int(S.get("reg", [0, 1, 4].pick_random()))
+	var p: Vector2 = random_tile(func(i: int) -> bool: return world.region[i] == rg and (world.tile[i] == GuData.GRASS or world.tile[i] == GuData.STEP or world.tile[i] == GuData.HILL or world.tile[i] == GuData.SNOW) and world.bmap[i] < 0, 200)
+	if p.x < 0.0 or nearest_village(p.x, p.y, 30.0) != null:
+		return
+	spawn_beast(p.x, p.y, s)
+	log_event("Bestie gesichtet: %s in %s." % [str(S["n"]), GuData.REGN_DAT[rg]], "war", int(S.get("tier", 0)) >= 5)
 
 
 func strongest(n: int) -> Array[Unit]:
@@ -1323,15 +1660,16 @@ func beast_tide(v: Village, at: Vector2) -> void:
 	if p.x < 0.0:
 		return
 	var n: int = mini(30, 10 + v.pop / 3)
+	var ws: String = "lightning_wolf" if (v.reg == 1 and randf() < 0.5) else "wolf"
 	for k: int in range(n):
-		var w: Unit = mk_animal(p.x + (randf() - 0.5) * 8.0, p.y + (randf() - 0.5) * 8.0, "wolf")
+		var w: Unit = mk_animal(p.x + (randf() - 0.5) * 8.0, p.y + (randf() - 0.5) * 8.0, ws)
 		w.tide = true
 		w.tide_v = v.id
 		w.hungry = 1.0
 	var kw: Unit = mk_animal(p.x, p.y, "kingwolf")
 	kw.tide = true
 	kw.tide_v = v.id
-	log_event("Wolfsflut! Ein Donnerkronen-Wolf führt %d Wölfe gegen %s (%s)." % [n, v.name, clans[v.clan].name], "war", true)
+	log_event("Wolfsflut! Ein Donnerkronen-Wolf führt %d %s gegen %s (%s)." % [n, "Blitzwölfe" if ws == "lightning_wolf" else "Wölfe", v.name, clans[v.clan].name], "war", true)
 
 
 func heavens_will(u: Unit) -> void:
@@ -1347,7 +1685,11 @@ func heavens_will(u: Unit) -> void:
 		bolt(u.x, u.y, 0.0, true)
 		ring(u.x, u.y, 12.0, Color("#b98cff"), 1.0)
 		var ch: float = 0.12 if u.rank >= 9 else (0.3 if u.rank >= 8 else 0.45)
-		if randf() < ch:
+		var dies: bool = randf() < ch
+		if dies and use_fortune(u):
+			dies = false
+			log_event(nm + " trotzt dem Himmelswillen dank des Himmelstrotzenden-Glück-Gu.", "gold", true)
+		if dies:
 			u.dreason = "Himmelswille"
 			u.hp = 0.0
 			log_event(nm + " wird vom Himmelswillen ausgelöscht.", "red", true)
@@ -1491,10 +1833,31 @@ func think_p(u: Unit) -> void:
 			return
 	if u.tgt != null:
 		return
+	if u.lure_t > sim_time:
+		go_to(u, u.lx, u.ly)
+		u.st = "idle"
+		return
+	if u.notrib and u.hx >= 0.0 and Vector2(u.hx - u.x, u.hy - u.y).length() > 22.0:
+		go_to(u, u.hx + randf() * 8.0 - 4.0, u.hy + randf() * 8.0 - 4.0)
+		return
+	if u.rank >= 5 and wild_igu > 0 and catch_igu_think(u):
+		return
 	if u.rogue:
+		if u.rank >= 6 and randf() < 0.3:
+			var rich: Unit = nearest(u, 60.0, func(o: Unit) -> bool: return o.k == "p" and not o.igu.is_empty() and power(o) < power(u) * 1.5)
+			if rich != null:
+				u.tgt = rich
+				return
 		var prey: Unit = nearest(u, 24.0, func(o: Unit) -> bool: return o.k == "p" and not o.rogue and power(o) < power(u) * 1.3)
 		if prey != null:
 			u.tgt = prey
+			return
+		var g0: Unit = nearest(u, 14.0, func(o: Unit) -> bool: return o.beh == GuData.B_GU)
+		if g0 != null and u.rank > 0:
+			if Vector2(g0.x - u.x, g0.y - u.y).length() < 1.8:
+				catch_wild_gu(u, g0)
+			else:
+				go_to(u, g0.x, g0.y)
 			return
 		wander(u, 20.0)
 		return
@@ -1514,18 +1877,10 @@ func think_p(u: Unit) -> void:
 	if u.st == "work":
 		return
 	if u.rank > 0:
-		var g: Unit = nearest(u, 18.0, func(o: Unit) -> bool: return o.sp == "wildgu")
+		var g: Unit = nearest(u, 18.0, func(o: Unit) -> bool: return o.beh == GuData.B_GU)
 		if g != null and randf() < 0.6:
 			if Vector2(g.x - u.x, g.y - u.y).length() < 1.8:
-				g.hp = 0.0
-				g.caught = true
-				u.prog += 0.12
-				var nm: String = gain_gu(u)
-				float_txt(u, ("+" + nm) if nm != "" else "+Gu", Color("#cfe8ff"))
-				spark(g.x, g.y, Color("#cfe8ff"), 8, 5.0)
-				if u.prog >= 1.0:
-					u.prog = 0.0
-					stage_up(u)
+				catch_wild_gu(u, g)
 			else:
 				go_to(u, g.x, g.y)
 			return
@@ -1582,7 +1937,7 @@ func do_job(u: Unit, v: Village) -> void:
 				return
 			work_at(u, i, 2.0, "gather")
 		"hunt":
-			var p: Unit = nearest(u, 28.0, func(o: Unit) -> bool: return o.sp == "deer" or o.sp == "boar")
+			var p: Unit = nearest(u, 28.0, func(o: Unit) -> bool: return o.beh == GuData.B_PREY or (o.beh == GuData.B_BOAR and o.rank == 0))
 			if p != null and Vector2(p.x - v.cx, p.y - v.cy).length() < 36.0:
 				u.tgt = p
 			else:
@@ -1622,26 +1977,35 @@ func lone_think(u: Unit, a: float) -> void:
 
 
 func think_a(u: Unit) -> void:
-	var s: String = u.sp
-	if s == "wildgu":
-		wander(u, 6.0)
+	var bh: int = u.beh
+	if bh == GuData.B_GU or bh == GuData.B_IGU:
+		wander(u, 6.0 if bh == GuData.B_GU else 10.0)
 		return
-	if s == "deer" or s == "monkey" or s == "crane":
-		var th: Unit = nearest(u, 8.0, func(o: Unit) -> bool: return (o.k == "p" and o.job == "hunt") or o.sp == "wolf" or o.sp == "kingwolf" or o.sp == "ancient")
+	var L: Unit = u.ldr
+	if L != null and L.hp <= 0.0:
+		u.ldr = null
+		L = null
+	if bh == GuData.B_PREY or bh == GuData.B_SHY:
+		var th: Unit = nearest(u, 8.0, func(o: Unit) -> bool: return o != L and ((o.k == "p" and o.job == "hunt") or o.beh == GuData.B_PRED or (o.beh == GuData.B_KING and o.ldr != L)))
 		if th != null:
 			var d: Vector2 = Vector2(u.x - th.x, u.y - th.y)
 			if d.length() < 0.01:
 				d = Vector2(1, 0)
 			d = d.normalized() * 12.0
 			go_to(u, u.x + d.x, u.y + d.y)
+		elif L != null:
+			wander_near(u, L.x, L.y, 5.0)
 		elif randf() < 0.6:
 			wander(u, 10.0)
 		return
 	if u.tgt == null:
-		var r: float = 14.0 if s == "ancient" else (18.0 if (s == "kingwolf" or u.tide) else 10.0)
+		var r: float = 14.0 if u.rank >= 6 else (18.0 if (u.rank >= 3 or u.tide) else 10.0)
 		var e: Unit = nearest(u, r, func(o: Unit) -> bool: return hostile(u, o))
 		if e != null:
 			u.tgt = e
+			return
+		if L != null and L.tgt != null and L.tgt.hp > 0.0:
+			u.tgt = L.tgt
 			return
 	if u.tgt != null:
 		return
@@ -1651,7 +2015,65 @@ func think_a(u: Unit) -> void:
 			go_to(u, v.cx + randf() * 8.0 - 4.0, v.cy + randf() * 8.0 - 4.0)
 			return
 		u.tide = false
-	wander(u, 20.0 if s == "ancient" else 12.0)
+	if L != null:
+		wander_near(u, L.x, L.y, 5.0)
+		return
+	if u.rank >= 6 and u.hx >= 0.0:
+		# Revierbestie: streift durchs Revier und überfällt nahe Dörfer
+		if u.lure_t > sim_time:
+			go_to(u, u.lx + randf() * 6.0 - 3.0, u.ly + randf() * 6.0 - 3.0)
+			return
+		if randf() < 0.1:
+			var hv: Village = nearest_village(u.hx, u.hy, 34.0)
+			if hv != null:
+				u.lure_t = sim_time + 8.0
+				u.lx = hv.cx
+				u.ly = hv.cy
+				return
+		wander_near(u, u.hx, u.hy, 22.0)
+		return
+	wander(u, 20.0 if u.rank >= 6 else 12.0)
+
+
+## Fängt einen wilden sterblichen Gu: Gu-Name in die Liste, Fortschritt.
+func catch_wild_gu(u: Unit, g: Unit) -> void:
+	g.hp = 0.0
+	g.caught = true
+	var gain: float = 0.12 * (1.6 if u.race == 1 else 1.0) * (1.5 if g.path == u.path else 1.0)
+	u.prog += gain
+	var nm: String = g.gname
+	if nm == "" or u.gus.has(nm):
+		nm = gain_gu(u)
+	else:
+		u.gus.append(nm)
+		if u.gus.size() > 9:
+			u.gus.remove_at(1)
+	var gc: Color = GuData.PATH_COL[g.path] if g.path >= 0 else Color("#cfe8ff")
+	float_txt(u, ("+" + nm) if nm != "" else "+Gu", gc)
+	spark(g.x, g.y, gc, 8, 5.0)
+	if u.prog >= 1.0:
+		u.prog = 0.0
+		stage_up(u)
+
+
+## Unsterbliche (und Rang 5 für den Fötus) jagen wilde Unsterbliche Gu. true = beschäftigt.
+func catch_igu_think(u: Unit) -> bool:
+	var imm: bool = u.rank >= 6
+	var g: Unit = nearest(u, 40.0, func(o: Unit) -> bool: return o.beh == GuData.B_IGU and (imm or o.gname == "sovereign_immortal_fetus"))
+	if g == null or randf() > 0.8:
+		return false
+	if Vector2(g.x - u.x, g.y - u.y).length() < 2.2:
+		g.hp = 0.0
+		g.caught = true
+		var nm: String = Lore.igu_name(g.gname)
+		pillar(g.x, g.y, GuData.PATH_COL[g.path], 0.8)
+		spark(g.x, g.y, Color("#ffe8a0"), 16, 6.0)
+		float_txt(u, "+" + nm, Color("#ffe27a"))
+		log_event(u.pname() + " fängt das Unsterbliche Gu " + nm + ".", "violet", true)
+		give_igu(u, g.gname)
+	else:
+		go_to(u, g.x, g.y)
+	return true
 
 
 # ---------------- Schritt ----------------
@@ -1665,12 +2087,12 @@ func move_unit(u: Unit, dt: float) -> void:
 		return
 	var ti: int = int(u.y) * W + int(u.x)
 	var mul: float = sp_mul(u, world.tile[ti])
-	if weather.get("type", "") == "sand" and not u.fly:
+	if _sand and not u.fly:
 		mul *= 0.6
 	var spd: float = minf(u.speed * mul * dt, d)
 	var ang: float = atan2(dy, dx)
 	var cur_ok: bool = passable(u, int(u.x), int(u.y))
-	for off: float in [0.0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9]:
+	for off: float in MOVE_OFFS:
 		var a: float = ang + off
 		var nx: float = u.x + cos(a) * spd
 		var ny: float = u.y + sin(a) * spd
@@ -1701,11 +2123,18 @@ func move_unit(u: Unit, dt: float) -> void:
 
 
 func attack(u: Unit, e: Unit) -> void:
-	u.cd = (1.1 if u.rank >= 6 else 0.9) if u.k == "p" else (1.6 if u.sp == "ancient" else 0.85)
+	u.cd = (1.1 if u.rank >= 6 else 0.9) if u.k == "p" else (1.6 if u.rank >= 6 else 0.85)
 	u.face = 1 if e.x > u.x else -1
+	if u.k == "p" and u.rank >= 6 and u.km_cd <= 0.0 and u.path >= 0 and randf() < 0.3:
+		u.km_cd = 9.0 + randf() * 8.0
+		u.cd = 1.4
+		killer_move(u, e.x, e.y)
+		return
+	if (u.igf & F_BOLT) != 0 and randf() < 0.3:
+		bolt(e.x, e.y, u.atk * 0.6, false)
 	if u.rng > 3.0:
-		var c: Color = GuData.PATH_COL[u.path] if (u.k == "p" and u.path >= 0) else (Color("#fff27a") if u.sp == "kingwolf" else Color("#ff6a3a"))
-		projs.append({"x": u.x, "y": u.y - 1.5, "t": e, "sp": 30.0 if u.rank >= 6 else 22.0, "dmg": u.atk * (0.85 + randf() * 0.3), "src": u, "c": c, "aoe": u.aoe, "path": u.path if u.k == "p" else -1, "big": u.rank >= 6, "l": 3.0, "a": 0.0})
+		var c: Color = GuData.PATH_COL[u.path] if (u.k == "p" and u.path >= 0) else Color(str(GuData.SPEC[u.sp].get("pc", "#ff6a3a")) if u.k == "a" else "#ff6a3a")
+		projs.append({"x": u.x, "y": u.y - 1.5, "t": e, "sp": 30.0 if u.rank >= 6 else 22.0, "dmg": u.atk * (0.85 + randf() * 0.3), "src": u, "c": c, "aoe": u.aoe, "path": u.path if u.k == "p" else -1, "big": u.rank >= 6, "l": 3.0, "a": 0.0, "ign": (u.igf & F_FIRE) != 0})
 	else:
 		hurt(e, u.atk * (0.8 + randf() * 0.4), u)
 		spark(e.x, e.y - 1.0, Color("#ffe0b0"), 2, 3.0)
@@ -1736,14 +2165,17 @@ func step_unit(u: Unit, dt: float) -> void:
 				o.sick = 18.0 + randf() * 12.0
 		if randf() < dt * 3.0:
 			parts.append({"x": u.x, "y": u.y - 3.0, "vx": 0.0, "vy": -2.0, "l": 0.6, "ml": 0.6, "c": Color("#86e04a"), "s": 0.6, "g": 0.0})
-	if u.k == "a" and (u.sp == "wolf" or u.sp == "kingwolf"):
-		u.hungry = minf(1.0, u.hungry + dt * 0.006)
-	if u.sp == "ancient" and world.bmap[ti] >= 0:
-		var b: Building = buildings[world.bmap[ti]]
-		if b != null:
-			b.hp -= 60.0 * dt
-			if b.hp <= 0.0:
-				remove_building(b)
+	if u.k == "a":
+		if u.beh == GuData.B_PRED or u.beh == GuData.B_KING:
+			u.hungry = minf(1.0, u.hungry + dt * 0.006)
+		if u.rank >= 6 and world.bmap[ti] >= 0:
+			var b: Building = buildings[world.bmap[ti]]
+			if b != null:
+				b.hp -= 60.0 * dt
+				if b.hp <= 0.0:
+					remove_building(b)
+	elif u.km_cd > 0.0:
+		u.km_cd -= dt
 	u.think -= dt
 	if u.think <= 0.0:
 		u.think = 0.35 + randf() * 0.45
@@ -1784,6 +2216,7 @@ func step_unit(u: Unit, dt: float) -> void:
 
 func step(dt: float) -> void:
 	sim_time += dt
+	_sand = weather.get("type", "") == "sand"
 	var m: int = int(sim_time)
 	if m != last_month:
 		last_month = m
@@ -1814,7 +2247,7 @@ func step(dt: float) -> void:
 				ring(tu.x, tu.y, p["aoe"], p["c"], 0.45)
 				if p["big"]:
 					var i: int = clampi(int(tu.y), 0, H - 1) * W + clampi(int(tu.x), 0, W - 1)
-					if p["path"] == 2 or p["path"] == 5:
+					if p["path"] == 2 or p["path"] == 5 or p.get("ign", false):
 						ignite(i, 1.0)
 					elif randf() < 0.25 and (world.tile[i] == GuData.GRASS or world.tile[i] == GuData.STEP):
 						world.tile[i] = GuData.SOIL
@@ -1850,6 +2283,8 @@ func step(dt: float) -> void:
 		for u: Unit in units:
 			if u.hp > 0.0:
 				alive.append(u)
+			elif try_revive(u):
+				alive.append(u)
 			else:
 				on_death(u)
 		units = alive
@@ -1857,6 +2292,9 @@ func step(dt: float) -> void:
 
 func on_death(u: Unit) -> void:
 	unit_died.emit(u)
+	if u.k == "a" and u.rank >= 6 and not presim and randf() < 0.35:
+		var g: Unit = spawn_wild_igu(u.x, u.y)
+		log_event("Aus dem Leib von " + u.pname() + " entweicht das Unsterbliche Gu " + g.pname() + ".", "violet", true)
 	if u.k == "p":
 		if not u.caught:
 			puff(u.x, u.y - 1.0, Color("#7a2020"), 3)
@@ -1959,6 +2397,8 @@ func reset_state() -> void:
 	sched.clear()
 	log_entries.clear()
 	fire.clear()
+	places.clear()
+	next_pid = 1
 	sim_time = 0.0
 	last_month = 0
 	next_id = 1
@@ -1967,14 +2407,17 @@ func reset_state() -> void:
 
 func seed_life() -> void:
 	var plan: Array = [[0, 2], [1, 3], [2, 1], [3, 1], [4, 3]]
+	if world.map_mode == "gu":
+		seed_canon()
+		plan = [[0, 1], [1, 1], [3, 1]]
 	for e: Array in plan:
 		var r: int = e[0]
 		for k: int in range(int(e[1])):
 			var p: Vector2 = random_tile(func(i: int) -> bool: return world.region[i] == r and GuData.buildable(world.tile[i]) and world.tile[i] != GuData.SAND and site_ok(i % W, i / W, r), 900)
 			if p.x < 0.0:
 				continue
-			var race: int = 3 if r == 3 else ((2 if randf() < 0.5 else 0) if r == 2 else ((1 if randf() < 0.3 else 0) if r == 4 else (1 if (r == 1 and randf() < 0.2) else 0)))
-			var sur: String = rand_sur(4) if r == 4 else GuData.SURN[r].pick_random()[0]
+			var race: int = seed_race(r)
+			var sur: String = GuData.RACE_SUR[race].pick_random()[0] if race >= 4 else (rand_sur(4) if r == 4 else GuData.SURN[r].pick_random()[0])
 			var lead: Unit = mk_person(p.x, p.y, race, 24.0, sur)
 			lead.awk = true
 			awaken(lead)
@@ -1989,23 +2432,80 @@ func seed_life() -> void:
 	nature_only()
 
 
+## Volk eines Startdorfs je Region (Variant-Menschen in ihren Heimatregionen).
+func seed_race(r: int) -> int:
+	var q: float = randf()
+	match r:
+		0:
+			return 5 if q < 0.35 else 0
+		1:
+			return 1 if q < 0.15 else (2 if q < 0.25 else (8 if q < 0.32 else (10 if q < 0.39 else (9 if q < 0.45 else 0))))
+		2:
+			return 4 if q < 0.45 else (2 if q < 0.7 else 0)
+		3:
+			return 6 if q < 0.4 else 3
+	return 1 if q < 0.3 else 0
+
+
+func _landmark(nm: String) -> Vector2:
+	for l: Dictionary in world.landmarks:
+		if l["name"] == nm:
+			return Vector2(float(l["x"]) + 0.5, float(l["y"]) + 0.5)
+	return Vector2(-1, -1)
+
+
+## Kanonische Mächte der Gu-Weltkarte an ihren Orten.
+func seed_canon() -> void:
+	var spots: Array = [["heavenly_court", "Himmlischer Hof"], ["immortal_crane_sect", "Unsterblicher-Kranich-Sekte"], ["spirit_affinity_house", "Geistaffinitätshaus"],
+		["gu_yue_clan", "Gu-Yue-Dorf"], ["shang_clan", "Shang-Clan-Stadt"], ["bai_clan", "Bai-Gu-Berg"], ["western_desert_families", "Große Oase"],
+		["huang_jin_tribes", ""], ["hei_tribe", ""], ["eastern_sea_clans", ""]]
+	for e: Array in spots:
+		var o: Dictionary = Lore.org(e[0])
+		var p: Vector2 = _landmark(e[1]) if e[1] != "" else Vector2(-1, -1)
+		if p.x < 0.0:
+			var rg: int = int(o["reg"])
+			p = random_tile(func(i: int) -> bool: return world.region[i] == rg and GuData.buildable(world.tile[i]) and world.tile[i] != GuData.SAND and site_ok(i % W, i / W, rg), 900)
+		if p.x >= 0.0:
+			found_org(o, p.x, p.y, true)
+	var central: Array[Clan] = []
+	for id: String in ["heavenly_court", "immortal_crane_sect", "spirit_affinity_house"]:
+		var c: Clan = org_clan(id)
+		if c != null:
+			central.append(c)
+	for a: Clan in central:
+		a.calm = sim_time + 240.0
+		for b: Clan in central:
+			if a != b:
+				a.ally[b.id] = true
+	for e2: Array in [["langya", "Lang-Ya-Gesegnetes-Land"], ["imperial", "Kaiserhof-Gesegnetes-Land"]]:
+		var lp: Vector2 = _landmark(e2[1])
+		if lp.x >= 0.0 and place_ok(e2[0], lp.x, lp.y) == "":
+			add_place(e2[0], lp.x, lp.y, true)
+
+
 func nature_only() -> void:
-	for e: Array in [["deer", 22], ["boar", 10], ["wolf", 12], ["monkey", 8], ["crane", 8], ["wildgu", 36]]:
+	for e: Array in [["deer", 22], ["boar", 10], ["wolf", 12], ["monkey", 8], ["crane", 8], ["wildgu", 36], ["white_boar", 3], ["black_boar", 3], ["lightning_wolf", 4]]:
 		var s: String = e[0]
+		var rg: int = int(GuData.SPEC[s].get("reg", -1))
 		for k: int in range(int(e[1])):
 			var p: Vector2 = random_tile(func(i: int) -> bool:
 				var t: int = world.tile[i]
+				if rg >= 0 and world.region[i] != rg:
+					return false
 				if s == "crane" or s == "wildgu":
 					return GuData.is_land(t) and t != GuData.WALL
 				return t == GuData.GRASS or t == GuData.STEP or t == GuData.SNOW, 300)
 			if p.x >= 0.0:
-				mk_animal(p.x, p.y, s)
+				if s == "wildgu":
+					spawn_wild_gu(p.x, p.y, int(GuData.REGPATH[region_at(p.x, p.y)].pick_random()))
+				else:
+					mk_animal(p.x, p.y, s)
 
 
-func new_world(live: bool) -> void:
+func new_world(live: bool, mode: String = "gu") -> void:
 	reset_state()
 	seed_val = randi()
-	world.generate(seed_val)
+	world.generate(seed_val, mode)
 	if live:
 		presim = true
 		seed_life()
@@ -2046,14 +2546,19 @@ func serialize() -> Dictionary:
 	var fr: Array = []
 	for i: int in fire.keys():
 		fr.append([i, fire[i]])
-	return {"v": 1, "seed": seed_val, "sim_time": sim_time, "next_id": next_id,
+	var ps: Array = []
+	for p: Place in places:
+		if p.alive:
+			ps.append(p.to_dict())
+	return {"v": 2, "seed": seed_val, "sim_time": sim_time, "next_id": next_id, "map_mode": world.map_mode, "places": ps, "next_pid": next_pid,
 		"tile": Marshalls.raw_to_base64(world.tile), "feat": Marshalls.raw_to_base64(world.feat), "region": Marshalls.raw_to_base64(world.region),
 		"hgt": Marshalls.raw_to_base64(hb), "ts": Marshalls.raw_to_base64(world.temp_snow),
 		"units": us, "villages": vs, "clans": cs, "buildings": bs, "laws": laws, "log": log_entries.slice(0, 120), "fire": fr}
 
 
 func deserialize(d: Dictionary) -> bool:
-	if int(d.get("v", 0)) != 1:
+	var ver: int = int(d.get("v", 0))
+	if ver != 1 and ver != 2:
 		return false
 	reset_state()
 	world.alloc()
@@ -2066,8 +2571,19 @@ func deserialize(d: Dictionary) -> bool:
 	sim_time = d["sim_time"]
 	last_month = int(sim_time)
 	next_id = int(d["next_id"])
+	world._set_landmarks(str(d.get("map_mode", "random")))
+	next_pid = int(d.get("next_pid", 1))
+	for e: Dictionary in d.get("places", []):
+		places.append(Place.from_dict(e))
 	for e: Dictionary in d["units"]:
-		units.append(Unit.from_dict(e))
+		var u: Unit = Unit.from_dict(e)
+		if u.k == "a":
+			if not GuData.SPEC.has(u.sp):
+				continue
+			init_animal(u)
+		elif not u.igu.is_empty():
+			apply_igu(u)
+		units.append(u)
 	for e: Dictionary in d["villages"]:
 		villages.append(Village.from_dict(e))
 	for e: Dictionary in d["clans"]:
@@ -2093,3 +2609,670 @@ func deserialize(d: Dictionary) -> bool:
 	update_leaders()
 	terr_dirty = true
 	return true
+
+
+# =====================================================================
+# Gu-Welt: Wiedergeburt, Mordzüge, Gu-Meister, Ehrwürdige, Figuren, Organisationen, Orte, Ereignisse
+# =====================================================================
+
+## Frühling-Herbst-Zikade (jung wiedergeboren) oder Auferstehung von den Toten. true = lebt weiter.
+func try_revive(u: Unit) -> bool:
+	if u.k != "p" or u.dreason == "göttliche Auslöschung" or (u.igf & (F_REVIVE | F_REZ)) == 0:
+		return false
+	var rez: bool = (u.igf & F_REVIVE) == 0
+	var want: String = "rez" if rez else "revive"
+	for k: int in range(u.igu.size()):
+		if str(Lore.igu(u.igu[k]).get("fx", "")) == want:
+			u.igu.remove_at(k)
+			break
+	apply_igu(u)
+	var nm: String = u.pname()
+	u.dreason = ""
+	u.tgt = null
+	u.aggro = null
+	u.sick = 0.0
+	u.st = "idle"
+	if rez:
+		set_stats(u, true)
+		u.hp = u.mhp * 0.5
+		log_event(nm + " steht durch die Auferstehung von den Toten wieder auf.", "violet", true)
+		pillar(u.x, u.y, GuData.PATH_COL[32], 0.9)
+		return true
+	u.birth = sim_time - 15.0 * 12.0
+	u.life = maxf(u.life, 15.0 + GuData.RACE_LIFE[u.race] * 0.8 + GuData.LIFEB[u.rank])
+	if u.apt == "B" or u.apt == "C" or u.apt == "D":
+		u.apt = "A"
+	if u.rank > 0:
+		u.prog = minf(0.99, u.prog + 0.5)
+	var rg: int = region_at(u.x, u.y)
+	var p: Vector2 = random_tile(func(i: int) -> bool: return world.region[i] == rg and GuData.buildable(world.tile[i]) and world.bmap[i] < 0, 200)
+	if p.x >= 0.0:
+		u.x = p.x
+		u.y = p.y
+		u.tx = p.x
+		u.ty = p.y
+	if u.vil >= 0:
+		u.col_clan = u.clan
+		u.vil = -1
+	set_stats(u, true)
+	log_event(nm + " stirbt – doch die Frühling-Herbst-Zikade dreht die Zeit zurück: " + nm + " erwacht als 15-Jähriger, mit allen Erinnerungen.", "violet", true)
+	pillar(u.x, u.y, GuData.PATH_COL[10], 1.2)
+	ring(u.x, u.y, 8.0, GuData.PATH_COL[10], 1.0)
+	return true
+
+
+## Pfad-Mordzug eines Unsterblichen: Flächenschaden, Effekt und Name in der Farbe des Pfades.
+func killer_move(u: Unit, x: float, y: float) -> void:
+	var p: int = clampi(u.path, 0, GuData.PATH_NAME.size() - 1)
+	var c: Color = GuData.PATH_COL[p]
+	var r: float = 3.0 + u.rank * 0.8
+	var dmg: float = u.atk * 2.5
+	var nm: String = Lore.km_name(p)
+	fx.append({"k": "km", "x": x, "y": y, "r": r, "c": c, "p": p, "l": 1.1, "ml": 1.1})
+	fx.append({"k": "txt", "x": u.x, "y": u.y - 7.0, "t": nm, "c": c.lightened(0.3), "l": 2.0, "ml": 2.0})
+	for o: Unit in near_units(x, y, r):
+		if o != u and hostile(u, o):
+			var d: float = Vector2(o.x - x, o.y - y).length()
+			hurt(o, dmg * (1.0 - 0.5 * d / r), u)
+	if p == 1:
+		fx.append({"k": "cres", "x": x, "y": y, "r": r, "a": randf() * TAU, "l": 0.9, "ml": 0.9})
+	if p == 5 or p == 17 or p == 28:
+		for k: int in range(3):
+			bolt(x + (randf() - 0.5) * r, y + (randf() - 0.5) * r, 0.0, p == 5)
+	for k: int in range(int(r * 2.0)):
+		var tx: int = int(x + (randf() - 0.5) * r * 1.4)
+		var ty: int = int(y + (randf() - 0.5) * r * 1.4)
+		if not world.in_map(tx, ty):
+			continue
+		var i: int = ty * W + tx
+		var t: int = world.tile[i]
+		if not GuData.is_land(t) or t == GuData.WALL:
+			continue
+		match p:
+			2, 5:
+				if k < 3:
+					ignite(i, 1.0)
+			7, 12:
+				if t != GuData.MOUNT and world.bmap[i] < 0:
+					if world.feat[i] != 0 and world.feat[i] != GuData.F_SPRING and world.feat[i] != GuData.F_ORE:
+						world.feat[i] = 0
+					set_tile(i, GuData.SOIL)
+			14, 15:
+				if world.bmap[i] < 0 and (t == GuData.GRASS or t == GuData.STEP or t == GuData.SOIL or t == GuData.DES):
+					world.temp_snow[i] = t + 1
+					world.tile[i] = GuData.SNOW
+					world.mark_dirty(tx, ty)
+			6:
+				if world.feat[i] == 0 and world.bmap[i] < 0 and (t == GuData.GRASS or t == GuData.STEP or t == GuData.SOIL):
+					world.feat[i] = plant_for(i)
+					world.mark_area(tx, ty)
+	spark(x, y, c, 30, 9.0)
+	ring(x, y, r, c, 0.8)
+	ring(x, y, r * 0.5, Color.WHITE, 0.5)
+	if u.rank >= 8:
+		shake = minf(1.2, shake + 0.35)
+		log_event(u.pname() + " entfesselt den " + nm + ".", "violet")
+
+
+# ---------------- Gu-Meister, Unsterbliche, Ehrwürdige, Figuren ----------------
+
+func _race_for_region(rg: int) -> int:
+	var opts: Array[int] = []
+	for i: int in range(1, GuData.RACE_NAME.size()):
+		if GuData.RACE_REG[i] == rg:
+			opts.append(i)
+	return opts.pick_random() if not opts.is_empty() else 0
+
+
+## Gu-Meister von Rang 1..5: schließt sich einem nahen Dorf an, Pfad passend zur Region.
+func spawn_gm(x: float, y: float, rank: int) -> Unit:
+	var v: Village = nearest_village(x, y, 24.0)
+	var race: int = v.race if v != null else (_race_for_region(region_at(x, y)) if randf() < 0.35 else 0)
+	var u: Unit = mk_person(x, y, race, 14.0 + rank * 5.0 + randf() * 10.0, pick_sur(v) if v != null else "")
+	if v != null:
+		join_village(u, v)
+	u.awk = true
+	awaken(u, true)
+	for r: int in range(2, rank + 1):
+		ascend(u, r)
+	u.life = maxf(u.life, uage(u) + 25.0 + GuData.LIFEB[rank])
+	pillar(x, y, GuData.ESS_COL[rank], 0.6)
+	return u
+
+
+## Wandernder Gu-Unsterblicher von Rang 6..8 (manchmal mit Unsterblichem Gu).
+func spawn_immortal(x: float, y: float, rank: int) -> Unit:
+	var u: Unit = mk_person(x, y, 0 if randf() < 0.7 else _race_for_region(region_at(x, y)), 100.0 + rank * 40.0 + randf() * 80.0)
+	u.awk = true
+	awaken(u, true)
+	for r: int in range(2, rank + 1):
+		ascend(u, r)
+	u.life = uage(u) + GuData.LIFEB[rank] * 0.8 + randf() * 200.0
+	u.next_trib = uage(u) + 8.0 + randf() * 10.0
+	if randf() < 0.15 + 0.2 * (rank - 6):
+		give_igu(u, Lore.IGU.pick_random()["id"])
+	pillar(x, y, GuData.ESS_COL[rank])
+	log_event("Ein wandernder %s erscheint: %s (%s-Pfad)." % [rank_title(rank), u.pname(), GuData.PATH_NAME[u.path]], "violet", true)
+	return u
+
+
+## Einer der elf Ehrwürdigen (nur einer je Ehrwürdigem zur selben Zeit). Gibt einen Hinweis zurück oder "".
+func spawn_venerable(vd: Dictionary, x: float, y: float) -> String:
+	var key: String = vd["fig"]
+	if fig_alive(key) != null:
+		return str(vd["t"]) + " lebt bereits."
+	var u: Unit = mk_person(x, y, 0, 600.0 + randf() * 900.0)
+	u.sur = ""
+	u.given = vd["n"]
+	u.awk = true
+	awaken(u, true)
+	u.path = int(vd["p"])
+	u.align = int(vd["al"])
+	u.apt = "A"
+	u.gus = PackedStringArray([Lore.start_gu(u.path)])
+	for r: int in range(2, 10):
+		ascend(u, r)
+	u.title = vd["t"]
+	u.fig = key
+	u.life = uage(u) + 3000.0 + randf() * 2000.0
+	give_igu(u, vd["igu"])
+	u.hp = u.mhp
+	log_event("Der " + u.title + " steigt herab! Die Welt erzittert.", "gold", true)
+	pillar(x, y, GuData.ESS_COL[9], 1.6)
+	ring(x, y, 16.0, Color(str(vd["col"])), 1.2)
+	shake = 1.0
+	return ""
+
+
+## Benannte Figur aus der Geschichte (einzigartig). Gibt einen Hinweis zurück oder "".
+func spawn_figure(fd: Dictionary, x: float, y: float) -> String:
+	var nm: String = (str(fd["sur"]) + " " + str(fd["given"])).strip_edges()
+	if fig_alive(fd["id"]) != null:
+		return nm + " lebt bereits."
+	var rank: int = int(fd["r"])
+	var u: Unit = mk_person(x, y, int(fd.get("race", 0)), float(fd["age"]), str(fd["sur"]))
+	u.sur = fd["sur"]
+	u.given = fd["given"]
+	var oc: Clan = org_clan(str(fd["org"])) if str(fd["org"]) != "" else null
+	if oc != null:
+		var bv: Village = nearest_village(x, y, 9999.0, func(v: Village) -> bool: return v.clan == oc.id)
+		if bv != null:
+			join_village(u, bv)
+	u.awk = true
+	awaken(u, true)
+	u.apt = fd["apt"]
+	u.phys_x = u.apt == "X"
+	u.path = int(fd["p"])
+	u.align = int(fd["al"])
+	u.gus = PackedStringArray([Lore.start_gu(u.path)])
+	for r: int in range(2, rank + 1):
+		ascend(u, r)
+	u.fig = fd["id"]
+	u.life = maxf(u.life, uage(u) + 40.0 + GuData.LIFEB[rank])
+	if rank >= 6:
+		u.next_trib = uage(u) + 10.0 + randf() * 10.0
+	for id: Variant in fd["igu"]:
+		give_igu(u, str(id))
+	u.hp = u.mhp
+	pillar(x, y, GuData.ESS_COL[rank], 0.9)
+	log_event(u.pname() + " betritt die Welt (" + rank_title(rank) + (", " + oc.name if oc != null else "") + ").", "gold", true)
+	return ""
+
+
+# ---------------- Organisationen ----------------
+
+## Gründet eine Organisation aus Lore.ORGS am Ort (x, y). Gibt einen Hinweis zurück oder "".
+func found_org(o: Dictionary, x: float, y: float, quiet: bool = false) -> String:
+	var nm: String = o["n"]
+	if org_clan(o["id"]) != null:
+		return nm + " existiert bereits."
+	if not world.in_map(int(x), int(y)):
+		return ""
+	var reg: int = region_at(x, y)
+	var oreg: int = int(o.get("reg", -1))
+	if oreg >= 0 and reg != oreg:
+		return nm + " gehört in " + GuData.REGN_IN[oreg] + "."
+	var tx: int = int(x)
+	var ty: int = int(y)
+	if not site_ok(tx, ty, -1):
+		var s: Vector2 = find_site(x, y, 2.0, 22.0, reg)
+		if s.x < 0.0:
+			s = find_site(x, y, 2.0, 22.0, reg)
+		if s.x < 0.0:
+			return "Hier ist kein Platz für " + nm + "."
+		tx = int(s.x)
+		ty = int(s.y)
+	var race: int = int(o.get("race", 0))
+	if race == -2:
+		race = [1, 2, 4, 6].pick_random()
+	var sur: String = str(o.get("sur", ""))
+	if sur == "":
+		sur = GuData.RACE_SUR[race].pick_random()[0] if race >= 4 else rand_sur(reg)
+	var lr: int = int(o.get("lead", 4))
+	var al: int = int(o.get("al", 0))
+	var lead: Unit = mk_person(tx + 0.5, ty + 0.5, race, 30.0 + lr * 6.0, sur)
+	lead.awk = true
+	awaken(lead, true)
+	lead.align = al
+	for r: int in range(2, lr + 1):
+		ascend(lead, r)
+	lead.life = maxf(lead.life, uage(lead) + 40.0 + GuData.LIFEB[lr] * 0.5)
+	var c: Clan = new_org_clan(o, reg)
+	if not found_village(lead, c.id):
+		lead.hp = 0.0
+		c.alive = false
+		return "Hier ist kein Platz für " + nm + "."
+	var v: Village = villages[lead.vil]
+	var k: String = o["k"]
+	if k == "Clan" and c.sur != "":
+		v.name = c.sur.replace(" ", "-") + "-Dorf"
+	elif k == "Stamm" and c.sur != "":
+		v.name = c.sur.replace(" ", "-") + "-Lager"
+	v.food = 30.0
+	v.wood = 30.0
+	v.stones = 25.0
+	var elders: Array = {"Hof": [7, 6, 6], "Sekte": [5, 3, 3, 2], "Allianz": [5, 4, 3], "Clan": [3, 2, 2], "Stamm": [3, 2, 2]}.get(k, [2])
+	if o["id"] == "heavenly_court":
+		elders = [7, 7, 6, 6]
+	for j: int in range(9):
+		var u: Unit = mk_person(tx + (randf() - 0.5) * 6.0, ty + 2.0 + (randf() - 0.5) * 4.0, race, 6.0 if j == 0 else 16.0 + randf() * 20.0, sur)
+		u.awk = j >= 1
+		join_village(u, v)
+		if j >= 1 and j - 1 < elders.size():
+			awaken(u, true)
+			u.align = al if randf() < 0.85 else 1 - al
+			for r: int in range(2, int(elders[j - 1]) + 1):
+				ascend(u, r)
+			if u.rank >= 6:
+				u.life = maxf(u.life, uage(u) + 200.0)
+	if o.get("spring", false):
+		for t: int in range(60):
+			var sx: int = tx + randi_range(-10, 10)
+			var sy: int = ty + randi_range(-8, 8)
+			if not world.in_map(sx, sy):
+				continue
+			var si: int = sy * W + sx
+			if GuData.is_land(world.tile[si]) and world.tile[si] != GuData.WALL and world.tile[si] != GuData.MOUNT and world.feat[si] == 0 and world.bmap[si] < 0 and absi(sx - tx) + absi(sy - ty) > 5:
+				world.feat[si] = GuData.F_SPRING
+				world.mark_area(sx, sy)
+				v.spring = true
+				break
+	if o["id"] == "heavenly_court" and find_place("court") == null:
+		add_place("court", tx + 0.5, ty - 16.0, true)
+	if k == "Allianz":
+		var n: int = 0
+		for oc: Clan in clans:
+			if n >= 3:
+				break
+			if oc.alive and oc != c and (oreg < 0 or oc.region == oreg) and not c.war.has(oc.id) and oc.align == c.align:
+				oc.ally[c.id] = true
+				c.ally[oc.id] = true
+				n += 1
+	log_event(("Die " if k in ["Sekte", "Allianz"] else ("Der " if k == "Clan" or k == "Stamm" or k == "Hof" else "")) + nm + " wird in " + v.name + " gegründet (" + GuData.REGN[reg] + ").", "jade", not quiet)
+	terr_dirty = true
+	return ""
+
+
+## Krieg Rechtschaffen gegen Dämonisch: alle rechtschaffenen Clans gegen alle dämonischen.
+func rd_war() -> String:
+	var tally: Dictionary = {}
+	for u: Unit in units:
+		if u.k == "p" and u.hp > 0.0 and u.rank > 0 and u.clan >= 0:
+			tally[u.clan] = int(tally.get(u.clan, 0)) + (1 if u.align == 1 else -1)
+	var good: Array[Clan] = []
+	var bad: Array[Clan] = []
+	for c: Clan in clans:
+		if not c.alive:
+			continue
+		if c.align == 1 or int(tally.get(c.id, 0)) > 0:
+			c.align = 1
+			bad.append(c)
+		else:
+			good.append(c)
+	if bad.is_empty() and good.size() >= 2:
+		good.shuffle()
+		for k: int in range(maxi(1, good.size() / 3)):
+			var c2: Clan = good.pop_back()
+			c2.align = 1
+			bad.append(c2)
+			log_event(c2.name + " wendet sich dem dämonischen Pfad zu.", "war")
+	if bad.is_empty() or good.is_empty():
+		return "Es gibt nicht genug Clans für einen solchen Krieg."
+	for a: Clan in good:
+		for b: Clan in bad:
+			a.ally.erase(b.id)
+			b.ally.erase(a.id)
+			declare_war(a, b, true)
+	for a2: Clan in good:
+		for b2: Clan in good:
+			if a2 != b2:
+				a2.war.erase(b2.id)
+				a2.ally[b2.id] = true
+	log_event("Krieg zwischen rechtschaffenem und dämonischem Pfad! %d rechtschaffene gegen %d dämonische Mächte." % [good.size(), bad.size()], "war", true)
+	return ""
+
+
+## Fremdweltdämon: fremde Seele, lernt mehrere Pfade ohne Konflikt, kultiviert rasend schnell und wird von allen gejagt.
+func ow_demon(x: float, y: float) -> Unit:
+	var u: Unit = mk_person(x, y, 0, 16.0)
+	u.awk = true
+	awaken(u, true)
+	u.ow = true
+	u.apt = "A"
+	u.title = "Fremdweltdämon"
+	ascend(u, 2)
+	ascend(u, 3)
+	for k: int in range(3):
+		var g: String = Lore.mgu(randi() % GuData.PATH_NAME.size())[0]
+		if not u.gus.has(g):
+			u.gus.append(g)
+	set_stats(u, true)
+	pillar(x, y, Color("#c04aff"), 1.0)
+	log_event("Ein Fremdweltdämon erscheint: " + u.pname() + " – eine fremde Seele, die das Schicksal nicht kennt. Alle Mächte jagen ihn.", "war", true)
+	return u
+
+
+## Irdische Kalamität für einen Unsterblichen: Erdstöße um ihn, Bestehen gibt Dao-Male (Fortschritt).
+func earthly_calamity(u: Unit) -> void:
+	var nm: String = u.pname()
+	for k: int in range(5):
+		later(k * 0.2, func() -> void:
+			if u.hp > 0.0:
+				boom(u.x + (randf() - 0.5) * 14.0, u.y + (randf() - 0.5) * 14.0, 3.0, 40.0, {"ash": true, "burn": 0.2, "c": Color("#c9a46a")}))
+	later(1.3, func() -> void:
+		if u.hp <= 0.0:
+			return
+		var dies: bool = not u.notrib and randf() < 0.04 + 0.03 * (u.rank - 6)
+		if dies and use_fortune(u):
+			dies = false
+		if dies:
+			u.dreason = "Irdische Kalamität"
+			u.hp = 0.0
+			log_event(nm + " stirbt in einer Irdischen Kalamität.", "red", true)
+		else:
+			u.prog = minf(0.99, u.prog + 0.25)
+			float_txt(u, "+Dao-Male", Color("#e8c070"))
+			log_event(nm + " übersteht eine Irdische Kalamität und gewinnt Dao-Male.", "violet"))
+
+
+# ---------------- Orte ----------------
+
+func find_place(type: String) -> Place:
+	for p: Place in places:
+		if p.alive and p.type == type:
+			return p
+	return null
+
+
+## Ort unter einem Tipp (null = keiner).
+func place_at(x: float, y: float) -> Place:
+	var best: Place = null
+	var bd: float = 1e9
+	for p: Place in places:
+		if not p.alive:
+			continue
+		var d: float = Vector2(p.x - x, p.y - 2.0 - y).length()
+		if d < maxf(5.0, Sprites.place_size(p.type) * 0.45) and d < bd:
+			bd = d
+			best = p
+	return best
+
+
+func unit_by_id(id: int) -> Unit:
+	for u: Unit in units:
+		if u.id == id and u.hp > 0.0:
+			return u
+	return null
+
+
+func count_race(r: int) -> int:
+	var n: int = 0
+	for u: Unit in units:
+		if u.k == "p" and u.hp > 0.0 and u.race == r:
+			n += 1
+	return n
+
+
+## Prüft, ob ein Ort hier entstehen darf. "" = ja, sonst der Hinweis.
+func place_ok(type: String, x: float, y: float) -> String:
+	var D: Dictionary = Lore.PLACE[type]
+	var nm: String = D["n"]
+	if not world.in_map(int(x), int(y)):
+		return ""
+	if D.get("uniq", false) and find_place(type) != null:
+		return nm + " existiert bereits."
+	var t: int = world.tile[int(y) * W + int(x)]
+	if type == "palace":
+		if t != GuData.DEEP and t != GuData.SHAL:
+			return "Der Drachenpalast muss im Meer stehen."
+	elif not GuData.is_land(t) or t == GuData.WALL:
+		return nm + " braucht festen Boden."
+	if type == "court" and region_at(x, y) != 4:
+		return "Der Himmelshof gehört in den Zentralkontinent."
+	for p: Place in places:
+		if p.alive and Vector2(p.x - x, p.y - y).length() < 12.0:
+			return "Zu nah an " + p.name + "."
+	return ""
+
+
+func add_place(type: String, x: float, y: float, quiet: bool = false) -> Place:
+	var p: Place = Place.new()
+	p.id = next_pid
+	next_pid += 1
+	p.type = type
+	p.x = x
+	p.y = y
+	p.born = sim_time
+	p.name = Lore.PLACE[type]["n"]
+	if type == "inherit":
+		p.name = Lore.INHERIT_NAMES[randi() % Lore.INHERIT_NAMES.size()]
+	var life: float = float(Lore.PLACE[type].get("life", 0.0))
+	if life > 0.0:
+		p.until = sim_time + life
+	places.append(p)
+	pillar(x, y, Color("#fff1c0"), 0.9)
+	ring(x, y, Sprites.place_size(type) * 0.6, Color("#fff1c0"), 0.8)
+	if not quiet:
+		log_event(p.name + " erscheint in " + GuData.REGN_DAT[region_at(x, y)] + ".", "violet", true)
+	if type == "court" and org_clan("heavenly_court") == null and not presim:
+		found_org(Lore.org("heavenly_court"), x, y + 16.0, true)
+	return p
+
+
+func _boost(p: Place, f: float, minr: int, skip_demonic: bool) -> void:
+	for u: Unit in near_units(p.x, p.y, p.radius()):
+		if u.k == "p" and u.rank >= minr:
+			if skip_demonic and (u.rogue or u.align == 1):
+				continue
+			u.pb = f
+			u.pb_t = sim_time + 1.5
+
+
+func _lure(p: Place, rmin: int, rmax: int) -> void:
+	for u: Unit in near_units(p.x, p.y, p.lure()):
+		if u.k == "p" and u.rank >= rmin and u.rank <= rmax and u.tgt == null and not u.has_col_target():
+			u.lure_t = sim_time + 2.0
+			u.lx = p.x + (randf() - 0.5) * 3.0
+			u.ly = p.y + (randf() - 0.3) * 3.0
+
+
+func place_month() -> void:
+	if places.is_empty():
+		return
+	var i: int = places.size() - 1
+	while i >= 0:
+		var p: Place = places[i]
+		if p.until > 0.0 and sim_time >= p.until:
+			p.alive = false
+			log_event(p.name + " verblasst.", "violet")
+		else:
+			p.t += 1.0
+			_place_tick(p)
+		if not p.alive:
+			places.remove_at(i)
+		i -= 1
+
+
+func _place_tick(p: Place) -> void:
+	var r: float = p.radius()
+	match p.type:
+		"blessed", "grotto", "hu":
+			var minr: int = 8 if p.type == "grotto" else 6
+			if p.owner >= 0 and unit_by_id(p.owner) == null:
+				p.owner = -1
+				p.name = str(Lore.PLACE[p.type]["n"]) + " (herrenlos)"
+			if p.type == "hu" and not p.used:
+				_lure(p, 5, 5)
+				for u: Unit in near_units(p.x, p.y, 5.0):
+					if u.k == "p" and u.rank == 5:
+						ascend(u, 6)
+						p.owner = u.id
+						p.used = true
+						log_event(u.pname() + " übernimmt das " + p.name + " und wird zum Gu-Unsterblichen!", "gold", true)
+						pillar(u.x, u.y, GuData.ESS_COL[6])
+						break
+			elif p.owner < 0:
+				for u2: Unit in near_units(p.x, p.y, r):
+					if u2.k == "p" and u2.rank >= minr:
+						p.owner = u2.id
+						p.name = u2.given + ("-Grottenhimmel" if p.type == "grotto" else "-Gesegnetes-Land")
+						log_event(u2.pname() + " nimmt das " + str(Lore.PLACE[p.type]["n"]) + " in Besitz: " + p.name + ".", "violet", true)
+						break
+			_boost(p, 3.0 if p.type == "grotto" else 2.0, 6, false)
+			if p.type == "grotto":
+				for v: Village in villages:
+					if v.alive and Vector2(v.cx - p.x, v.cy - p.y).length() < 40.0:
+						v.stones += 1.0
+			if randf() < (0.03 if p.type == "grotto" else 0.012) and count_sp("wildimm") < 8:
+				var g: Unit = spawn_wild_igu(p.x + (randf() - 0.5) * 10.0, p.y + 3.0 + randf() * 4.0)
+				log_event("Im " + p.name + " entsteht das Unsterbliche Gu " + g.pname() + ".", "violet", true)
+		"court":
+			_boost(p, 2.0, 6, true)
+			if randf() < 0.4:
+				for u: Unit in near_units(p.x, p.y, r):
+					if u.k == "p" and u.rank >= 2 and (u.rogue or u.ow or (u.align == 1 and u.rank >= 6)):
+						bolt(u.x, u.y, 600.0 + u.mhp * 0.3, false)
+						ring(u.x, u.y, 5.0, Color("#fff1c0"), 0.6)
+						if randf() < 0.3:
+							log_event("Der Himmelsüberwachungsturm straft " + u.pname() + ".", "violet")
+						break
+			if randf() < 0.02 and count_sp("wildimm") < 8:
+				spawn_wild_igu(p.x + (randf() - 0.5) * 12.0, p.y + 4.0 + randf() * 6.0)
+		"langya":
+			for u: Unit in near_units(p.x, p.y, r):
+				if u.k == "p" and u.rank >= 1 and randf() < 0.05:
+					var g2: String = gain_gu(u)
+					if g2 != "":
+						float_txt(u, "Tausch: " + g2, Color("#e8c070"))
+			for v: Village in villages:
+				if v.alive and Vector2(v.cx - p.x, v.cy - p.y).length() < r:
+					v.stones += 0.5
+		"imperial":
+			_lure(p, 2, 6)
+			var near: Array[Unit] = []
+			for u: Unit in near_units(p.x, p.y, r + 6.0):
+				if u.k == "p" and u.rank >= 1:
+					near.append(u)
+			if int(p.t) % 12 == 0:
+				var cs: Array[int] = []
+				for u: Unit in near:
+					if u.clan >= 0 and not cs.has(u.clan):
+						cs.append(u.clan)
+				if cs.size() >= 2:
+					cs.shuffle()
+					var a: Clan = clans[cs[0]]
+					var b: Clan = clans[cs[1]]
+					if not a.ally.has(b.id):
+						log_event("Streit um das " + p.name + "!", "war")
+						declare_war(a, b)
+			if int(p.t) % 18 == 0 and not near.is_empty():
+				var w: Unit = near.pick_random()
+				stage_up(w)
+				stage_up(w)
+				gain_gu(w)
+				log_event(w.pname() + " birgt einen Schatz im " + p.name + ".", "gold", true)
+		"dream":
+			_lure(p, 1, 8)
+			for u: Unit in near_units(p.x, p.y, r):
+				if u.k != "p" or u.rank <= 0:
+					continue
+				var safe: bool = (u.igf & F_DREAM) != 0 or u.path == 39
+				if randf() < 0.55:
+					u.prog += 0.35 * (2.0 if safe else 1.0)
+					spark(u.x, u.y - 3.0, GuData.PATH_COL[39], 4, 3.0)
+					if u.prog >= 1.0:
+						u.prog = 0.0
+						stage_up(u)
+				elif not safe and randf() < 0.07:
+					u.dreason = "Seelenschaden im Traumreich"
+					u.hp = 0.0
+		"inherit":
+			_lure(p, 2, 6)
+			for u: Unit in near_units(p.x, p.y, r):
+				if u.k != "p" or u.rank < 1:
+					continue
+				if randf() < 0.25:
+					u.dreason = "Falle im " + p.name
+					u.hp = 0.0
+					log_event(u.pname() + " tappt im " + p.name + " in eine tödliche Falle.", "red")
+				else:
+					if u.rank < 5:
+						ascend(u, u.rank + 1)
+						gain_gu(u)
+						gain_gu(u)
+					else:
+						give_igu(u, Lore.IGU.pick_random()["id"])
+					log_event(u.pname() + " öffnet das " + p.name + " und erhält sein Vermächtnis.", "gold", true)
+					pillar(p.x, p.y, Color("#ffe27a"), 0.8)
+					p.alive = false
+				break
+		"fragment":
+			_lure(p, 6, 9)
+			for u: Unit in near_units(p.x, p.y, r):
+				if u.k == "p" and u.rank >= 6:
+					u.notrib = true
+					u.hx = p.x
+					u.hy = p.y
+					log_event(u.pname() + " verleibt sich das Himmelsfragment ein – keine Drangsal trifft ihn mehr, doch er bleibt für immer daran gebunden.", "violet", true)
+					pillar(p.x, p.y, Color("#cfe0ff"), 1.0)
+					p.alive = false
+					break
+		"palace":
+			if randf() < 0.1 and count_race(6) < 40:
+				for t: int in range(30):
+					var lx2: float = p.x + (randf() - 0.5) * 50.0
+					var ly2: float = p.y + (randf() - 0.5) * 50.0
+					if not world.in_map(int(lx2), int(ly2)):
+						continue
+					var tt: int = world.tile[int(ly2) * W + int(lx2)]
+					if GuData.buildable(tt):
+						for j: int in range(3):
+							var dm: Unit = mk_person(lx2 + (randf() - 0.5) * 3.0, ly2 + (randf() - 0.5) * 3.0, 6, 16.0 + randf() * 14.0)
+							dm.awk = true
+							if j == 0:
+								awaken(dm, true)
+								ascend(dm, 2)
+						log_event("Drachenmenschen verlassen den Drachenpalast.", "info")
+						break
+		"mushroom":
+			if (p.t <= 1.0 or int(p.t) % 12 == 0) and count_race(8) < 30:
+				for j: int in range(4):
+					var mx: float = p.x + (randf() - 0.5) * 10.0
+					var my: float = p.y + 2.0 + (randf() - 0.5) * 6.0
+					if world.in_map(int(mx), int(my)) and GuData.is_land(world.tile[int(my) * W + int(mx)]):
+						var pm: Unit = mk_person(mx, my, 8, 14.0 + randf() * 10.0)
+						pm.awk = randf() < 0.5
+		"yitian":
+			_lure(p, 4, 5)
+			for u: Unit in near_units(p.x, p.y, r):
+				if u.k == "p" and u.rank >= 4:
+					u.duel_t = sim_time + 1.5
+			if not p.used and p.t >= 24.0:
+				spawn_wild_igu(p.x, p.y - 1.0, "sovereign_immortal_fetus")
+				p.used = true
+				log_event("Auf dem Yi-Tian-Berg erscheint das Souveräner-Unsterblichen-Fötus-Gu!", "gold", true)
+		"crazed":
+			_lure(p, 7, 9)
+			for u: Unit in near_units(p.x, p.y, r):
+				if u.k == "p" and u.rank >= 7:
+					u.duel_t = sim_time + 1.5

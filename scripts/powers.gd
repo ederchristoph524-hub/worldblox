@@ -6,8 +6,13 @@ const W: int = GuData.W
 const H: int = GuData.H
 
 ## Reiter -1 ist das Hauptmenü. m: paint = Pinsel, tap = Tippen, pair = zwei Dörfer, spawn = Setzen, act = Sofort-Aktion.
-const TABS: PackedStringArray = ["Welt formen", "Noosphäre und Leben", "Kreaturen und Bestien", "Natur und Katastrophen", "Zerstörung und Chaos", "Gu und Schicksal"]
-const TOOLS: Array = [
+const TABS: PackedStringArray = ["Welt formen", "Noosphäre und Leben", "Kreaturen und Bestien", "Natur und Katastrophen", "Zerstörung und Chaos", "Gu und Schicksal", "Gu-Meister und Unsterbliche"]
+## Alle Werkzeuge, nach Reiter und Gruppe sortiert (Gruppenwechsel = Trennstrich in der Leiste).
+static var TOOLS: Array = _build_tools()
+
+
+static func _build_tools() -> Array:
+	var L: Array = [
 	{"id": "winfo", "tab": -1, "g": 0, "n": "Weltinfo", "m": "act"},
 	{"id": "help", "tab": -1, "g": 0, "n": "Lexikon", "m": "act"},
 	{"id": "chron", "tab": -1, "g": 0, "n": "Chronik", "m": "act"},
@@ -54,10 +59,6 @@ const TOOLS: Array = [
 	{"id": "s_wolf", "tab": 2, "g": 1, "n": "Wolf", "m": "spawn", "sp": "wolf"},
 	{"id": "s_monkey", "tab": 2, "g": 1, "n": "Affe", "m": "spawn", "sp": "monkey"},
 	{"id": "s_crane", "tab": 2, "g": 1, "n": "Kranich", "m": "spawn", "sp": "crane"},
-	{"id": "s_imm", "tab": 2, "g": 2, "n": "Wandernder Unsterblicher", "d": "Ein Rang-6-Gu-Unsterblicher ohne Clan.", "m": "spawn", "sp": "imm"},
-	{"id": "s_kingwolf", "tab": 2, "g": 2, "n": "Donnerkronen-Wolf", "d": "Ein Bestienkönig, der mit Blitzen angreift.", "m": "spawn", "sp": "kingwolf"},
-	{"id": "s_ancient", "tab": 2, "g": 2, "n": "Uralte Wildbestie", "d": "Stark wie ein Rang-8-Unsterblicher. Zertrampelt Dörfer.", "m": "spawn", "sp": "ancient"},
-	{"id": "tide", "tab": 2, "g": 2, "n": "Wolfsflut", "d": "Tippe aufs Land: Eine Wolfsflut stürmt das nächste Dorf.", "m": "tap"},
 	{"id": "w_rain", "tab": 3, "g": 0, "n": "Regen", "d": "Löscht Feuer, lässt Wälder wachsen.", "m": "act", "w": "rain"},
 	{"id": "w_snow", "tab": 3, "g": 0, "n": "Schneefall", "m": "act", "w": "snow"},
 	{"id": "w_drought", "tab": 3, "g": 0, "n": "Dürre", "d": "Gras verdorrt, Feuer breitet sich schneller aus.", "m": "act", "w": "drought"},
@@ -79,8 +80,64 @@ const TOOLS: Array = [
 	{"id": "luck", "tab": 5, "g": 0, "n": "Großes Glück", "d": "Schnellere Kultivierung und ein sicherer Durchbruch.", "m": "paint"},
 	{"id": "life", "tab": 5, "g": 0, "n": "Lebensspannen-Gu", "d": "Schenkt 100 Jahre Lebenszeit.", "m": "paint"},
 	{"id": "stones", "tab": 5, "g": 1, "n": "Urstein-Regen", "d": "Tippe auf ein Dorf: 50 Ursteine fallen vom Himmel.", "m": "tap"},
-	{"id": "s_wildgu", "tab": 5, "g": 1, "n": "Wilde Gu", "d": "Gu-Meister fangen und veredeln sie.", "m": "spawn", "sp": "wildgu"},
-]
+
+	]
+	# --- Reiter 2: Völker, Tiere, Bestienkönige, Ödbestien ---
+	for r: int in range(4, GuData.RACE_NAME.size()):
+		var hr: int = GuData.RACE_REG[r]
+		L.append({"id": "s_%d" % r, "tab": 2, "g": 0, "n": GuData.RACE_PL[r], "d": GuData.RACE_TRAIT[r] + (" Heimat: " + GuData.REGN[hr] + "." if hr >= 0 else ""), "m": "spawn", "sp": "p%d" % r})
+	for s: String in ["bk100", "kingwolf", "bk10000", "desolate", "ancient", "remote"]:
+		var S: Dictionary = GuData.SPEC[s]
+		L.append({"id": "s_" + s, "tab": 2, "g": 2, "n": S["n"], "d": str(S.get("d", "")), "m": "spawn", "sp": s})
+	for s2: String in GuData.NAMED_BEASTS:
+		var S2: Dictionary = GuData.SPEC[s2]
+		var tn: String = GuData.TIER_NAME.get(int(S2.get("tier", 0)), "")
+		L.append({"id": "s_" + s2, "tab": 2, "g": 3, "n": S2["n"], "d": (tn + ". " if int(S2.get("tier", 0)) > 0 else "") + str(S2.get("d", "")), "m": "spawn", "sp": s2})
+	L.append({"id": "tide", "tab": 2, "g": 4, "n": "Wolfsflut", "d": "Tippe aufs Land: Eine Wolfsflut stürmt das nächste Dorf.", "m": "tap"})
+	# --- Reiter 6: Gu-Meister, Unsterbliche, Ehrwürdige, Figuren ---
+	for r2: int in range(1, 6):
+		L.append({"id": "s_gm%d" % r2, "tab": 6, "g": 0, "n": "Rang-%d-Gu-Meister" % r2, "d": "Erweckter Gu-Meister mit dem Pfad seiner Region und passenden sterblichen Gu. Schließt sich einem nahen Dorf an.", "m": "spawn", "sp": "gm", "r": r2})
+	L.append({"id": "s_imm", "tab": 6, "g": 1, "n": "Rang-6-Gu-Unsterblicher", "d": "Ein wandernder Gu-Unsterblicher ohne Clan. Fliegt über Regionswände und setzt Mordzüge ein.", "m": "spawn", "sp": "gi", "r": 6})
+	L.append({"id": "s_gi7", "tab": 6, "g": 1, "n": "Rang-7-Gu-Unsterblicher", "d": "Ein mächtiger wandernder Unsterblicher, oft mit einem Unsterblichen Gu.", "m": "spawn", "sp": "gi", "r": 7})
+	L.append({"id": "s_gi8", "tab": 6, "g": 1, "n": "Rang-8-Gu-Unsterblicher", "d": "Fast ein Ehrwürdiger – vom Himmelswillen beobachtet.", "m": "spawn", "sp": "gi", "r": 8})
+	for vd: Dictionary in Lore.VEN:
+		L.append({"id": "s_v_" + str(vd["id"]), "tab": 6, "g": 2, "n": vd["t"], "d": str(vd["d"]) + " %s-Pfad, %s. Nur einer zur selben Zeit." % [GuData.PATH_NAME[int(vd["p"])], "dämonisch" if int(vd["al"]) == 1 else "rechtschaffen"], "m": "spawn", "sp": "ven", "ven": vd["id"]})
+	for fd: Dictionary in Lore.FIG:
+		L.append({"id": "s_f_" + str(fd["id"]), "tab": 6, "g": 3, "n": (str(fd["sur"]) + " " + str(fd["given"])).strip_edges(), "d": str(fd["d"]) + " (" + GuData.rank_title(int(fd["r"])) + ")", "m": "spawn", "sp": "fig", "fig": fd["id"]})
+	# --- Reiter 5: wilde Gu und Unsterbliche Gu ---
+	L.append({"id": "s_wildgu", "tab": 5, "g": 2, "n": "Wilde Gu", "d": "Ein Schwarm wilder Gu vom Pfad der Region. Gu-Meister fangen und veredeln sie.", "m": "spawn", "sp": "gu", "path": -1})
+	for pth: int in Lore.WILD_PATHS:
+		L.append({"id": "s_gu%d" % pth, "tab": 5, "g": 2, "n": "Wilde %s-Gu" % GuData.PATH_NAME[pth], "d": "z. B. %s. Gu-Meister fangen sie und nehmen sie in ihre Sammlung auf." % ", ".join(Lore.mgu(pth).slice(0, 3)), "m": "spawn", "sp": "gu", "path": pth})
+	for gid: String in Lore.IGU_BTN:
+		var e: Dictionary = Lore.igu(gid)
+		L.append({"id": "s_ig_" + gid, "tab": 5, "g": 3, "n": e["n"], "d": str(e["d"]) + " Rang %d. Nur Gu-Unsterbliche können es fangen." % int(e["r"]), "m": "spawn", "sp": "igu", "igu": gid})
+	L.append({"id": "s_ig_rand", "tab": 5, "g": 3, "n": "Zufälliges Unsterbliches Gu", "d": "Eines von %d Unsterblichen Gu der Enzyklopädie." % Lore.IGU.size(), "m": "spawn", "sp": "igu", "igu": ""})
+	# --- Reiter 0: Orte ---
+	for pt: String in Lore.PLACE_ORDER:
+		var D: Dictionary = Lore.PLACE[pt]
+		L.append({"id": "pl_" + pt, "tab": 0, "g": 3, "n": D["n"], "d": D["d"], "m": "tap", "pl": pt})
+	# --- Reiter 1: Organisationen ---
+	for o: Dictionary in Lore.ORGS:
+		var rg: int = int(o["reg"])
+		L.append({"id": "o_" + str(o["id"]), "tab": 1, "g": 2 + int(o["g"]), "n": o["n"], "d": str(o["d"]) + (" Region: " + GuData.REGN[rg] + "." if rg >= 0 else ""), "m": "tap", "org": o["id"], "gl": o["gl"], "col": o["col"]})
+	# --- Ereignisse ---
+	L.append({"id": "ev_calam", "tab": 3, "g": 2, "n": "Irdische Kalamität", "d": "Prüfung der Unsterblichen: Gu-Unsterbliche in der Nähe müssen sie bestehen. Ohne Unsterbliche bebt nur die Erde.", "m": "tap"})
+	L.append({"id": "ev_dream", "tab": 3, "g": 2, "n": "Traumreich erscheint", "d": "Irgendwo in der Welt öffnet sich ein Traumreich.", "m": "act"})
+	L.append({"id": "ev_inherit", "tab": 3, "g": 2, "n": "Erbe öffnet sich", "d": "Das verborgene Erbe eines toten Unsterblichen wird zugänglich.", "m": "act"})
+	L.append({"id": "ev_ow", "tab": 4, "g": 2, "n": "Fremdweltdämon", "d": "Eine fremde Seele: lernt mehrere Pfade ohne Konflikt, kultiviert rasend schnell – und wird von allen gejagt.", "m": "spawn", "sp": "ow"})
+	L.append({"id": "ev_war", "tab": 4, "g": 2, "n": "Rechtschaffen gegen Dämonisch", "d": "Alle rechtschaffenen Clans erklären allen dämonischen den Krieg.", "m": "act"})
+	L.append({"id": "ev_frag", "tab": 4, "g": 2, "n": "Himmelsfragment", "d": "Ein Trümmerstück eines zerstörten Himmels stürzt herab und bleibt als Schatz liegen.", "m": "tap"})
+	for k: int in range(L.size()):
+		L[k]["o"] = k
+	L.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if int(a["tab"]) != int(b["tab"]):
+			return int(a["tab"]) < int(b["tab"])
+		if int(a["g"]) != int(b["g"]):
+			return int(a["g"]) < int(b["g"])
+		return int(a["o"]) < int(b["o"]))
+	return L
+
+
 const BRUSH: PackedInt32Array = [1, 2, 4, 7, 11]
 const LADDER: PackedInt32Array = [GuData.DEEP, GuData.SHAL, GuData.SAND, GuData.GRASS, GuData.HILL, GuData.MOUNT]
 
@@ -94,11 +151,14 @@ func _init(s: Sim) -> void:
 	sim = s
 
 
+static var _tool_idx: Dictionary = {}
+
+
 static func tool_by_id(id: String) -> Dictionary:
-	for t: Dictionary in TOOLS:
-		if t["id"] == id:
-			return t
-	return {}
+	if _tool_idx.is_empty():
+		for t: Dictionary in TOOLS:
+			_tool_idx[t["id"]] = t
+	return _tool_idx.get(id, {})
 
 
 func brush_r() -> int:
@@ -243,7 +303,7 @@ func apply_paint(t: Dictionary, wx: float, wy: float, stroke: Dictionary) -> voi
 					sim.spark(u.x, u.y - 2.0, Color("#ff3030"), 6, 4.0)
 		"plague":
 			for u: Unit in _brush_units(wx, wy):
-				if u.sp != "wildgu":
+				if u.beh != GuData.B_GU and u.beh != GuData.B_IGU:
 					u.sick = 22.0 + randf() * 10.0
 		"smite":
 			for u: Unit in _brush_units(wx, wy):
@@ -260,9 +320,10 @@ func spawn_at(t: Dictionary, wx: float, wy: float) -> String:
 		return ""
 	var tt: int = sim.world.tile[ty * W + tx]
 	var s: String = t["sp"]
+	var land: bool = GuData.is_land(tt) and tt != GuData.WALL
 	if s.begins_with("p"):
 		var race: int = int(s.substr(1))
-		if tt == GuData.WALL or (tt == GuData.DEEP and race != 3):
+		if tt == GuData.WALL or (tt == GuData.DEEP and not GuData.RACE_SWIM[race] and not GuData.RACE_FLY[race]):
 			return "Hier kann niemand leben."
 		var u: Unit = sim.mk_person(wx, wy, race, 16.0 + randf() * 14.0)
 		u.awk = true
@@ -270,26 +331,60 @@ func spawn_at(t: Dictionary, wx: float, wy: float) -> String:
 			sim.awaken(u)
 		sim.puff(wx, wy - 1.0, Color("#fff6d8"), 5)
 		return ""
-	if s == "imm":
-		if tt == GuData.WALL:
+	match s:
+		"gm":
+			if not land:
+				return "Gu-Meister brauchen festen Boden."
+			sim.spawn_gm(wx, wy, int(t["r"]))
 			return ""
-		var im: Unit = sim.mk_person(wx, wy, 0 if randf() < 0.75 else 1, 120.0 + randf() * 80.0)
-		im.awk = true
-		sim.awaken(im)
-		for r: int in range(2, 7):
-			sim.ascend(im, r)
-		im.life = sim.uage(im) + 300.0 + randf() * 200.0
-		im.next_trib = sim.uage(im) + 8.0 + randf() * 10.0
-		sim.pillar(wx, wy, GuData.ESS_COL[6])
-		sim.log_event("Ein wandernder Gu-Unsterblicher erscheint: " + im.pname() + ".", "violet", true)
-		return ""
+		"gi":
+			if tt == GuData.WALL:
+				return ""
+			sim.spawn_immortal(wx, wy, int(t["r"]))
+			return ""
+		"ven":
+			for vd: Dictionary in Lore.VEN:
+				if vd["id"] == t["ven"]:
+					return sim.spawn_venerable(vd, wx, wy)
+			return ""
+		"fig":
+			if not land:
+				return "Hier kann niemand leben."
+			for fd: Dictionary in Lore.FIG:
+				if fd["id"] == t["fig"]:
+					return sim.spawn_figure(fd, wx, wy)
+			return ""
+		"gu":
+			if not land:
+				return "Wilde Gu leben an Land."
+			var pth: int = int(t["path"])
+			if pth < 0:
+				pth = int(GuData.REGPATH[sim.region_at(wx, wy)].pick_random())
+			for k: int in range(3):
+				sim.spawn_wild_gu(wx + (randf() - 0.5) * 3.0, wy + (randf() - 0.5) * 3.0, pth)
+			sim.spark(wx, wy - 2.0, GuData.PATH_COL[pth], 6, 3.0)
+			return ""
+		"igu":
+			var g: Unit = sim.spawn_wild_igu(wx, wy, str(t["igu"]))
+			sim.pillar(wx, wy, GuData.PATH_COL[g.path], 0.7)
+			sim.log_event("Ein wildes Unsterbliches Gu erscheint: " + g.pname() + ".", "violet", true)
+			return ""
+		"ow":
+			if not land:
+				return "Hier kann niemand leben."
+			sim.ow_demon(wx, wy)
+			return ""
 	var S: Dictionary = GuData.SPEC[s]
-	if not S["fly"] and (tt == GuData.DEEP or tt == GuData.WALL):
+	if S.get("aqua", false):
+		if not GuData.is_water(tt):
+			return S["n"] + " lebt nur im Wasser."
+	elif not S["fly"] and ((tt == GuData.DEEP and not S.get("swim", false)) or tt == GuData.WALL):
 		return "Hier kann diese Kreatur nicht leben."
-	sim.mk_animal(wx, wy, s)
-	if s == "ancient":
-		sim.shake = 0.8
-		sim.log_event("Eine Uralte Wildbestie ist erwacht.", "war", true)
+	sim.spawn_beast(wx, wy, s)
+	var tier: int = int(S.get("tier", 0))
+	if tier >= 6:
+		sim.shake = 0.4 + 0.15 * (tier - 6)
+		sim.log_event("%s erwacht in %s." % [str(S["n"]), GuData.REGN_DAT[sim.region_at(wx, wy)]], "war", true)
 	sim.puff(wx, wy - 1.0, Color("#e8dcc0"), 4)
 	return ""
 
@@ -298,7 +393,27 @@ func spawn_at(t: Dictionary, wx: float, wy: float) -> String:
 func tap_tool(t: Dictionary, wx: float, wy: float) -> String:
 	var tx: int = clampi(int(wx), 0, W - 1)
 	var ty: int = clampi(int(wy), 0, H - 1)
+	if t.has("pl"):
+		var pt: String = t["pl"]
+		var msg: String = sim.place_ok(pt, wx, wy)
+		if msg != "":
+			return msg
+		sim.add_place(pt, wx, wy)
+		return ""
+	if t.has("org"):
+		return sim.found_org(Lore.org(t["org"]), wx, wy)
 	match str(t["id"]):
+		"ev_calam":
+			calamity(wx, wy)
+		"ev_frag":
+			var msg2: String = sim.place_ok("fragment", wx, wy)
+			if msg2 != "":
+				return msg2
+			sim.fx.append({"k": "met", "x": wx, "y": wy, "l": 0.8, "ml": 0.8, "big": true})
+			sim.later(0.8, func() -> void:
+				sim.boom(wx, wy, 5.0, 200.0, {"ash": true, "burn": 0.2, "c": Color("#cfe0ff")})
+				if sim.place_ok("fragment", wx, wy) == "":
+					sim.add_place("fragment", wx, wy))
 		"feud", "ally":
 			var v: Village = sim.village_at(tx, ty)
 			if v == null:
@@ -366,6 +481,50 @@ func tap_tool(t: Dictionary, wx: float, wy: float) -> String:
 				sim.boom(wx, wy, 26.0, 99999.0, {"ash": true, "lake": true, "burn": 0.3, "c": Color("#ffe4a0")})
 				sim.log_event("Eine unsterbliche Katastrophe verwüstet " + GuData.REGN[sim.region_at(wx, wy)] + ".", "red", true))
 	return ""
+
+
+## Irdische Kalamität: Unsterbliche im Umkreis werden geprüft, sonst bebt die Erde.
+func calamity(x: float, y: float) -> void:
+	var imms: Array[Unit] = []
+	for u: Unit in sim.near_units(x, y, 30.0):
+		if u.k == "p" and u.rank >= 6:
+			imms.append(u)
+	if imms.is_empty():
+		quake(x, y)
+		for k: int in range(4):
+			sim.later(k * 0.3, func() -> void: sim.boom(x + (randf() - 0.5) * 20.0, y + (randf() - 0.5) * 20.0, 3.5, 60.0, {"ash": true, "burn": 0.15, "c": Color("#c9a46a")}))
+		sim.log_event("Eine Irdische Kalamität erschüttert " + GuData.REGN_IN[sim.region_at(x, y)] + ".", "war", true)
+		return
+	for u: Unit in imms:
+		sim.earthly_calamity(u)
+	sim.log_event("Die Irdische Kalamität kommt über %d Gu-Unsterbliche." % imms.size(), "violet", true)
+
+
+## Sofort-Ereignisse. Gibt {"msg": Hinweis, "pos": Ort zum Hinzoomen} zurück.
+func event_act(id: String) -> Dictionary:
+	match id:
+		"ev_war":
+			return {"msg": sim.rd_war(), "pos": Vector2(-1, -1)}
+		"ev_dream", "ev_inherit":
+			var pt: String = "dream" if id == "ev_dream" else "inherit"
+			var vs: Array[Village] = []
+			for v: Village in sim.villages:
+				if v.alive:
+					vs.append(v)
+			for k: int in range(80):
+				var p: Vector2
+				if not vs.is_empty() and k < 60:
+					var v2: Village = vs.pick_random()
+					var a: float = randf() * TAU
+					var d: float = 14.0 + randf() * 18.0
+					p = Vector2(v2.cx + cos(a) * d, v2.cy + sin(a) * d)
+				else:
+					p = Vector2(randf() * W, randf() * H)
+				if sim.place_ok(pt, p.x, p.y) == "":
+					sim.add_place(pt, p.x, p.y)
+					return {"msg": "", "pos": p}
+			return {"msg": "Kein Ort gefunden.", "pos": Vector2(-1, -1)}
+	return {"msg": "", "pos": Vector2(-1, -1)}
 
 
 func discord(v: Village) -> String:

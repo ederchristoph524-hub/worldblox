@@ -33,6 +33,8 @@ var tab: int = -1
 var tool_id: String = ""
 var sel_unit: Unit = null
 var sel_vil: Village = null
+var sel_place: Place = null
+var lm_font: FontVariation
 var insp_kind: String = ""
 var follow: bool = false
 var gift_cd: float = 0.0
@@ -81,6 +83,8 @@ func _ready() -> void:
 			_dev_shots(a.substr(8))
 		if a == "--selftest":
 			_selftest()
+		if a.begins_with("--sheets="):
+			_dev_sheets(a.substr(9))
 
 
 func _build_scene() -> void:
@@ -209,7 +213,7 @@ func zoom_to(x: float, y: float, nz: float) -> void:
 
 # ---------------- Ablauf ----------------
 
-func _start_new_world(live: bool) -> void:
+func _start_new_world(live: bool, mode: String = "gu") -> void:
 	loading = true
 	load_live = live
 	hud.set_loading(true, "Die fünf Regionen entstehen …", 0.05)
@@ -220,7 +224,7 @@ func _start_new_world(live: bool) -> void:
 	follow = false
 	await get_tree().process_frame
 	await get_tree().process_frame
-	sim.new_world(live)
+	sim.new_world(live, mode)
 	sim.world.render_all()
 	if not live:
 		_finish_start()
@@ -508,15 +512,28 @@ func _run_action(t: Dictionary) -> void:
 			var ok2: bool = _load_game()
 			hud.toast("Gespeicherte Welt geladen." if ok2 else "Kein Spielstand gefunden.", "jade" if ok2 else "red", sim.year())
 		"new":
-			hud.open_modal("[font_size=20][color=#9fd0ff][b]Neue Welt erschaffen[/b][/color][/font_size]\n\nDie aktuelle Welt geht verloren, wenn du sie nicht gespeichert hast.", [
-				["Mit Clans (%d Jahre Vorgeschichte)" % int(PRESIM_YEARS), func() -> void:
+			hud.open_modal("[font_size=20][color=#9fd0ff][b]Neue Welt erschaffen[/b][/color][/font_size]\n\n[b]Gu-Weltkarte (Standard)[/b]: die fünf Regionen der Gu-Welt mit Himmelshof, Gu-Yue-Dorf, Shang-Clan-Stadt und den anderen bekannten Orten. Mit Clans entstehen die kanonischen Mächte, dann vergehen %d Jahre Vorgeschichte.\n\n[b]Zufallswelt[/b]: frei erzeugte Regionen ohne benannte Orte.\n\n[color=#9db09e]Die aktuelle Welt geht verloren, wenn du sie nicht gespeichert hast.[/color]" % int(PRESIM_YEARS), [
+				["Gu-Weltkarte mit Clans", func() -> void:
 					hud.close_modal()
-					_start_new_world(true), "red"],
-				["Nur Natur", func() -> void:
+					_start_new_world(true, "gu"), "red"],
+				["Gu-Weltkarte, nur Natur", func() -> void:
 					hud.close_modal()
-					_start_new_world(false), ""]])
+					_start_new_world(false, "gu"), ""],
+				["Zufallswelt mit Clans", func() -> void:
+					hud.close_modal()
+					_start_new_world(true, "random"), "jade"],
+				["Zufallswelt, nur Natur", func() -> void:
+					hud.close_modal()
+					_start_new_world(false, "random"), ""]])
 		"hideui":
 			_set_ui_hidden(true)
+		"ev_war", "ev_dream", "ev_inherit":
+			var r: Dictionary = powers.event_act(t["id"])
+			if str(r["msg"]) != "":
+				hud.show_hint(t["n"], r["msg"])
+			var pos: Vector2 = r["pos"]
+			if pos.x >= 0.0:
+				zoom_to(pos.x, pos.y, 5.0)
 
 
 func _set_ui_hidden(h: bool) -> void:
@@ -602,6 +619,13 @@ func _inspect_at(wx: float, wy: float) -> void:
 		sel_vil = null
 		_open_unit()
 		return
+	var pl: Place = sim.place_at(wx, wy)
+	if pl != null:
+		sel_unit = null
+		sel_vil = null
+		sel_place = pl
+		_open_place()
+		return
 	var v: Village = sim.village_at(clampi(int(wx), 0, W - 1), clampi(int(wy), 0, H - 1))
 	if v != null:
 		sel_vil = v
@@ -623,11 +647,22 @@ func _portrait(u: Unit) -> ImageTexture:
 	var q: Px = Px.new(16, 16)
 	var sink: Callable = func(r: Rect2, c: Color) -> void: q.p(roundi(r.position.x), roundi(r.position.y), maxi(1, roundi(r.size.x)), maxi(1, roundi(r.size.y)), c)
 	if u.k == "p":
-		var cl: Color = sim.clans[u.clan].col if u.clan >= 0 else (Color("#3a2a3a") if u.rogue else Color("#8e8676"))
-		Sprites.draw_person(sink, 8.0, 14.5, 1.05 if u.rank >= 6 else 1.5, u.race, u.rank, cl, 1, sim.uage(u) >= 14.0, false, 0.0, false, false, u.rogue, u.sick > 0.0, false)
+		Sprites.draw_person(sink, 8.0, 14.5, 0.72 if u.rank >= 9 else (1.05 if u.rank >= 6 else 1.5), u.race, u.rank, unit_col(u), 1, sim.uage(u) >= 14.0, false, 0.0, false, false, u.rogue, u.sick > 0.0, false, 0.0, 0.0, u.ow)
 	else:
-		Sprites.draw_animal(sink, 8.0, 13.0, 0.55 if u.sp == "ancient" else (0.8 if u.sp == "kingwolf" else 1.5), u.sp, 1, false, 1.0, false, u.tide, u.id)
+		var ss: float = float(GuData.SPEC[u.sp].get("ss", 1.0))
+		Sprites.draw_animal(sink, 8.0, 13.0, minf(1.5, 1.5 / ss * (1.0 if ss <= 1.0 else 0.75)), u.sp, 1, false, 1.0, false, u.tide, u.id, 0.0, u.path)
 	return q.outline().tex()
+
+
+## Gewandfarbe einer Figur: Ehrwürdige in ihrer Farbe, sonst Clanfarbe.
+func unit_col(u: Unit) -> Color:
+	if u.rank >= 9 and u.fig != "":
+		for vd: Dictionary in Lore.VEN:
+			if vd["fig"] == u.fig:
+				return Color(str(vd["col"]))
+	if u.ow:
+		return Color("#6a2a8a")
+	return sim.clans[u.clan].col if u.clan >= 0 else (Color("#3a2a3a") if u.rogue else Color("#8e8676"))
 
 
 func _open_unit() -> void:
@@ -637,10 +672,20 @@ func _open_unit() -> void:
 	if u.k == "p":
 		var c: Clan = sim.clans[u.clan] if u.clan >= 0 else null
 		var v: Village = sim.villages[u.vil] if u.vil >= 0 else null
-		sub = (u.title if u.rank == 9 else GuData.rank_title(u.rank)) + ((" · " + GuData.STAGE[u.stage]) if (u.rank > 0 and u.rank < 9) else "")
+		sub = (u.title if (u.rank == 9 or u.ow) and u.title != "" else GuData.rank_title(u.rank)) + ((" · " + GuData.STAGE[u.stage]) if (u.rank > 0 and u.rank < 9) else "")
 		sub += "\n" + ("Dämonischer Einzelgänger" if u.rogue else ((c.name + ((" · " + v.name) if v != null else "")) if c != null else "ohne Clan"))
 	else:
-		sub = "Teil einer Wolfsflut" if u.tide else ("Wild – kann von Gu-Meistern veredelt werden" if u.sp == "wildgu" else "Wildtier")
+		var tn: String = GuData.TIER_NAME.get(u.rank, "Wildtier")
+		if u.beh == GuData.B_GU:
+			sub = "Wilder Gu des %s-Pfades – Gu-Meister fangen ihn" % GuData.PATH_NAME[maxi(0, u.path)]
+		elif u.beh == GuData.B_IGU:
+			sub = "Wildes Unsterbliches Gu (Rang %d) – nur Unsterbliche fangen es" % int(Lore.igu(u.gname).get("r", 6))
+		elif u.tide:
+			sub = "Teil einer Wolfsflut"
+		elif u.ldr != null and u.ldr.hp > 0.0:
+			sub = tn + " · Rudel von " + u.ldr.pname()
+		else:
+			sub = tn
 	var btns: Array = [
 		["Folgt" if follow else "Folgen", func() -> void:
 			follow = not follow
@@ -667,10 +712,11 @@ func _unit_body(u: Unit) -> String:
 	var mt: String = "[color=#9db09e]"
 	var s: String = ""
 	if u.k == "p":
-		s += mt + "Volk[/color]  " + GuData.RACE_NAME[u.race] + "\n"
+		s += mt + "Volk[/color]  " + GuData.RACE_NAME[u.race] + ("  [color=#c080ff](Fremdweltdämon)[/color]" if u.ow else "") + "\n"
 		s += mt + "Alter[/color]  %d / %d Jahre\n" % [int(a), int(u.life)]
 		if u.rank > 0:
-			s += mt + "Pfad[/color]  " + _swatch(GuData.PATH_COL[u.path]) + GuData.PATH_NAME[u.path] + "-Pfad · " + ("dämonisch" if u.align == 1 else "rechtschaffen") + "\n"
+			s += mt + "Pfad[/color]  " + _swatch(GuData.PATH_COL[u.path]) + GuData.PATH_NAME[u.path] + "-Pfad\n"
+			s += mt + "Gesinnung[/color]  " + ("[color=#ff8a7a]dämonisch[/color]" if (u.align == 1 or u.rogue) else "[color=#9fe0b0]rechtschaffen[/color]") + "\n"
 			s += mt + "Begabung[/color]  " + ("Extremkonstitution" if u.apt == "X" else u.apt + "-Grad") + "\n"
 			s += mt + "Essenz[/color]  " + _swatch(GuData.ESS_COL[u.rank]) + GuData.ESS_NAME[u.rank] + "\n"
 			if u.rank < 9:
@@ -681,16 +727,45 @@ func _unit_body(u: Unit) -> String:
 			s += mt + "Arbeit[/color]  " + str(jobs.get(u.job, "Kind" if a < 14.0 else "–")) + "\n"
 		s += mt + "Leben[/color]  " + _bar_txt(u.hp / u.mhp, Color("#d24a35")) + "\n"
 		s += mt + "Siege[/color]  %d" % u.kills
+		if not u.igu.is_empty():
+			var ig: PackedStringArray = PackedStringArray()
+			for id: String in u.igu:
+				var e: Dictionary = Lore.igu(id)
+				ig.append(str(e.get("n", id)) + " [color=#9db09e](" + str(Lore.FX_TEXT.get(str(e.get("fx", "gen")), "")) + ")[/color]")
+			s += "\n\n[color=#ffd24a]Unsterbliche Gu:[/color] " + ", ".join(ig)
+		if u.notrib:
+			s += "\n[color=#cfe0ff]An ein Himmelsfragment gebunden – keine Drangsale[/color]"
 		if not u.gus.is_empty():
 			s += "\n\n[color=#e8c70a]Gu:[/color] " + ", ".join(u.gus)
+		if u.fig != "" and u.rank < 9:
+			for fd: Dictionary in Lore.FIG:
+				if fd["id"] == u.fig:
+					s += "\n[color=#9db09e]" + str(fd["d"]) + "[/color]"
+		elif u.rank >= 9 and u.fig != "":
+			for vd: Dictionary in Lore.VEN:
+				if vd["fig"] == u.fig:
+					s += "\n[color=#9db09e]" + str(vd["d"]) + "[/color]"
 		if u.luck > 0.0:
 			s += "\n[color=#ffd23a]Großes Glück[/color]"
 		if u.sick > 0.0:
 			s += "\n[color=#86e04a]Seuchen-Gu[/color]"
 	else:
+		var S: Dictionary = GuData.SPEC[u.sp]
+		if u.beh == GuData.B_GU or u.beh == GuData.B_IGU:
+			s += mt + "Pfad[/color]  " + _swatch(GuData.PATH_COL[maxi(0, u.path)]) + GuData.PATH_NAME[maxi(0, u.path)] + "-Pfad\n"
+			if u.beh == GuData.B_IGU:
+				var e2: Dictionary = Lore.igu(u.gname)
+				s += mt + "Wirkung[/color]  " + str(Lore.FX_TEXT.get(str(e2.get("fx", "gen")), "")) + "\n"
+				s += "[color=#9db09e]" + str(e2.get("d", "")) + "[/color]\n"
+			s += mt + "Leben[/color]  " + _bar_txt(u.hp / u.mhp, Color("#d24a35"))
+			return s
+		if u.rank > 0:
+			s += mt + "Stufe[/color]  " + _swatch(GuData.ESS_COL[u.rank]) + str(GuData.TIER_NAME.get(u.rank, "")) + " (wie Rang %d)\n" % u.rank
 		s += mt + "Leben[/color]  " + _bar_txt(u.hp / u.mhp, Color("#d24a35")) + "\n"
-		s += mt + "Stärke[/color]  %d\n" % int(GuData.SPEC[u.sp]["atk"])
+		s += mt + "Stärke[/color]  %d\n" % int(u.atk)
 		s += mt + "Beute[/color]  %d" % u.kills
+		if S.has("d"):
+			s += "\n[color=#9db09e]" + str(S["d"]) + "[/color]"
 	return s
 
 
@@ -760,6 +835,44 @@ func _village_body(v: Village) -> String:
 	return s
 
 
+func _open_place() -> void:
+	insp_kind = "pl"
+	var p: Place = sel_place
+	var D: Dictionary = Lore.PLACE[p.type]
+	var btns: Array = []
+	btns.append(["Auflösen", func() -> void:
+		p.alive = false
+		sim.places.erase(p)
+		sim.spark(p.x, p.y - 4.0, Color("#fff1c0"), 20, 8.0)
+		_close_insp(), "red"])
+	hud.open_insp(Icons.get_icon("pl_" + p.type), "", Color.WHITE, p.name, str(D["n"]) + " · " + GuData.REGN[sim.region_at(p.x, p.y)], _place_body(p), btns)
+	hud.layout_floaters()
+
+
+func _place_body(p: Place) -> String:
+	var mt: String = "[color=#9db09e]"
+	var s: String = ""
+	if p.owner >= 0:
+		var o: Unit = sim.unit_by_id(p.owner)
+		if o != null:
+			s += mt + "Besitzer[/color]  " + _swatch(GuData.ESS_COL[o.rank]) + o.pname() + ", " + GuData.rank_title(o.rank) + "\n"
+	elif p.type in ["blessed", "grotto", "hu"]:
+		s += mt + "Besitzer[/color]  herrenlos\n"
+	s += mt + "Alter[/color]  %d Jahre\n" % int((sim.sim_time - p.born) / 12.0)
+	if p.until > 0.0:
+		s += mt + "Verblasst[/color]  in %d Monaten\n" % int(p.until - sim.sim_time)
+	s += mt + "Wirkung[/color]  %d Felder\n" % int(p.radius())
+	if p.type == "yitian":
+		s += mt + "Fötus-Gu[/color]  " + ("bereits erschienen" if p.used else "erscheint in %d Monaten" % maxi(0, int(24.0 - p.t))) + "\n"
+	var n: int = 0
+	for u: Unit in sim.near_units(p.x, p.y, p.radius()):
+		if u.k == "p" and u.rank > 0:
+			n += 1
+	s += mt + "Gu-Meister[/color]  %d in der Nähe\n" % n
+	s += "\n[color=#9db09e]" + str(Lore.PLACE[p.type]["d"]) + "[/color]"
+	return s
+
+
 func _open_tile(tx: int, ty: int) -> void:
 	if not sim.world.in_map(tx, ty):
 		return
@@ -784,6 +897,11 @@ func _refresh_insp() -> void:
 			_close_insp()
 			return
 		hud.update_insp_body(_village_body(sel_vil))
+	elif insp_kind == "pl":
+		if sel_place == null or not sel_place.alive:
+			_close_insp()
+			return
+		hud.update_insp_body(_place_body(sel_place))
 
 
 # ---------------- Fenster ----------------
@@ -809,7 +927,7 @@ func _open_world_info() -> void:
 				gm += 1
 			if u.rank >= 6:
 				imm += 1
-		elif u.sp == "wildgu":
+		elif u.beh == GuData.B_GU or u.beh == GuData.B_IGU:
 			gu += 1
 		else:
 			an += 1
@@ -829,7 +947,7 @@ func _open_world_info() -> void:
 	for b: Building in sim.buildings:
 		if b != null:
 			bl += 1
-	var rows: Array = [["Jahr", sim.year()], ["Zeitalter", sim.age_data()["n"]], ["Seelen", ps], ["Gu-Meister", gm], ["Gu-Unsterbliche", imm], ["Clans und Sekten", cl], ["Dörfer", vl], ["Tiere", an], ["Wilde Gu", gu], ["Bäume", trees], ["Gebäude", bl]]
+	var rows: Array = [["Jahr", sim.year()], ["Zeitalter", sim.age_data()["n"]], ["Seelen", ps], ["Gu-Meister", gm], ["Gu-Unsterbliche", imm], ["Clans und Sekten", cl], ["Dörfer", vl], ["Tiere", an], ["Wilde Gu", gu], ["Besondere Orte", sim.places.size()], ["Bäume", trees], ["Gebäude", bl]]
 	var s: String = _h("Weltinfo") + "[table=2]"
 	for r: Array in rows:
 		s += "[cell][color=#9db09e]%s[/color]   [/cell][cell][b]%s[/b][/cell]" % [r[0], str(r[1])]
@@ -965,6 +1083,11 @@ func _open_help() -> void:
 	s += _h3("Kultivierung") + "Mit 14 Jahren wird die Öffnung geprüft. Wer erwacht, wird Rang-1-Gu-Meister mit Begabung A bis D. Jeder Rang hat vier Stufen. Gu-Meister verbrauchen Ursteine aus Adern und Geisterquellen und veredeln wilde Gu. Ab Rang 6 droht regelmäßig eine Drangsal; Rang 9 gibt es nur einmal zur selben Zeit.\n\n"
 	for r: int in range(1, 10):
 		s += _swatch(GuData.ESS_COL[r]) + "Rang %d · %s\n" % [r, GuData.ESS_NAME[r]]
+	s += _h3("Völker") + "Neben den Menschen leben Variant-Menschen: Haar-, Stein-, Fischschuppen-, Feder-, Schnee-, Drachen-, Tier-, Pilz-, Schlamm- und Holzmenschen – jedes Volk mit eigener Heimat, Gestalt und Gabe. Nur Menschen können Ehrwürdige werden.\n"
+	s += _h3("Pfade und Mordzüge") + "Es gibt %d Pfade. Gu-Meister sammeln die sterblichen Gu ihres Pfades, indem sie wilde Gu fangen. Ab Rang 6 setzen Unsterbliche Mordzüge ihres Pfades ein, etwa den Mondsichel-Mordzug oder den Feuermeer-Mordzug. Rechtschaffene und Dämonische bekriegen sich; Dämonische werden oft zu mordenden Einzelgängern.\n" % GuData.PATH_NAME.size()
+	s += _h3("Unsterbliche Gu") + "Wilde Unsterbliche Gu leuchten golden. Nur Gu-Unsterbliche können sie fangen. Die Frühling-Herbst-Zikade lässt ihren Träger nach dem Tod jung wiedergeboren werden; andere schenken Glück, Zeit, Kraft, Tempo, Heilung oder Weisheit. Ödbestien tragen manchmal eines in sich.\n"
+	s += _h3("Bestien") + "Hundert-, Tausend- und Zehntausend-Bestienkönige führen Rudel. Ödbestien (Rang 6 bis 8) verteidigen ihr Revier und überfallen nahe Dörfer.\n"
+	s += _h3("Orte") + "Gesegnete Länder und Grottenhimmel stärken Unsterbliche und gebären Unsterbliche Gu. Traumreiche locken Gu-Meister an, Erbe schenken Macht oder Tod, der Himmelshof straft Dämonische. Tippe einen Ort an, um mehr zu erfahren.\n"
 	s += _h3("Schicksalsgabe") + "Das Geschenk oben rechts löst ein zufälliges Ereignis aus: ein Erbe, eine Frühling-Herbst-Zikade, Urstein-Regen, einen Glücksstern oder einen Bestienkönig.\n"
 	s += "\nDie Welt speichert sich jede Minute von selbst."
 	hud.open_modal(s)
@@ -1117,6 +1240,14 @@ class EntityLayer:
 				sim.parts.append({"x": dx + 7.0, "y": dy + 0.0, "vx": (randf() - 0.5) * 0.6, "vy": -2.4, "l": 1.4, "ml": 1.4, "c": Color(0.59, 0.94, 0.78, 0.55), "s": 1.0, "g": 0.0})
 			if insp_open and m.sel_vil != null and b.v == m.sel_vil.id:
 				draw_rect(Rect2(dx - 0.5, dy - 0.5, tw + 1, th + 1), Color(1, 0.9, 0.47, 0.9), false, 1.5 / z)
+		# Orte (Gesegnete Länder, Himmelshof, Traumreiche …)
+		for p: Place in sim.places:
+			if not p.alive:
+				continue
+			var ps: float = Sprites.place_size(p.type)
+			if p.x < vx0 - ps or p.x > vx1 + ps or p.y < vy0 - ps or p.y > vy1 + ps:
+				continue
+			_draw_place(p, tnow, insp_open and m.sel_place == p)
 		# Wesen (Kontur etwa 1 Bildschirmpixel breit, im Fernblick keine)
 		var ol: float = 0.0 if z * GuMain.PS < 0.5 else clampf(0.9 / (z * GuMain.PS), 0.4, 0.9)
 		Sprites.outline_col = Color(Sprites.OUTLINE, clampf((z * GuMain.PS - 0.6) / 1.0, 0.0, 0.92))
@@ -1125,9 +1256,11 @@ class EntityLayer:
 				continue
 			if u.k == "p":
 				var cl: Color = sim.clans[u.clan].col if u.clan >= 0 else (Color("#3a2a3a") if u.rogue else Color("#8e8676"))
-				Sprites.draw_person(sink, u.x, u.y, GuMain.PS, u.race, u.rank, cl, u.face, sim.uage(u) >= 14.0, u.moving, u.anim, u.flash > 0.0, u.st == "work", u.rogue, u.sick > 0.0, u.luck > 0.0, ol, tnow)
+				if u.fig != "" or u.ow:
+					cl = m.unit_col(u)
+				Sprites.draw_person(sink, u.x, u.y, GuMain.PS, u.race, u.rank, cl, u.face, sim.uage(u) >= 14.0, u.moving, u.anim, u.flash > 0.0, u.st == "work", u.rogue, u.sick > 0.0, u.luck > 0.0, ol, tnow, u.ow)
 			else:
-				Sprites.draw_animal(sink, u.x, u.y, GuMain.PS, u.sp, u.face, u.moving, u.anim, u.flash > 0.0, u.tide, u.id, ol)
+				Sprites.draw_animal(sink, u.x, u.y, GuMain.PS, u.sp, u.face, u.moving or u.fly, u.anim, u.flash > 0.0, u.tide, u.id, ol, u.path)
 		var su: Unit = m.sel_unit
 		if su != null and su.hp > 0.0:
 			draw_arc(Vector2(su.x, su.y), 2.4, 0.0, TAU, 24, Color("#ffe27a"), maxf(0.15, 1.5 / z))
@@ -1192,7 +1325,68 @@ class EntityLayer:
 					draw_line(Vector2(px - 12, py - 16), Vector2(px, py), Color("#ff9a3a"), 4.0 if e["big"] else 2.0)
 					var rr: float = 3.0 if e["big"] else 1.5
 					draw_rect(Rect2(px - rr, py - rr, rr * 2, rr * 2), Color("#ffe4a0"))
+				"km":
+					_draw_km(e, t)
 			fi -= 1
+
+	## Mordzug: Strahlenkranz und Wellen in der Pfadfarbe, je nach Pfad mit eigener Form.
+	func _draw_km(e: Dictionary, t: float) -> void:
+		var c: Color = e["c"]
+		var p: int = e["p"]
+		var cen: Vector2 = Vector2(e["x"], e["y"])
+		var r: float = float(e["r"]) * (0.35 + t * 0.75)
+		var a0: float = t * 2.4
+		var al: float = 1.0 - t
+		var lw: float = maxf(0.4, 2.2 / m.z)
+		draw_circle(cen, r * 0.55, Color(c, 0.22 * al))
+		draw_arc(cen, r, 0.0, TAU, 40, Color(c, al), lw * 1.6)
+		draw_arc(cen, r * 0.7, 0.0, TAU, 32, Color(1, 1, 1, al * 0.8), lw)
+		var n: int = 12 if p in [5, 17, 20, 11] else 8
+		for k: int in range(n):
+			var a: float = a0 + k * TAU / n
+			var d0: float = r * 0.3
+			var d1: float = r * (1.05 if k % 2 == 0 else 0.8)
+			if p == 36 or p == 37 or p == 4:
+				# Klingen: schräge Striche
+				draw_line(cen + Vector2(cos(a), sin(a)) * d0, cen + Vector2(cos(a + 0.5), sin(a + 0.5)) * d1, Color(c.lightened(0.3), al), lw)
+			elif p == 2 or p == 8:
+				# Flammen/Blut: dicke Zungen
+				draw_line(cen + Vector2(cos(a), sin(a)) * d0, cen + Vector2(cos(a), sin(a)) * d1 - Vector2(0, r * 0.2 * (1.0 - t)), Color(c, al), lw * 2.2)
+			else:
+				draw_line(cen + Vector2(cos(a), sin(a)) * d0, cen + Vector2(cos(a), sin(a)) * d1, Color(c, al), lw)
+
+	## Ort zeichnen: Schatten, Bild (schwebend mit Auf und Ab), belebte Effekte.
+	func _draw_place(p: Place, tnow: float, sel: bool) -> void:
+		var tex: Texture2D = Sprites.place_tex(p.type)
+		var tw: float = tex.get_width()
+		var th: float = tex.get_height()
+		var fl: bool = p.type in Sprites.PLACE_FLOAT
+		var bob: float = sin(tnow * 1.3 + p.id) * 0.8 if fl else 0.0
+		var pos: Vector2 = Vector2(roundf(p.x - tw / 2.0), roundf(p.y - th + 2.0 - (8.0 if fl else 0.0) + bob))
+		if fl:
+			for k: int in range(3):
+				var sw: float = tw * (0.7 - k * 0.15)
+				draw_rect(Rect2(p.x - sw / 2.0, p.y - 1.0 + k * 0.3, sw, 2.0 - k * 0.5), Color(0.03, 0.12, 0.03, 0.18))
+		match p.type:
+			"dream":
+				var a: float = tnow * 0.8
+				for k: int in range(3):
+					draw_arc(Vector2(p.x, p.y - th * 0.45), th * (0.25 + k * 0.12), a + k * 2.1, a + k * 2.1 + 2.4, 20, Color("#e8c0ff", 0.55 - k * 0.12), 1.2)
+			"court":
+				var pa: float = 0.25 + 0.15 * sin(tnow * 2.0)
+				draw_rect(Rect2(p.x - 1.0, pos.y - 26.0, 2.0, 26.0), Color(1.0, 0.95, 0.7, pa))
+		draw_texture(tex, pos)
+		if p.type == "dream":
+			var a2: float = -tnow * 1.3
+			draw_arc(Vector2(p.x, pos.y + th * 0.55), th * 0.3, a2, a2 + 2.0, 16, Color(1, 1, 1, 0.6), 0.8)
+		if (p.type == "blessed" or p.type == "grotto" or p.type == "hu") and randf() < 0.05:
+			m.sim.parts.append({"x": p.x + (randf() - 0.5) * tw * 0.7, "y": pos.y + th * 0.4, "vx": 0.0, "vy": -2.0, "l": 1.2, "ml": 1.2, "c": Color("#fff6b0"), "s": 0.6, "g": 0.0})
+		if p.type == "fragment" and int(tnow * 3.0 + p.id) % 5 == 0:
+			draw_rect(Rect2(p.x - 0.5, pos.y + 2.0, 1.0, 1.0), Color.WHITE)
+		if p.type == "yitian" and not p.used:
+			draw_rect(Rect2(p.x - 0.5, pos.y - 20.0, 1.0, 20.0), Color(1.0, 0.9, 0.5, 0.25 + 0.15 * sin(tnow * 3.0)))
+		if sel:
+			draw_rect(Rect2(pos.x - 0.5, pos.y - 0.5, tw + 1.0, th + 1.0), Color(1, 0.9, 0.47, 0.9), false, 1.5 / m.z)
 
 
 class CloudLayer:
@@ -1335,6 +1529,7 @@ class ScreenLayer:
 				draw_rect(Rect2(Vector2.ZERO, vs), Color(1, 0.98, 0.9, float(e["l"]) / float(e["ml"]) * 0.35))
 		_weather(vs)
 		if m.show_names:
+			_landmarks(o, z, vs)
 			_labels(o, z, vs)
 		var font: Font = m.hud.font_bold
 		for e: Dictionary in sim.fx:
@@ -1440,15 +1635,18 @@ class ScreenLayer:
 		for u: Unit in sim.units:
 			if u.k != "p" or u.hp <= 0.0:
 				continue
-			if not (u.rank >= 6 or u == m.sel_unit or (u.rank >= 4 and z >= 8.0)):
+			var named: bool = u.fig != "" or u.ow
+			if not (u.rank >= 6 or named or u == m.sel_unit or (u.rank >= 4 and z >= 8.0)):
 				continue
-			if u.rank < 9 and z < 3.0 and u != m.sel_unit:
+			if u.rank < 9 and z < 3.0 and u != m.sel_unit and not named:
 				continue
 			var X2: float = u.x * z + o.x
 			var Y2: float = (u.y - (9.0 if u.rank >= 9 else (6.5 if u.rank >= 6 else 4.5))) * z + o.y - 6.0
 			if X2 < 0 or X2 > vs.x or Y2 < 0 or Y2 > vs.y:
 				continue
-			var t2: String = "%s · R%d" % [u.given, u.rank]
+			var t2: String = "%s · R%d" % [u.given if u.sur == "" or u.fig == "" else u.sur + " " + u.given, u.rank]
+			if u.ow:
+				t2 = "Fremdweltdämon · R%d" % u.rank
 			var tw2: float = font.get_string_size(t2, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 			var r2: Rect2 = Rect2(roundf(X2 - tw2 / 2.0 - 5.0), roundf(Y2 - 7.0), roundf(tw2 + 10.0), 13.0)
 			var clash2: bool = false
@@ -1462,6 +1660,42 @@ class ScreenLayer:
 			_plate(r2)
 			draw_rect(Rect2(r2.position.x + 2.0, r2.position.y + 2.0, 2.0, r2.size.y - 4.0), GuData.ESS_COL[u.rank])
 			draw_string(font, Vector2(r2.position.x + 6.0, r2.position.y + 10.0), t2, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, GuData.ESS_COL[u.rank].lightened(0.15))
+
+	## Namen der Orte der Gu-Weltkarte und gesetzter Orte im Fernblick: klein, schräg, weiß mit dunkler Kontur.
+	func _landmarks(o: Vector2, z: float, vs: Vector2) -> void:
+		if z > 3.4:
+			return
+		var a: float = clampf((3.4 - z) / 0.8, 0.0, 1.0)
+		if m.lm_font == null:
+			m.lm_font = FontVariation.new()
+			m.lm_font.base_font = ThemeDB.fallback_font
+			m.lm_font.variation_embolden = 0.35
+			m.lm_font.variation_transform = Transform2D(Vector2(1, 0), Vector2(0.22, 1), Vector2.ZERO)
+		var fnt: Font = m.lm_font
+		var fs: int = 9 if z < 2.0 else 10
+		var lms: Array = []
+		for l0: Dictionary in m.sim.world.landmarks:
+			var dup: bool = false
+			for p0: Place in m.sim.places:
+				if p0.alive and absf(p0.x - float(l0["x"])) < 14.0 and absf(p0.y - float(l0["y"])) < 14.0:
+					dup = true
+					break
+			if not dup:
+				lms.append(l0)
+		for p: Place in m.sim.places:
+			if p.alive:
+				lms.append({"name": p.name, "x": p.x, "y": p.y + 3.0, "kind": "ort"})
+		for l: Dictionary in lms:
+			var nm: String = l["name"]
+			var tw: float = fnt.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			var pos: Vector2 = Vector2(float(l["x"]) * z + o.x - tw / 2.0, float(l["y"]) * z + o.y + (fs + 4.0 if l["kind"] == "siedlung" else 3.0))
+			if pos.x < -tw or pos.x > vs.x or pos.y < 0 or pos.y > vs.y:
+				continue
+			var col: Color = Color(1, 1, 1, a * 0.92)
+			if l["kind"] == "fluss":
+				col = Color(0.8, 0.92, 1.0, a * 0.92)
+			draw_string_outline(fnt, pos, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 3, Color(0.05, 0.07, 0.1, a * 0.85))
+			draw_string(fnt, pos, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
 
 	## Dunkle Namensplatte mit abgeschrägten Ecken und heller Kante (WorldBox).
 	func _plate(r: Rect2) -> void:
@@ -1568,6 +1802,149 @@ func _dev_shots(dir: String) -> void:
 	_open_rank()
 	await _wait(0.3)
 	await _shot(dir + "/G.png")
+	hud.close_modal()
+	# Leisten der Reiter (jeweils Anfang und weiter rechts)
+	for tb: int in [0, 1, 2, 5, 6]:
+		_apply_tab(tb)
+		await _wait(0.2)
+		await _shot(dir + "/bar%d_a.png" % tb)
+		hud.tools_scroll.scroll_horizontal = 340
+		await _wait(0.2)
+		await _shot(dir + "/bar%d_b.png" % tb)
+		hud.tools_scroll.scroll_horizontal = 700
+		await _wait(0.2)
+		await _shot(dir + "/bar%d_c.png" % tb)
+	_apply_tab(-1)
+	# Nahaufnahme: Ehrwürdige, Figuren, Bestien, Orte
+	var c: Vector2 = Vector2(best.cx, best.cy) if best != null else Vector2(W / 2.0, H / 2.0)
+	var spot: Vector2 = c + Vector2(30, 10)
+	for k: int in range(60):
+		var t2: Vector2 = c + Vector2(randf_range(-40, 40), randf_range(-40, 40))
+		if sim.world.in_map(int(t2.x), int(t2.y)) and GuData.buildable(sim.world.tile[int(t2.y) * W + int(t2.x)]) and sim.nearest_village(t2.x, t2.y, 18.0) == null:
+			spot = t2
+			break
+	sim.add_place("blessed", spot.x - 14.0, spot.y - 6.0, true)
+	sim.add_place("dream", spot.x + 16.0, spot.y - 4.0, true)
+	sim.spawn_venerable(Lore.VEN[4], spot.x - 6.0, spot.y + 6.0)
+	sim.spawn_venerable(Lore.VEN[7], spot.x + 2.0, spot.y + 6.0)
+	sim.spawn_figure(Lore.FIG[0], spot.x - 2.0, spot.y + 2.0)
+	sim.spawn_beast(spot.x + 10.0, spot.y + 8.0, "flying_bear")
+	sim.spawn_beast(spot.x - 12.0, spot.y + 10.0, "qi_grand_lion")
+	sim.spawn_beast(spot.x + 2.0, spot.y + 14.0, "bk100")
+	sim.spawn_wild_igu(spot.x - 4.0, spot.y - 2.0, "spring_autumn_cicada")
+	for k2: int in range(4):
+		sim.spawn_wild_gu(spot.x + 6.0 + k2, spot.y + 2.0, [2, 8, 11, 6][k2])
+	for r: int in range(4, 11):
+		sim.mk_person(spot.x - 10.0 + (r - 4) * 3.0, spot.y + 18.0, r, 25.0)
+	paused = true
+	z = 7.0
+	cam = spot + Vector2(0, 4)
+	_clamp_cam()
+	await _wait(3.2)
+	await _shot(dir + "/H.png")
+	z = 11.0
+	cam = spot + Vector2(-2, 12)
+	_clamp_cam()
+	await _wait(0.4)
+	await _shot(dir + "/I.png")
+	var ven: Unit = sim.fig_alive("red_lotus")
+	if ven != null:
+		sel_unit = ven
+		_open_unit()
+		await _wait(0.3)
+		await _shot(dir + "/J.png")
+		_close_insp()
+	var pl: Place = sim.find_place("blessed")
+	if pl != null:
+		sel_place = pl
+		_open_place()
+		await _wait(0.3)
+		await _shot(dir + "/K.png")
+		_close_insp()
+	paused = false
+	for k3: int in range(80):
+		sim.step(Sim.DT)
+	z = 6.0
+	await _wait(0.5)
+	await _shot(dir + "/L.png")
+	# Übersicht mit Ortsnamen
+	z = min_z
+	cam = Vector2(W / 2.0, H / 2.0)
+	_clamp_cam()
+	await _wait(0.5)
+	await _shot(dir + "/M.png")
+	z = 2.2
+	cam = Vector2(110, 190)
+	_clamp_cam()
+	await _wait(0.5)
+	await _shot(dir + "/N.png")
+	_run_action(Powers.tool_by_id("new"))
+	await _wait(0.3)
+	await _shot(dir + "/O.png")
+	get_tree().quit()
+
+
+## Entwickler: Icon- und Sprite-Bögen als PNG (läuft auch headless): <ordner>/icons.png, sprites.png
+func _dev_sheets(dir: String) -> void:
+	var sc: int = 3
+	var cols: int = 16
+	var ids: Array[String] = []
+	var last_tab: int = -99
+	for t: Dictionary in Powers.TOOLS:
+		if int(t["tab"]) != last_tab and not ids.is_empty():
+			while ids.size() % cols != 0:
+				ids.append("")
+		last_tab = int(t["tab"])
+		ids.append(t["id"])
+	var rows: int = ceili(ids.size() / float(cols))
+	var sheet: Image = Image.create_empty(cols * 26 * sc, rows * 26 * sc, false, Image.FORMAT_RGBA8)
+	sheet.fill(Color("#2a3427"))
+	for k: int in range(ids.size()):
+		if ids[k] == "":
+			continue
+		var im: Image = Icons._make(ids[k]).img
+		im.resize(im.get_width() * sc, im.get_height() * sc, Image.INTERPOLATE_NEAREST)
+		var cx: int = (k % cols) * 26 * sc + sc
+		var cy: int = (k / cols) * 26 * sc + sc
+		sheet.fill_rect(Rect2i(cx, cy, 24 * sc, 24 * sc), Color("#1f2923"))
+		sheet.blend_rect(im, Rect2i(Vector2i.ZERO, im.get_size()), Vector2i(cx + (24 * sc - im.get_width()) / 2, cy + (24 * sc - im.get_height()) / 2))
+	sheet.save_png(dir + "/icons.png")
+	var order: PackedStringArray = PackedStringArray()
+	for k2: int in range(ids.size()):
+		order.append("%d:%s" % [k2, ids[k2]])
+	print("ICONS ", " ".join(order))
+	# Wesen: Völker (Rang 0, 3, 6, 9), Bestien, Gu, Orte
+	var cell: int = 64
+	var items: Array = []
+	for r: int in range(GuData.RACE_NAME.size()):
+		for rk: int in [0, 3, 6, 9]:
+			items.append(["p", r, rk])
+	for s: String in GuData.SPEC.keys():
+		items.append(["a", s])
+	for pt: String in Lore.PLACE_ORDER:
+		items.append(["pl", pt])
+	items.append(["pl", "fragment"])
+	var cols2: int = 12
+	var sp: Image = Image.create_empty(cols2 * cell, ceili(items.size() / float(cols2)) * cell, false, Image.FORMAT_RGBA8)
+	sp.fill(Color("#5a9a48"))
+	for k3: int in range(items.size()):
+		var it: Array = items[k3]
+		var q: Px = Px.new(cell, cell)
+		var sk: Callable = func(rr: Rect2, c: Color) -> void: q.p(roundi(rr.position.x), roundi(rr.position.y), maxi(1, roundi(rr.size.x)), maxi(1, roundi(rr.size.y)), c)
+		match str(it[0]):
+			"p":
+				Sprites.draw_person(sk, 32.0, 58.0, 2.4 if int(it[2]) < 9 else 1.6, int(it[1]), int(it[2]), GuData.CLANCOL[int(it[1]) % 16], 1, true, false, 0.0, false, false, false, false, false, 0.5, 0.0, false)
+			"a":
+				var ss: float = float(GuData.SPEC[it[1]].get("ss", 1.0))
+				Sprites.draw_animal(sk, 30.0, 56.0, 2.6 / maxf(1.0, ss * 0.8), it[1], 1, false, 1.0, false, false, 3, 0.5, 1)
+			"pl":
+				var pim: Image = Sprites.place_image(it[1])
+				var f: int = maxi(1, int(60.0 / maxf(pim.get_width(), pim.get_height())))
+				pim.resize(pim.get_width() * f, pim.get_height() * f, Image.INTERPOLATE_NEAREST)
+				q.draw_image(pim, (cell - pim.get_width()) / 2, cell - pim.get_height() - 2)
+		sp.blend_rect(q.img, Rect2i(0, 0, cell, cell), Vector2i((k3 % cols2) * cell, (k3 / cols2) * cell))
+	sp.save_png(dir + "/sprites.png")
+	print("SHEETS DONE")
 	get_tree().quit()
 
 
@@ -1614,6 +1991,34 @@ func _selftest() -> void:
 			sim.step(Sim.DT)
 		print("ok ", id, " units=", sim.units.size())
 	_set_weather("")
+	# Gu-Welt: Inspektoren aller Wesenarten und Orte, Mordzüge, Wiedergeburt
+	var seen: Dictionary = {}
+	for u: Unit in sim.units:
+		var key: String = u.sp if u.k == "a" else "p%d_%d" % [u.race, u.rank]
+		if seen.has(key):
+			continue
+		seen[key] = true
+		_unit_body(u)
+		_portrait(u)
+	for p: Place in sim.places:
+		_place_body(p)
+		sel_place = p
+		_open_place()
+		_close_insp()
+	var imm: Unit = sim.spawn_immortal(c.x, c.y - 30.0, 7)
+	for pth: int in [1, 2, 6, 7, 14, 36, 47]:
+		imm.path = pth
+		sim.killer_move(imm, c.x + 4.0, c.y - 30.0)
+	var fy: Unit = sim.fig_alive("fang_yuan")
+	if fy == null and sim.spawn_figure(Lore.FIG[0], c.x, c.y + 12.0) == "":
+		fy = sim.fig_alive("fang_yuan")
+	if fy != null and (fy.igf & Sim.F_REVIVE) == 0:
+		sim.give_igu(fy, "spring_autumn_cicada")
+	if fy != null and (fy.igf & Sim.F_REVIVE) != 0:
+		sim.hurt(fy, 1e9, null)
+		sim.step(Sim.DT)
+		print("revive ", fy.hp > 0.0, " age ", int(sim.uage(fy)))
+	print("places ", sim.places.size(), " wild_igu ", sim.wild_igu)
 	_inspect_at(c.x, c.y)
 	_refresh_insp()
 	_open_rank()
@@ -1630,8 +2035,16 @@ func _selftest() -> void:
 		sim.step(Sim.DT)
 	print("400 steps ms ", Time.get_ticks_msec() - t1, " units ", sim.units.size())
 	fresh = false
+	var np: int = sim.places.size()
+	var nig: int = 0
+	for u2: Unit in sim.units:
+		nig += u2.igu.size()
 	print("save ", _save_game())
 	print("load ", _load_game())
+	var nig2: int = 0
+	for u3: Unit in sim.units:
+		nig2 += u3.igu.size()
+	print("places after load ", sim.places.size(), " / ", np, " · immortal gu owned ", nig2, " / ", nig, " · map ", sim.world.map_mode, " landmarks ", sim.world.landmarks.size())
 	fresh = true
 	for k: int in range(100):
 		sim.step(Sim.DT)

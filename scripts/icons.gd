@@ -51,20 +51,11 @@ static func _cloud(q: Px, a: String, b: String) -> void:
 	q.p(9, 4, 5, 1, a)
 
 
-static func _person_icon(race: int, rank: int, col: Color, w: int, h: int, X: float, Yp: float, sc: float) -> Px:
-	var q: Px = Px.new(w, h)
-	Sprites.draw_person(func(r: Rect2, c: Color) -> void: q.p(roundi(r.position.x), roundi(r.position.y), maxi(1, roundi(r.size.x)), maxi(1, roundi(r.size.y)), c), X, Yp, sc, race, rank, col, 1, true, false, 0.0, false, false, false, false, false)
-	return q.outline()
-
-
-static func _animal_icon(sp: String, w: int, h: int, X: float, Yp: float, sc: float, tide: bool = false) -> Px:
-	var q: Px = Px.new(w, h)
-	Sprites.draw_animal(func(r: Rect2, c: Color) -> void: q.p(roundi(r.position.x), roundi(r.position.y), maxi(1, roundi(r.size.x)), maxi(1, roundi(r.size.y)), c), X, Yp, sc, sp, 1, false, 1.0, false, tide, 3)
-	return q.outline()
-
-
 static func _make(id: String) -> Px:
 	var q: Px = Px.new(24, 24)
+	var gen: Px = _make_generated(id)
+	if gen != null:
+		return gen
 	match id:
 		"t_deep":
 			return _tile(GuData.DEEP)
@@ -288,22 +279,6 @@ static func _make(id: String) -> Px:
 			q.p(3, 7, 5, 5, "#d03a2a")
 			q.p(4, 8, 1, 1, Y)
 			q.p(2, 11, 3, 1, "#f4f0e0")
-		"s_0":
-			return _person_icon(0, 0, Color("#3d6fd0"), 12, 12, 6.0, 11.5, 1.2)
-		"s_1":
-			return _person_icon(1, 0, Color("#b8562e"), 12, 12, 6.0, 11.5, 1.2)
-		"s_2":
-			return _person_icon(2, 0, Color("#7a8a2a"), 12, 12, 6.0, 11.5, 1.2)
-		"s_3":
-			return _person_icon(3, 0, Color("#2a9ab0"), 12, 12, 6.0, 11.5, 1.2)
-		"s_imm":
-			return _person_icon(0, 6, Color("#a768e2"), 18, 18, 9.0, 17.0, 1.0)
-		"s_deer", "s_boar", "s_wolf", "s_monkey", "s_crane":
-			return _animal_icon(id.substr(2), 12, 12, 6.0, 10.5, 1.15)
-		"s_kingwolf":
-			return _animal_icon("kingwolf", 18, 18, 9.0, 16.0, 1.0)
-		"s_ancient":
-			return _animal_icon("ancient", 22, 22, 11.0, 19.0, 0.8)
 		"tide":
 			var a4: Px = Px.new(20, 20)
 			var sink: Callable = func(r: Rect2, c: Color) -> void: a4.p(roundi(r.position.x), roundi(r.position.y), maxi(1, roundi(r.size.x)), maxi(1, roundi(r.size.y)), c)
@@ -314,9 +289,12 @@ static func _make(id: String) -> Px:
 			return a4.outline()
 		"s_wildgu":
 			var g: Px = Px.new(20, 20)
+			var gcs: Array[Color] = [GuData.PATH_COL[1], GuData.PATH_COL[2], GuData.PATH_COL[6], GuData.PATH_COL[8], GuData.PATH_COL[11]]
+			var gi: int = 0
 			for pt: Vector2i in [Vector2i(4, 6), Vector2i(11, 4), Vector2i(15, 11), Vector2i(7, 13), Vector2i(12, 16)]:
-				g.p(pt.x - 1, pt.y - 1, 4, 4, Color(0.6, 0.82, 1.0, 0.45))
-				g.p(pt.x, pt.y, 2, 2, "#f0faff")
+				g.p(pt.x - 1, pt.y - 1, 4, 4, Color(gcs[gi], 0.5))
+				g.p(pt.x, pt.y, 2, 2, gcs[gi].lightened(0.5))
+				gi += 1
 			return g
 		"w_rain":
 			_cloud(q, "#9aa2ac", "#6a727c")
@@ -564,6 +542,19 @@ static func _make(id: String) -> Px:
 			t5.p(14, 6, 4, 4, MINT)
 			t5.p(22, 6, 4, 4, MINT)
 			return t5
+		"tab6":
+			var t6: Px = Px.new(32, 16)
+			t6.p(14, 4, 4, 4, MINT)
+			t6.p(12, 8, 8, 6, MINT)
+			t6.p(13, 14, 2, 2, MINT)
+			t6.p(17, 14, 2, 2, MINT)
+			t6.p(13, 1, 1, 2, MINT)
+			t6.p(15, 0, 2, 3, MINT)
+			t6.p(18, 1, 1, 2, MINT)
+			for k: int in range(3):
+				t6.p(6 - k * 2, 5 + k * 3, 3, 1, MINT)
+				t6.p(23 + k * 2, 5 + k * 3, 3, 1, MINT)
+			return t6
 		_:
 			pass
 	return q.outline()
@@ -573,3 +564,329 @@ static func _scaled(src: Image, f: int) -> Image:
 	var im: Image = src.duplicate()
 	im.resize(src.get_width() * f, src.get_height() * f, Image.INTERPOLATE_NEAREST)
 	return im
+
+
+# ---------------- Erzeugte Icons (Völker, Gu-Meister, Bestien, Gu, Orte, Organisationen, Ereignisse) ----------------
+
+static func _sink(q: Px) -> Callable:
+	return func(r: Rect2, c: Color) -> void: q.p(roundi(r.position.x), roundi(r.position.y), maxi(1, roundi(r.size.x)), maxi(1, roundi(r.size.y)), c)
+
+
+## Zeichnet eine Figur so groß wie möglich in 24 × 24 (deckende Pixel bestimmen die Größe).
+## draw: Callable(sink, X, Y, sc). fill: Zielgröße in Pixeln.
+static func _fit(draw: Callable, fill: float = 21.0, max_sc: float = 2.4) -> Px:
+	Sprites.no_aura = true
+	var big: Px = Px.new(128, 128)
+	draw.call(_sink(big), 64.0, 92.0, 4.0)
+	var x0: int = 999
+	var y0: int = 999
+	var x1: int = -1
+	var y1: int = -1
+	for y: int in range(128):
+		for x: int in range(128):
+			if big.img.get_pixel(x, y).a > 0.6:
+				x0 = mini(x0, x)
+				y0 = mini(y0, y)
+				x1 = maxi(x1, x)
+				y1 = maxi(y1, y)
+	if x1 < 0:
+		Sprites.no_aura = false
+		return Px.new(24, 24)
+	var bw: float = x1 - x0 + 1
+	var bh: float = y1 - y0 + 1
+	var k: float = minf(minf(fill / bw, fill / bh) * 4.0, max_sc)
+	var q: Px = Px.new(24, 24)
+	var ox: float = 12.0 - ((x0 + x1 + 1) / 2.0 - 64.0) * k / 4.0
+	var oy: float = 12.0 - ((y0 + y1 + 1) / 2.0 - 92.0) * k / 4.0
+	draw.call(_sink(q), ox, oy, k)
+	Sprites.no_aura = false
+	return q
+
+
+static func _person_fit(race: int, rank: int, col: Color, ow: bool = false) -> Px:
+	return _fit(func(sk: Callable, X: float, Yp: float, sc: float) -> void:
+		Sprites.draw_person(sk, X, Yp, sc, race, rank, col, 1, true, false, 0.0, false, false, false, false, false, 0.0, 0.0, ow), 21.0, 2.6)
+
+
+static func _animal_fit(sp: String, pth: int = -1) -> Px:
+	return _fit(func(sk: Callable, X: float, Yp: float, sc: float) -> void:
+		Sprites.draw_animal(sk, X, Yp, sc / float(GuData.SPEC[sp].get("ss", 1.0)), sp, 1, false, 1.0, false, false, 3, 0.0, pth), 22.0, 2.6)
+
+
+## Heiligenschein-Ring in einer Farbe hinter der Figur (nur auf freien Pixeln).
+static func _ring_behind(q: Px, col: Color) -> void:
+	for k: int in range(48):
+		var a: float = k / 48.0 * TAU
+		for rr: float in [10.5, 11.0]:
+			var x: int = 12 + roundi(cos(a) * rr)
+			var y: int = 12 + roundi(sin(a) * rr)
+			if x >= 0 and y >= 0 and x < 24 and y < 24 and q.img.get_pixel(x, y).a < 0.1:
+				q.img.set_pixel(x, y, Color(col, 0.9))
+
+
+## Kleine 3×5-Ziffer mit dunklem Hintergrund (Rang-Abzeichen).
+const DIGITS: Array = [["111", "101", "101", "101", "111"], ["010", "110", "010", "010", "111"], ["111", "001", "111", "100", "111"], ["111", "001", "111", "001", "111"],
+	["101", "101", "111", "001", "001"], ["111", "100", "111", "001", "111"], ["111", "100", "111", "101", "111"], ["111", "001", "010", "010", "010"],
+	["111", "101", "111", "101", "111"], ["111", "101", "111", "001", "111"]]
+
+
+static func _badge(q: Px, n: int, col: Color) -> void:
+	var x: int = 17
+	var y: int = 16
+	q.p(x - 1, y - 1, 5, 7, Color("#141a16"))
+	var rows: Array = DIGITS[n % 10]
+	for r: int in range(5):
+		var row: String = rows[r]
+		for c: int in range(3):
+			if row[c] == "1":
+				q.p(x + c, y + r, 1, 1, col)
+
+
+## Wilder sterblicher Gu: Käfer in der Pfadfarbe mit Schein.
+static func _gu_icon(c: Color) -> Px:
+	var q: Px = Px.new(24, 24)
+	q.d(12, 12, 10, Color(c, 0.2))
+	q.d(12, 12, 7, Color(c, 0.25))
+	q.p(4, 7, 6, 5, Color(1, 1, 1, 0.8))
+	q.p(14, 7, 6, 5, Color(1, 1, 1, 0.8))
+	q.p(5, 8, 4, 1, Color(c, 0.6))
+	q.p(15, 8, 4, 1, Color(c, 0.6))
+	q.d(12, 14, 4, c)
+	q.p(9, 14, 7, 1, c.darkened(0.35))
+	q.p(9, 16, 7, 1, c.darkened(0.35))
+	q.p(10, 12, 2, 1, c.lightened(0.5))
+	q.d(12, 9, 2, c.darkened(0.3))
+	q.p(10, 4, 1, 3, c.darkened(0.5))
+	q.p(13, 4, 1, 3, c.darkened(0.5))
+	q.p(11, 9, 1, 1, Color("#ffffff"))
+	q.p(13, 9, 1, 1, Color("#ffffff"))
+	return q.outline()
+
+
+## Unsterbliches Gu: goldener Kranz, Strahlen, Insekt in Pfadfarbe und ein Zeichen seiner Wirkung.
+static func _igu_icon(id: String) -> Px:
+	var q: Px = Px.new(24, 24)
+	var e: Dictionary = Lore.igu(id)
+	var c: Color = GuData.PATH_COL[int(e.get("p", 0))] if not e.is_empty() else Color("#ffd24a")
+	var fx: String = str(e.get("fx", "?"))
+	for k: int in range(8):
+		var a: float = k * TAU / 8.0
+		q.p(12 + roundi(cos(a) * 10.0), 12 + roundi(sin(a) * 10.0), 2, 2, Color("#ffe27a"))
+	for a2: int in range(32):
+		var an: float = a2 / 32.0 * TAU
+		q.p(12 + roundi(cos(an) * 8.0), 12 + roundi(sin(an) * 8.0), 1, 1, Color("#f0b030"))
+	q.d(12, 12, 7, Color(c, 0.35))
+	if fx == "revive":
+		# Zikade: breite, durchscheinende Flügel
+		q.p(3, 7, 8, 9, Color(0.9, 1.0, 0.95, 0.85))
+		q.p(13, 7, 8, 9, Color(0.9, 1.0, 0.95, 0.85))
+		for k2: int in range(3):
+			q.p(4, 9 + k2 * 2, 6, 1, Color(c, 0.8))
+			q.p(14, 9 + k2 * 2, 6, 1, Color(c, 0.8))
+		q.p(10, 6, 4, 13, Color("#8a6a3a"))
+		q.p(10, 6, 4, 3, c)
+		q.p(10, 10, 4, 1, Color("#5a4428"))
+		q.p(10, 13, 4, 1, Color("#5a4428"))
+		return q.outline()
+	q.p(5, 6, 6, 5, Color(1, 1, 0.92, 0.9))
+	q.p(13, 6, 6, 5, Color(1, 1, 0.92, 0.9))
+	q.d(12, 13, 4, c)
+	q.p(9, 13, 7, 1, c.darkened(0.35))
+	q.p(9, 15, 7, 1, c.darkened(0.35))
+	q.d(12, 8, 2, c.darkened(0.3))
+	q.p(11, 8, 1, 1, Color("#ffe24a"))
+	q.p(13, 8, 1, 1, Color("#ffe24a"))
+	# Zeichen der Wirkung unten links
+	var sx: int = 1
+	var sy: int = 16
+	match fx:
+		"wis", "cult", "refine":
+			q.d(sx + 3, sy + 3, 3, Color("#7ef0ff"))
+			q.p(sx + 2, sy + 2, 2, 2, Color("#ffffff"))
+		"str", "str2":
+			q.p(sx, sy + 1, 6, 5, Color("#d04030"))
+			q.p(sx + 1, sy, 4, 2, Color("#e86050"))
+		"move":
+			for k3: int in range(3):
+				q.p(sx, sy + k3 * 2, 6 - k3, 1, Color("#e8f4ff"))
+		"heal":
+			q.p(sx + 2, sy, 2, 6, Color("#5ad86a"))
+			q.p(sx, sy + 2, 6, 2, Color("#5ad86a"))
+		"life":
+			q.p(sx, sy, 6, 1, Color("#e8c070"))
+			q.p(sx + 1, sy + 1, 4, 2, Color("#fff0c0"))
+			q.p(sx + 1, sy + 3, 4, 2, Color("#e8c070"))
+			q.p(sx, sy + 5, 6, 1, Color("#e8c070"))
+		"luck", "fortune":
+			q.d(sx + 3, sy + 3, 3, Color("#ffd23a"))
+			q.p(sx + 2, sy + 2, 2, 2, Color("#8a5a10"))
+		"fire":
+			q.p(sx + 1, sy + 2, 4, 4, Color("#ff6a2a"))
+			q.p(sx + 2, sy, 2, 3, Color("#ffd23a"))
+		"bolt":
+			q.p(sx + 3, sy, 2, 2, Color("#fff27a"))
+			q.p(sx + 2, sy + 2, 2, 2, Color("#fff27a"))
+			q.p(sx + 1, sy + 4, 2, 2, Color("#fff27a"))
+		"rez":
+			q.p(sx + 2, sy, 2, 6, Color("#e8e0ff"))
+			q.p(sx, sy + 1, 6, 2, Color("#e8e0ff"))
+		"thief", "steal":
+			q.p(sx, sy + 1, 6, 3, Color("#2a2a34"))
+			q.p(sx + 1, sy + 2, 1, 1, Color("#ffffff"))
+			q.p(sx + 4, sy + 2, 1, 1, Color("#ffffff"))
+		"fetus":
+			q.d(sx + 3, sy + 3, 3, Color("#ffd8c8"))
+			q.p(sx + 3, sy + 2, 2, 2, Color("#e89880"))
+		"range":
+			for k4: int in range(6):
+				q.p(sx + k4, sy + roundi(absf(k4 - 2.5) * 0.8), 1, 2, Color("#e8f4ff"))
+		"dream":
+			q.p(sx, sy, 3, 4, Color("#e8b0ff"))
+			q.p(sx + 3, sy, 3, 4, Color("#c890ff"))
+		_:
+			q.p(sx + 1, sy + 1, 4, 4, Color("#ffd23a"))
+	return q.outline()
+
+
+## Organisation: Gebäude ihrer Art in der Organisationsfarbe (das Siegel legt die Leiste darüber).
+static func _org_icon(o: Dictionary) -> Px:
+	var q: Px = Px.new(24, 24)
+	var col: Color = Color(str(o["col"]))
+	var race: int = clampi(int(o.get("race", 0)), 0, 3)
+	var tx: Dictionary = Sprites.clan_textures(col, race)
+	var k: String = o["k"]
+	match k:
+		"Sekte", "Hof":
+			var im: Image = (tx["hall2"] as ImageTexture).get_image()
+			q.draw_image(im, 12 - im.get_width() / 2, 21 - im.get_height())
+			if k == "Hof":
+				q.p(6, 2, 12, 2, Color("#ffd23a"))
+				q.p(6, 0, 2, 2, Color("#ffd23a"))
+				q.p(11, 0, 2, 2, Color("#ffd23a"))
+				q.p(16, 0, 2, 2, Color("#ffd23a"))
+		"Clan":
+			var im2: Image = (tx["hall1"] as ImageTexture).get_image()
+			q.draw_image(im2, 12 - im2.get_width() / 2, 20 - im2.get_height())
+			q.p(2, 2, 1, 12, Color("#6a4a2a"))
+			q.p(3, 2, 6, 4, col)
+		"Stamm":
+			var im3: Image = (tx["tent"] as ImageTexture).get_image()
+			q.draw_image(_scaled(im3, 2), 13 - im3.get_width(), 22 - im3.get_height() * 2)
+			q.p(1, 1, 1, 13, Color("#6a4a2a"))
+			q.p(2, 1, 6, 5, col)
+			q.p(2, 1, 6, 1, col.lightened(0.3))
+		_:
+			for s: int in [0, 1]:
+				var bx: int = 4 + s * 9
+				q.p(bx + 2, 3, 1, 18, Color("#6a4a2a"))
+				q.p(bx + 3, 3, 6, 6, col if s == 0 else col.lightened(0.3))
+				q.p(bx + 3, 9, 3, 2, col.darkened(0.3) if s == 0 else col)
+			q.p(2, 19, 20, 3, Color("#8a7a5a"))
+	return q.outline()
+
+
+## Ort: das Ortsbild, verkleinert auf die Icongröße.
+static func _place_icon(type: String) -> Px:
+	var im: Image = Sprites.place_image(type)
+	var f: float = minf(22.0 / im.get_width(), 22.0 / im.get_height())
+	if f < 1.0 or f > 1.2:
+		im.resize(maxi(1, roundi(im.get_width() * f)), maxi(1, roundi(im.get_height() * f)), Image.INTERPOLATE_NEAREST)
+	var q: Px = Px.new(24, 24)
+	q.draw_image(im, 12 - im.get_width() / 2, 23 - im.get_height())
+	return q
+
+
+static func _make_generated(id: String) -> Px:
+	if id.begins_with("s_") and id.substr(2).is_valid_int():
+		var r: int = int(id.substr(2))
+		return _person_fit(r, 0, [Color("#3d6fd0"), Color("#b8562e"), Color("#7a8a2a"), Color("#2a9ab0"), Color("#d8a040"), Color("#5a8ae8"), Color("#2a8a9a"), Color("#8a5a2a"), Color("#c84a6a"), Color("#6a7a3a"), Color("#4e8a3a")][r]).outline()
+	if id.begins_with("s_gm"):
+		var rk: int = int(id.substr(4))
+		var q: Px = _person_fit(0, rk, [Color("#3d6fd0"), Color("#2f9a7a"), Color("#c23a2e"), Color("#d18a2a"), Color("#8a46b8")][rk - 1])
+		_badge(q, rk, GuData.ESS_COL[rk])
+		return q.outline()
+	if id == "s_imm" or id.begins_with("s_gi"):
+		var rk2: int = 6 if id == "s_imm" else int(id.substr(4))
+		var q2: Px = _person_fit(0, rk2, [Color("#a768e2"), Color("#c0284a"), Color("#e8e0d0")][rk2 - 6])
+		_badge(q2, rk2, GuData.ESS_COL[rk2])
+		return q2.outline()
+	if id.begins_with("s_v_"):
+		for vd: Dictionary in Lore.VEN:
+			if "s_v_" + str(vd["id"]) == id:
+				var q3: Px = _person_fit(0, 9, Color(str(vd["col"])))
+				_ring_behind(q3, Color(str(vd["col"])).lightened(0.2))
+				q3.p(0, 0, 4, 4, GuData.PATH_COL[int(vd["p"])])
+				q3.p(0, 0, 4, 1, Color(GuData.PATH_COL[int(vd["p"])]).lightened(0.4))
+				return q3.outline()
+	if id.begins_with("s_f_"):
+		for fd: Dictionary in Lore.FIG:
+			if "s_f_" + str(fd["id"]) == id:
+				var oc: Dictionary = Lore.org(str(fd["org"]))
+				var col: Color = Color(str(oc["col"])) if not oc.is_empty() else (Color("#3a2a3a") if int(fd["al"]) == 1 else Color("#8e8676"))
+				var q4: Px = _person_fit(int(fd.get("race", 0)), int(fd["r"]), col)
+				q4.p(0, 0, 4, 4, GuData.PATH_COL[int(fd["p"])])
+				if not (fd["igu"] as Array).is_empty() and str(fd["igu"][0]) == "spring_autumn_cicada":
+					q4.p(17, 1, 6, 4, Color(0.9, 1.0, 0.95, 0.9))
+					q4.p(19, 1, 2, 6, Color("#8a6a3a"))
+				return q4.outline()
+	if id.begins_with("s_gu") and id.substr(4).is_valid_int():
+		return _gu_icon(GuData.PATH_COL[int(id.substr(4))])
+	if id.begins_with("s_ig_"):
+		if id == "s_ig_rand":
+			var q5: Px = _igu_icon("")
+			q5.p(10, 9, 4, 1, Color("#ffffff"))
+			q5.p(13, 10, 1, 2, Color("#ffffff"))
+			q5.p(11, 12, 2, 1, Color("#ffffff"))
+			q5.p(11, 13, 1, 1, Color("#ffffff"))
+			q5.p(11, 15, 1, 1, Color("#ffffff"))
+			return q5
+		return _igu_icon(id.substr(5))
+	if id.begins_with("pl_"):
+		return _place_icon(id.substr(3))
+	if id.begins_with("o_"):
+		return _org_icon(Lore.org(id.substr(2)))
+	if id.begins_with("s_") and GuData.SPEC.has(id.substr(2)):
+		return _animal_fit(id.substr(2)).outline()
+	var q6: Px = Px.new(24, 24)
+	match id:
+		"ev_calam":
+			q6.p(1, 10, 22, 12, Color("#8a6a42"))
+			q6.p(1, 10, 22, 2, Color("#c9a46a"))
+			for pt: Vector2i in [Vector2i(11, 11), Vector2i(10, 13), Vector2i(12, 15), Vector2i(11, 17), Vector2i(13, 19), Vector2i(5, 14), Vector2i(4, 16), Vector2i(18, 13), Vector2i(19, 15)]:
+				q6.p(pt.x, pt.y, 2, 2, Color("#1a100a"))
+			q6.p(9, 1, 6, 6, Color("#92de5c"))
+			q6.p(10, 2, 4, 4, Color("#e8ffd0"))
+			for k: int in range(4):
+				q6.p(3 + k * 5, 6 + (k % 2), 2, 2, Color("#c9a46a"))
+		"ev_dream":
+			return _place_icon("dream").outline()
+		"ev_inherit":
+			var qi: Px = _place_icon("inherit")
+			for k2: int in range(6):
+				var a: float = k2 * TAU / 6.0
+				qi.p(12 + roundi(cos(a) * 10.0), 12 + roundi(sin(a) * 10.0), 2, 2, Color("#ffe27a"))
+			return qi.outline()
+		"ev_ow":
+			var qo: Px = _person_fit(0, 3, Color("#6a2a8a"), true)
+			qo.p(1, 1, 3, 3, Color("#d04aff"))
+			qo.p(20, 1, 3, 3, Color("#d04aff"))
+			return qo.outline()
+		"ev_war":
+			q6.p(3, 2, 2, 20, Color("#6a4a2a"))
+			q6.p(5, 3, 8, 7, Color("#f0f0e8"))
+			q6.p(5, 3, 8, 2, Color("#ffffff"))
+			q6.p(19, 2, 2, 20, Color("#3a2a20"))
+			q6.p(11, 11, 8, 7, Color("#c02a2a"))
+			q6.p(11, 11, 8, 2, Color("#e04a3a"))
+			q6.p(8, 6, 2, 2, Color("#4a8ad8"))
+			q6.p(14, 14, 2, 2, Color("#1a0a0a"))
+		"ev_frag":
+			for k3: int in range(6):
+				q6.p(1 + k3, 1 + k3, 3, 3, Color("#cfe0ff") if k3 < 3 else Color("#8aa8e8"))
+			q6.p(9, 8, 7, 9, Color("#cfe0ff"))
+			q6.p(11, 6, 3, 3, Color("#ffffff"))
+			q6.p(14, 10, 2, 6, Color("#8aa8e8"))
+			q6.p(5, 19, 16, 3, Color("#5a4a40"))
+		_:
+			return null
+	return q6.outline()

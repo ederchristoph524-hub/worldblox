@@ -62,7 +62,7 @@ var insp_head: HBoxContainer
 var modal: ColorRect
 var modal_panel: PanelContainer
 var modal_text: RichTextLabel
-var modal_btns: HBoxContainer
+var modal_btns: HFlowContainer
 var load_screen: ColorRect
 var load_label: Label
 var load_bar: ProgressBar
@@ -284,7 +284,7 @@ func _build_bar() -> void:
 	tabs_box.add_theme_constant_override("separation", 4)
 	tabs_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_child(tabs_box)
-	for i: int in range(6):
+	for i: int in range(Powers.TABS.size()):
 		var tb: TabButton = TabButton.new()
 		tb.icon_tex = Icons.get_icon("tab%d" % i)
 		tb.tooltip_text = Powers.TABS[i]
@@ -426,6 +426,17 @@ func set_tools(tab: int) -> void:
 			column.mouse_filter = Control.MOUSE_FILTER_PASS
 			tools_box.add_child(column)
 		var b: Button = _tool_button(Icons.get_icon(t["id"]), t["n"], t.get("riv", false))
+		if t.has("gl"):
+			var gl: Label = Label.new()
+			gl.text = t["gl"]
+			gl.add_theme_font_override("font", font_cjk)
+			gl.add_theme_font_size_override("font_size", 12)
+			gl.add_theme_color_override("font_color", Color.WHITE)
+			gl.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.05, 1.0))
+			gl.add_theme_constant_override("outline_size", 4)
+			gl.position = Vector2(26, 23)
+			gl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			b.add_child(gl)
 		var tt: Dictionary = t
 		b.pressed.connect(func() -> void: tool_pressed.emit(tt))
 		column.add_child(b)
@@ -710,7 +721,8 @@ var modal_title: Label
 const STAT_ICON: Dictionary = {
 	"Bewohner": "person", "Volk": "person", "Vorräte": "apple", "Gebäude": "house", "Clan": "flag", "Stärkster": "crown",
 	"Fehden": "sword", "Bündnisse": "hand", "Alter": "hourglass", "Pfad": "orb", "Begabung": "star", "Essenz": "gem",
-	"Fortschritt": "arrow", "Öffnung": "eye", "Arbeit": "hammer", "Leben": "heart", "Siege": "sword", "Stärke": "sword", "Beute": "skull"}
+	"Fortschritt": "arrow", "Öffnung": "eye", "Arbeit": "hammer", "Leben": "heart", "Siege": "sword", "Stärke": "sword", "Beute": "skull",
+	"Gesinnung": "yinyang", "Besitzer": "crown", "Wirkung": "gem", "Gu-Meister": "person", "Stufe": "star", "Verblasst": "hourglass", "Fötus-Gu": "orb"}
 
 
 static func stat_icon(id: String) -> ImageTexture:
@@ -751,6 +763,8 @@ static func stat_icon(id: String) -> ImageTexture:
 			g = [".GGG...", "GGGGG..", ".GGG...", "..b....", "...b...", "....b..", ".....b."]
 		"hand":
 			g = [".......", "SS...TT", "SSS.TTT", ".SSSTT.", "..SST..", "...S...", "......."]
+		"yinyang":
+			g = ["..WWK..", ".WWWKK.", "WWKWKKK", "WWWKKKK", "WWWWKWK", ".WWWKK.", "..WKK.."]
 	var pal: Dictionary = {"H": "#5a3a22", "S": "#f0c090", "B": "#3d6fd0", "L": "#3a2c26", "R": "#e0402e", "W": "#eef2f0", "g": "#3a7a2a",
 		"G": "#9aa4ac", "D": "#5a3a22", "P": "#8a6a3a", "F": "#3d6fd0", "Y": "#f0c040", "C": "#62d8a4", "K": "#22262a", "s": "#e8d090",
 		"b": "#7a5030", "T": "#c8a070", "V": "#b98cff"}
@@ -925,12 +939,13 @@ func _build_windows() -> void:
 	modal_text = _rich()
 	modal_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mv.add_child(modal_text)
-	modal_btns = HBoxContainer.new()
-	modal_btns.add_theme_constant_override("separation", 6)
+	modal_btns = HFlowContainer.new()
+	modal_btns.add_theme_constant_override("h_separation", 6)
+	modal_btns.add_theme_constant_override("v_separation", 6)
 	mv.add_child(modal_btns)
 
 
-func _fill_buttons(box: HBoxContainer, buttons: Array) -> void:
+func _fill_buttons(box: Container, buttons: Array) -> void:
 	for c: Node in box.get_children():
 		c.queue_free()
 	for e: Array in buttons:

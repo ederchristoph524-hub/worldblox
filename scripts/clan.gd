@@ -16,11 +16,15 @@ var wt: int = -1
 var kills: int = 0
 var war_start: float = 0.0
 var calm: float = -1.0
+var org: String = ""      # Id der Organisation aus Lore.ORGS (leer = gewöhnlicher Clan)
+var align: int = 0        # 1 = dämonisch
+var sur: String = ""      # Familienname der Mitglieder (leer = gemischt)
 
 
 func to_dict() -> Dictionary:
 	return {"id": id, "name": name, "glyph": glyph, "kind": kind, "col": col.to_html(false), "war": war.keys(), "ally": ally.keys(),
-		"born": born, "alive": alive, "region": region, "kills": kills, "war_start": war_start, "calm": calm}
+		"born": born, "alive": alive, "region": region, "kills": kills, "war_start": war_start, "calm": calm,
+		"org": org, "align": align, "sur": sur}
 
 
 static func from_dict(d: Dictionary) -> Clan:
@@ -40,4 +44,7 @@ static func from_dict(d: Dictionary) -> Clan:
 	c.kills = int(d["kills"])
 	c.war_start = d["war_start"]
 	c.calm = d["calm"]
+	c.org = str(d.get("org", ""))
+	c.align = int(d.get("align", 0))
+	c.sur = str(d.get("sur", ""))
 	return c
