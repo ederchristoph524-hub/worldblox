@@ -51,3 +51,12 @@ Mit `-- --fresh --selftest` wird kein Spielstand geladen oder überschrieben. L�
 - Neue Welt: `Sim.new_world(live, mode)` mit `mode` „gu“ (Standard, kanonische Mächte über `Sim.seed_canon`) oder „random“.
 - Spielstand liegt in `user://gu_weltenbox.json`. Bei Formatänderungen `v` in `Sim.serialize` erhöhen. Aktuell **v2** (neu: `map_mode`, `places`, `next_pid`, Unit-Felder `gname/igu/fig/ow/hx/hy/notrib`, Clan-Felder `org/align/sur`); v1 wird weiter geladen (Kartenmodus dann „random“).
 - Entwickler-Bögen: `-- --fresh --sheets=<ordner>` schreibt `icons.png` (alle Werkzeug-Icons, nach Reitern) und `sprites.png` (Völker, alle Tierarten, Orte) – läuft auch headless.
+
+## Web-Build
+
+- **Preset „Web“** in `export_presets.cfg` (gehört ins Repository, ohne Passwörter): Single-Threaded (`variant/thread_support=false`, keine SharedArrayBuffer, keine Cross-Origin-Isolation-Header nötig, läuft deshalb auf GitHub Pages), keine GDExtensions, Standard-HTML-Shell, `canvas_resize_policy=2` (Canvas füllt das Browserfenster; Hochformat passt über `stretch/aspect="expand"`). Ausgabe nach `build/web/index.html`; `build/` steht in `.gitignore` und ist vom Export ausgeschlossen.
+- **Workflow** `.github/workflows/web.yml`: bei jedem Push auf `main` (und manuell) Godot `GODOT_VERSION` (4.7.2) plus die Web-Templates `web_nothreads_*` laden (gecacht), importieren, exportieren, Downloadgröße (unkomprimiert, gzip, `index.pck`) in die Build-Zusammenfassung schreiben (Warnung über 50 MB), dann auf GitHub Pages veröffentlichen. Bei jedem Godot-Update `GODOT_VERSION` dort mitändern. Gleicher Aufbau wie bei Wildmark.
+- **Größe:** Engine ca. 10 MB komprimiert (`index.wasm` 39,5 MB roh), Spieldaten (`index.pck`) nur einige hundert kB.
+- **Export-Filter** ist `all_resources`: Godot packt nur Ressourcen (Szenen, Skripte, importierte Dateien inkl. `.json`). Andere Dateien, die zur Laufzeit per `FileAccess` gelesen werden (z. B. `.txt`, `.csv`), müssen in `include_filter` stehen, sonst fehlen sie nur im Web-Build.
+- **Web-Fallen:** Spielstand `user://` liegt im Browser in IndexedDB (pro Domain). Im Release-Build stürzt ein Aufruf auf ein freigegebenes Objekt ab: gespeicherte Verweise vor der Nutzung mit `is_instance_valid()` prüfen. Nicht auf echte Parallelität durch `Thread` oder `WorkerThreadPool` bauen (Single-Threaded-Export).
+- **Lokal prüfen:** `godot --headless --path . --export-release "Web" build/web/index.html` (Templates 4.7.2 unter `~/.local/share/godot/export_templates/4.7.2.stable/` bzw. `%APPDATA%\Godot\export_templates\4.7.2.stable\`).
