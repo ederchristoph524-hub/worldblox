@@ -1046,41 +1046,88 @@ class EntityLayer:
 			draw_rect(Rect2(x, y - (4.0 if big else 0.0) - fl, 1.0, 1.0), Color("#ffe27a"))
 			if randf() < 0.015:
 				sim.parts.append({"x": x + 0.5, "y": y - (6.0 if big else 1.0), "vx": randf() - 0.5, "vy": -3.0, "l": 1.4, "ml": 1.4, "c": Color(0.27, 0.25, 0.24, 0.55), "s": 1.0, "g": 0.0})
-		# Gebäude
+		# Dorfwege (unter den Gebäuden)
 		var insp_open: bool = m.hud.insp.visible
+		var road: Color = Color("#a8875a")
+		var road_e: Color = Color(0.32, 0.24, 0.12, 0.35)
+		for v: Village in sim.villages:
+			if not v.alive or v.b.size() < 2:
+				continue
+			if v.cx < vx0 - 30 or v.cx > vx1 + 30 or v.cy < vy0 - 30 or v.cy > vy1 + 30:
+				continue
+			var hall: Building = null
+			for id: int in v.b:
+				var hb: Building = sim.buildings[id]
+				if hb != null and hb.type == "hall":
+					hall = hb
+					break
+			if hall == null:
+				continue
+			var a: Vector2 = Sprites.door(hall)
+			var ra: float = 0.8 if v.lvl > 0 else 0.5
+			for pass_i: int in range(2):
+				for id: int in v.b:
+					var ob: Building = sim.buildings[id]
+					if ob == null or ob == hall:
+						continue
+					var d2: Vector2 = Sprites.door(ob)
+					var x0: float = minf(a.x, d2.x)
+					var x1: float = maxf(a.x, d2.x)
+					var y0: float = minf(a.y, d2.y)
+					var y1: float = maxf(a.y, d2.y)
+					if pass_i == 0:
+						draw_rect(Rect2(x0 - 0.25, a.y - 0.25, x1 - x0 + 1.5, 1.5), road_e)
+						draw_rect(Rect2(d2.x - 0.25, y0 - 0.25, 1.5, y1 - y0 + 1.5), road_e)
+					else:
+						draw_rect(Rect2(x0, a.y, x1 - x0 + 1.0, 1.0), Color(road, ra))
+						draw_rect(Rect2(d2.x, y0, 1.0, y1 - y0 + 1.0), Color(road, ra))
+		# Gebäude (von hinten nach vorne)
+		var vis: Array[Building] = []
 		for b: Building in sim.buildings:
 			if b == null:
 				continue
 			if b.x > vx1 or b.y > vy1 or b.x + 16 < vx0 or b.y + 16 < vy0:
 				continue
+			vis.append(b)
+		vis.sort_custom(func(p: Building, q: Building) -> bool: return p.y + p.h < q.y + q.h)
+		for b: Building in vis:
 			var v: Village = sim.villages[b.v]
 			var c: Clan = sim.clans[v.clan]
-			var tx: Dictionary = Sprites.clan_textures(c.col)
-			var key: String = b.type
-			if b.type == "hall" and v.lvl == 0:
-				key = "fire"
+			var tx: Dictionary = Sprites.clan_textures(c.col, v.race)
+			var key: String = Sprites.building_key(b, v)
 			var tex: Texture2D = tx[key]
-			var dx: float = b.x - (tex.get_width() - b.w) / 2
-			var dy: float = b.y + b.h - tex.get_height() + (1 if b.type == "farm" else 0)
+			var tw: int = tex.get_width() - 1
+			var th: int = tex.get_height() - 1
+			var dx: float = b.x - floori((tw - b.w) / 2.0)
+			var dy: float = b.y + b.h - th
 			draw_texture(tex, Vector2(dx, dy))
 			if key == "fire":
 				var f: int = int(tnow * 8.0) % 3
-				draw_rect(Rect2(dx + 3, dy - 2 + (1 if f == 1 else 0), 3, 3), Color("#ff7a2a"))
-				draw_rect(Rect2(dx + 4, dy - 3 + (1 if f == 2 else 0), 1, 3), Color("#ffd23a"))
-				draw_rect(Rect2(dx + 3 + (2 if f == 0 else 0), dy - 1, 1, 1), Color("#ffb43a"))
+				var fx: float = dx + 1.0
+				var fy: float = dy + 1.0
+				draw_rect(Rect2(fx + 4, fy + 1, 3, 3), Color("#e0402a"))
+				draw_rect(Rect2(fx + 4 + (1 if f == 1 else 0), fy - 1 + (1 if f == 2 else 0), 2, 3), Color("#ff9a2a"))
+				draw_rect(Rect2(fx + 5, fy + 1 - (1 if f == 0 else 0), 1, 2), Color("#ffe27a"))
+				draw_rect(Rect2(fx + 4 + (2 if f == 0 else 0), fy - 2 + (1 if f == 1 else 0), 1, 1), Color("#ffb43a"))
+				if randf() < 0.03:
+					sim.parts.append({"x": fx + 5.5, "y": fy - 1.0, "vx": (randf() - 0.5) * 0.6, "vy": -2.0, "l": 1.6, "ml": 1.6, "c": Color(0.55, 0.53, 0.5, 0.5), "s": 1.0, "g": 0.0})
+			elif key == "pen" and z > 1.6:
+				Sprites.draw_pen_animals(sink, b.x, b.y, tnow, b.id)
 			if b.type == "forge" and randf() < 0.04:
-				sim.parts.append({"x": dx + 7.0, "y": dy + 2.0, "vx": (randf() - 0.5) * 0.6, "vy": -2.4, "l": 1.4, "ml": 1.4, "c": Color(0.59, 0.94, 0.78, 0.55), "s": 1.0, "g": 0.0})
+				sim.parts.append({"x": dx + 7.0, "y": dy + 0.0, "vx": (randf() - 0.5) * 0.6, "vy": -2.4, "l": 1.4, "ml": 1.4, "c": Color(0.59, 0.94, 0.78, 0.55), "s": 1.0, "g": 0.0})
 			if insp_open and m.sel_vil != null and b.v == m.sel_vil.id:
-				draw_rect(Rect2(dx - 0.5, dy - 0.5, tex.get_width() + 1, tex.get_height() + 1), Color(1, 0.9, 0.47, 0.9), false, 1.5 / z)
-		# Wesen
+				draw_rect(Rect2(dx - 0.5, dy - 0.5, tw + 1, th + 1), Color(1, 0.9, 0.47, 0.9), false, 1.5 / z)
+		# Wesen (Kontur etwa 1 Bildschirmpixel breit, im Fernblick keine)
+		var ol: float = 0.0 if z * GuMain.PS < 0.5 else clampf(0.9 / (z * GuMain.PS), 0.4, 0.9)
+		Sprites.outline_col = Color(Sprites.OUTLINE, clampf((z * GuMain.PS - 0.6) / 1.0, 0.0, 0.92))
 		for u: Unit in sim.units:
 			if u.x < vx0 or u.x > vx1 or u.y < vy0 or u.y > vy1:
 				continue
 			if u.k == "p":
 				var cl: Color = sim.clans[u.clan].col if u.clan >= 0 else (Color("#3a2a3a") if u.rogue else Color("#8e8676"))
-				Sprites.draw_person(sink, u.x, u.y, GuMain.PS, u.race, u.rank, cl, u.face, sim.uage(u) >= 14.0, u.moving, u.anim, u.flash > 0.0, u.st == "work", u.rogue, u.sick > 0.0, u.luck > 0.0)
+				Sprites.draw_person(sink, u.x, u.y, GuMain.PS, u.race, u.rank, cl, u.face, sim.uage(u) >= 14.0, u.moving, u.anim, u.flash > 0.0, u.st == "work", u.rogue, u.sick > 0.0, u.luck > 0.0, ol, tnow)
 			else:
-				Sprites.draw_animal(sink, u.x, u.y, GuMain.PS, u.sp, u.face, u.moving, u.anim, u.flash > 0.0, u.tide, u.id)
+				Sprites.draw_animal(sink, u.x, u.y, GuMain.PS, u.sp, u.face, u.moving, u.anim, u.flash > 0.0, u.tide, u.id, ol)
 		var su: Unit = m.sel_unit
 		if su != null and su.hp > 0.0:
 			draw_arc(Vector2(su.x, su.y), 2.4, 0.0, TAU, 24, Color("#ffe27a"), maxf(0.15, 1.5 / z))
@@ -1155,54 +1202,105 @@ class CloudLayer:
 
 	func _ready() -> void:
 		for k: int in range(7):
-			var tex: ImageTexture = _make_cloud()
-			list.append({"x": randf() * GuData.W * 1.4 - GuData.W * 0.2, "y": randf() * GuData.H, "tex": tex, "sh": _shadow(tex), "sp": 1.0 + randf() * 1.5})
+			var ims: Array[Image] = _make_cloud()
+			list.append({"x": randf() * GuData.W * 1.4 - GuData.W * 0.2, "y": randf() * GuData.H, "tex": ImageTexture.create_from_image(ims[0]), "dark": ImageTexture.create_from_image(ims[1]), "sh": _shadow(ims[0]), "sp": 1.0 + randf() * 1.5})
 
-	func _make_cloud() -> ImageTexture:
-		var w: int = randi_range(34, 60)
-		var h: int = randi_range(14, 22)
-		var im: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
-		im.fill(Color(0, 0, 0, 0))
+	## Pixelwolke aus überlappenden Ballen: oben weiß, Mitte hellblau, Unterseite blaugrau (WorldBox).
+	func _make_cloud() -> Array[Image]:
+		var w: int = randi_range(70, 124)
+		var h: int = randi_range(22, 32)
+		var lite: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
+		lite.fill(Color(0, 0, 0, 0))
+		var dark: Image = lite.duplicate()
 		var blobs: Array[Vector3] = []
-		for k: int in range(7):
-			blobs.append(Vector3(w * (0.15 + randf() * 0.7), h * (0.35 + randf() * 0.35), h * (0.25 + randf() * 0.25)))
+		var n: int = 6 + w / 16
+		for k: int in range(n):
+			var f: float = float(k) / float(n - 1)
+			var bx: float = w * (0.1 + 0.8 * f) + randf_range(-4.0, 4.0)
+			var r: float = h * randf_range(0.26, 0.44) * (1.0 - absf(f - 0.45) * 0.9)
+			blobs.append(Vector3(bx, h - r - 1.5 - randf() * 4.0, maxf(3.0, r)))
 		for y: int in range(h):
 			for x: int in range(w):
-				var depth: float = -1.0
-				for b: Vector3 in blobs:
-					var d: float = Vector2((x - b.x) * 0.8, y - b.y).length() / b.z
-					if d < 1.0:
-						depth = maxf(depth, 1.0 - d)
-				if depth < 0.0:
+				var margin: float = -99.0
+				var top: float = 1.0
+				for bl: Vector3 in blobs:
+					var d: float = Vector2((x - bl.x) * 0.6, y - bl.y).length()
+					if d <= bl.z:
+						margin = maxf(margin, bl.z - d)
+						top = minf(top, (y - (bl.y - bl.z)) / (bl.z * 2.0))
+				if margin < 0.0:
 					continue
-				var col: Color = Color("#bcd6ec") if y > h * 0.58 else (Color.WHITE if depth > 0.45 else Color("#e4f0fa"))
-				im.set_pixel(x, y, col)
-		return ImageTexture.create_from_image(im)
+				if margin < 1.2 and (x + y) % 2 == 0:
+					continue
+				var c: Color
+				var cd: Color
+				if top > 0.78:
+					c = Color("#9fd6d6")
+					cd = Color("#3c434c")
+				elif top < 0.25:
+					c = Color("#f6fffd")
+					cd = Color("#7a838d")
+				elif top < 0.55:
+					c = Color("#dcf6f2")
+					cd = Color("#646d77")
+				else:
+					c = Color("#bfeae6")
+					cd = Color("#525a64")
+				lite.set_pixel(x, y, c)
+				dark.set_pixel(x, y, cd)
+		return [lite, dark]
 
-	func _shadow(t: ImageTexture) -> ImageTexture:
-		var im: Image = t.get_image()
+	func _shadow(im0: Image) -> ImageTexture:
+		var im: Image = im0.duplicate()
 		for y: int in range(im.get_height()):
 			for x: int in range(im.get_width()):
 				if im.get_pixel(x, y).a > 0.0:
-					im.set_pixel(x, y, Color("#06180c"))
+					im.set_pixel(x, y, Color("#08161c"))
 		return ImageTexture.create_from_image(im)
+
+	var glints: Array[Vector3] = []
 
 	func tick(dt: float) -> void:
 		for c: Dictionary in list:
 			c["x"] += c["sp"] * dt
 			if c["x"] > GuData.W * 1.3:
-				c["x"] = -GuData.W * 0.3 - 60.0
+				c["x"] = -GuData.W * 0.3 - 90.0
+		# Wasserglitzern: kurze helle Striche auf dem Meer
+		var k: int = glints.size() - 1
+		while k >= 0:
+			var g: Vector3 = glints[k]
+			g.z -= dt
+			if g.z <= 0.0:
+				glints.remove_at(k)
+			else:
+				glints[k] = g
+			k -= 1
+		var tries: int = 0
+		while glints.size() < 90 and tries < 40:
+			tries += 1
+			var x: int = randi() % GuData.W
+			var y: int = randi() % GuData.H
+			if GuData.is_water(m.sim.world.tile[y * GuData.W + x]):
+				glints.append(Vector3(x, y, randf_range(0.8, 2.2)))
 
 	func _draw() -> void:
-		var ca: float = clampf((7.0 - m.z) / 5.0, 0.0, 1.0)
+		var z: float = m.z
+		# Glitzern (in allen Zoomstufen, im Nahblick feiner)
+		var gw: float = clampf(2.0 / z, 0.35, 1.6)
+		for g: Vector3 in glints:
+			var a: float = sin(clampf(g.z / 2.2, 0.0, 1.0) * PI)
+			draw_rect(Rect2(g.x, g.y, gw * 2.0, maxf(0.3, gw * 0.6)), Color(0.86, 0.95, 1.0, 0.35 * a))
+		var ca: float = clampf((3.4 - z) / 1.4, 0.0, 1.0)
 		if ca <= 0.0:
 			return
 		var storm: bool = m.sim.weather.get("type", "") in ["rain", "snow"]
 		for c: Dictionary in list:
-			draw_texture(c["sh"], Vector2(c["x"] + 10.0, c["y"] + 14.0), Color(1, 1, 1, ca * 0.2))
+			draw_texture(c["sh"], Vector2(c["x"] + 6.0, c["y"] + 18.0), Color(1, 1, 1, ca * 0.36))
+		var i: int = 0
 		for c: Dictionary in list:
-			var mod: Color = Color(0.55, 0.57, 0.62, ca * 0.95) if storm else Color(1, 1, 1, ca * 0.85)
-			draw_texture(c["tex"], Vector2(c["x"], c["y"]), mod)
+			var dk: bool = storm and i % 2 == 0
+			draw_texture(c["dark"] if dk else c["tex"], Vector2(c["x"], c["y"]), Color(1, 1, 1, ca * (0.9 if dk else 0.78)))
+			i += 1
 
 
 class ScreenLayer:
@@ -1301,46 +1399,44 @@ class ScreenLayer:
 		var font: Font = m.hud.font_bold
 		var cjk: Font = m.hud.font_cjk
 		var rects: Array[Rect2] = []
-		var fs: int = 12
-		var h: float = 18.0
+		var fs: int = 11
+		var h: float = 15.0
 		var sink: Callable = func(r: Rect2, c: Color) -> void: draw_rect(r, c)
+		Sprites.outline_col = Sprites.OUTLINE
 		for v: Village in sim.villages:
 			if not v.alive:
 				continue
 			var c: Clan = sim.clans[v.clan]
 			var X: float = v.cx * z + o.x
-			var Y: float = (v.y - (9.0 if v.lvl > 0 else 3.0)) * z + o.y - 6.0
-			if X < -120 or X > vs.x + 120 or Y < -30 or Y > vs.y:
+			# Oberkante des Dorfzentrums (Lagerfeuer 7, Halle 10/13 Pixel hoch)
+			var th: float = 7.0 if v.lvl == 0 else (13.0 if Sprites.village_tier(v) == 2 else 10.0)
+			var Y: float = (v.y + 2.0 - th) * z + o.y - 2.0
+			if X < -140 or X > vs.x + 140 or Y < -30 or Y > vs.y + 20:
 				continue
 			var txt: String = "%s %d" % [v.name, v.pop]
 			var tw: float = font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-			var bw: float = h + 2.0
-			var pw: float = 12.0
-			var w: float = bw + pw + tw + 14.0
+			var bw: float = 13.0
+			var cw: float = 4.0
+			var pw: float = 13.0
+			var w: float = bw + cw + pw + tw + 10.0
 			var rx: float = roundf(X - w / 2.0)
 			var ry: float = roundf(Y - h)
-			var rr: Rect2 = Rect2(rx, ry, w, h)
-			var clash: bool = false
-			for q: Rect2 in rects:
-				if q.intersects(rr):
-					clash = true
+			var placed: bool = false
+			for dy: float in [0.0, -(h + 5.0), h + 5.0]:
+				var rr: Rect2 = Rect2(rx - 1.0, ry + dy - 3.0, w + 2.0, h + 6.0)
+				var clash: bool = false
+				for q: Rect2 in rects:
+					if q.intersects(rr):
+						clash = true
+						break
+				if not clash:
+					rects.append(rr)
+					ry += dy
+					placed = true
 					break
-			if clash:
+			if not placed:
 				continue
-			rects.append(rr)
-			var body: StyleBoxFlat = Hud.sb(Color(0.08, 0.09, 0.094, 0.9), Color("#0a0c0c"), 1, 4)
-			draw_style_box(body, Rect2(rx + bw - 3.0, ry + 1.0, w - bw + 3.0, h - 2.0))
-			draw_rect(Rect2(rx + w - 3.0, ry + 2.0, 2.0, h - 4.0), Color("#d8a83a"))
-			draw_style_box(Hud.sb(Color("#0a1426"), Color.TRANSPARENT, 0, 3), Rect2(rx, ry - 1.0, bw, h + 2.0))
-			draw_style_box(Hud.sb(c.col, Color.TRANSPARENT, 0, 2), Rect2(rx + 1.5, ry + 0.5, bw - 3.0, h - 1.0))
-			draw_rect(Rect2(rx + 3.5, ry + 2.5, bw - 7.0, h - 5.0), Color(1, 1, 1, 0.45), false, 1.0)
-			var gw: float = cjk.get_string_size(c.glyph, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-			draw_string(cjk, Vector2(rx + bw / 2.0 - gw / 2.0, ry + h / 2.0 + 5.0), c.glyph, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
-			var L: Unit = v.lead
-			if L != null and L.hp > 0.0:
-				var sc: float = 1.65 / (2.1 if L.rank >= 9 else (1.45 if L.rank >= 6 else 1.0))
-				Sprites.draw_person(sink, rx + bw + 7.0, ry + h - 3.0, sc, L.race, L.rank, c.col, 1, true, false, 0.0, false, false, false, false, false)
-			draw_string(font, Vector2(rx + bw + pw + 4.0, ry + h / 2.0 + 4.5), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color("#ffa894") if not c.war.is_empty() else Color("#8ec8ff"))
+			_kingdom_label(rx, ry, w, h, bw, cw, pw, c, v, txt, font, cjk, fs, sink)
 		for u: Unit in sim.units:
 			if u.k != "p" or u.hp <= 0.0:
 				continue
@@ -1353,9 +1449,69 @@ class ScreenLayer:
 			if X2 < 0 or X2 > vs.x or Y2 < 0 or Y2 > vs.y:
 				continue
 			var t2: String = "%s · R%d" % [u.given, u.rank]
-			var tw2: float = font.get_string_size(t2, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-			draw_style_box(Hud.sb(Color(0.08, 0.09, 0.094, 0.85), Color.TRANSPARENT, 0, 3), Rect2(X2 - tw2 / 2.0 - 5.0, Y2 - 8.0, tw2 + 10.0, 15.0))
-			draw_string(font, Vector2(X2 - tw2 / 2.0, Y2 + 4.0), t2, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, GuData.ESS_COL[u.rank])
+			var tw2: float = font.get_string_size(t2, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+			var r2: Rect2 = Rect2(roundf(X2 - tw2 / 2.0 - 5.0), roundf(Y2 - 7.0), roundf(tw2 + 10.0), 13.0)
+			var clash2: bool = false
+			for q: Rect2 in rects:
+				if q.intersects(r2):
+					clash2 = true
+					break
+			if clash2:
+				continue
+			rects.append(r2)
+			_plate(r2)
+			draw_rect(Rect2(r2.position.x + 2.0, r2.position.y + 2.0, 2.0, r2.size.y - 4.0), GuData.ESS_COL[u.rank])
+			draw_string(font, Vector2(r2.position.x + 6.0, r2.position.y + 10.0), t2, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, GuData.ESS_COL[u.rank].lightened(0.15))
+
+	## Dunkle Namensplatte mit abgeschrägten Ecken und heller Kante (WorldBox).
+	func _plate(r: Rect2) -> void:
+		var x: float = r.position.x
+		var y: float = r.position.y
+		var w: float = r.size.x
+		var hh: float = r.size.y
+		var edge: Color = Color("#55574b")
+		draw_rect(Rect2(x + 1.0, y, w - 2.0, hh), Color(0.04, 0.045, 0.035, 0.75))
+		draw_rect(Rect2(x, y + 1.0, w, hh - 2.0), Color(0.04, 0.045, 0.035, 0.75))
+		draw_rect(Rect2(x + 1.0, y + 1.0, w - 2.0, hh - 2.0), Color("#1d1f1a"))
+		draw_rect(Rect2(x + 2.0, y + 1.0, w - 4.0, 1.0), edge)
+		draw_rect(Rect2(x + 2.0, y + hh - 2.0, w - 4.0, 1.0), edge)
+		draw_rect(Rect2(x + 1.0, y + 2.0, 1.0, hh - 4.0), edge)
+		draw_rect(Rect2(x + w - 2.0, y + 2.0, 1.0, hh - 4.0), edge)
+		draw_rect(Rect2(x + 2.0, y + 2.0, w - 4.0, 1.0), Color(1, 1, 1, 0.04))
+
+	func _kingdom_label(rx: float, ry: float, w: float, h: float, bw: float, cw: float, pw: float, c: Clan, v: Village, txt: String, font: Font, cjk: Font, fs: int, sink: Callable) -> void:
+		var px: float = rx + bw + cw
+		_plate(Rect2(px, ry, w - bw - cw, h))
+		# Goldene Zierleiste rechts
+		var gx: float = rx + w - 3.0
+		draw_rect(Rect2(gx, ry - 1.0, 3.0, h + 2.0), Color("#3a2a10"))
+		for k: int in range(int(h + 2.0)):
+			draw_rect(Rect2(gx + 1.0, ry - 1.0 + k, 1.0, 1.0), Color("#f0c048") if k % 3 != 1 else Color("#9a6a1c"))
+		draw_rect(Rect2(gx, ry - 2.0, 3.0, 1.0), Color("#f0c048"))
+		draw_rect(Rect2(gx, ry + h + 1.0, 3.0, 1.0), Color("#f0c048"))
+		# Verbindung ≡ zwischen Banner und Platte
+		for k: int in range(3):
+			draw_rect(Rect2(rx + bw, ry + h / 2.0 - 3.0 + k * 3.0, cw + 1.0, 1.0), Color("#c8ccc4"))
+		# Banner in Clanfarbe mit Siegel
+		var bc: Color = c.col
+		var by: float = ry - 2.0
+		var bh: float = h + 4.0
+		draw_rect(Rect2(rx, by, bw, bh), bc.darkened(0.62))
+		draw_rect(Rect2(rx + 1.0, by + 1.0, bw - 2.0, bh - 2.0), bc.darkened(0.08))
+		draw_rect(Rect2(rx + 2.0, by + 2.0, bw - 4.0, bh - 4.0), bc.lightened(0.38), false, 1.0)
+		draw_rect(Rect2(rx + 3.0, by + 3.0, bw - 6.0, bh - 6.0), bc.darkened(0.2))
+		for q: Vector2 in [Vector2(rx - 1.0, by - 1.0), Vector2(rx + bw - 1.0, by - 1.0), Vector2(rx - 1.0, by + bh - 1.0), Vector2(rx + bw - 1.0, by + bh - 1.0)]:
+			draw_rect(Rect2(q, Vector2(2, 2)), bc.darkened(0.62))
+		var gw: float = cjk.get_string_size(c.glyph, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+		draw_string(cjk, Vector2(roundf(rx + bw / 2.0 - gw / 2.0), by + bh / 2.0 + 3.5), c.glyph, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, bc.lightened(0.7))
+		# Anführer
+		var L: Unit = v.lead
+		if L != null and L.hp > 0.0:
+			var sc: float = 1.45 / (2.1 if L.rank >= 9 else (1.45 if L.rank >= 6 else 1.0))
+			Sprites.draw_person(sink, px + 7.0, ry + h - 1.0, sc, L.race, L.rank, c.col, 1, true, false, 0.0, false, false, false, false, false, 0.7)
+		var tc: Color = Color("#ef7a62") if not c.war.is_empty() else Color("#62a6e6")
+		draw_string(font, Vector2(px + pw + 1.0, ry + h / 2.0 + 5.0), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.55))
+		draw_string(font, Vector2(px + pw, ry + h / 2.0 + 4.0), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, tc)
 
 
 # ---------------- Entwickler: Screenshots für Vergleiche ----------------

@@ -17,6 +17,28 @@ var terr: PackedInt32Array
 var temp_snow: PackedByteArray
 var wdist: PackedByteArray
 
+## Benannte Orte der kanonischen Gu-Weltkarte (Modus "gu"); kind: siedlung (Bauland), berg, fluss, ort, gebiet.
+const LANDMARKS: Array = [
+	{"name": "Himmlischer Hof", "x": 124, "y": 130, "region": 4, "kind": "siedlung"},
+	{"name": "Unsterblicher-Kranich-Sekte", "x": 154, "y": 134, "region": 4, "kind": "siedlung"},
+	{"name": "Geistaffinitätshaus", "x": 110, "y": 140, "region": 4, "kind": "siedlung"},
+	{"name": "Gu-Yue-Dorf", "x": 78, "y": 213, "region": 1, "kind": "siedlung"},
+	{"name": "Qing-Mao-Berg", "x": 80, "y": 205, "region": 1, "kind": "berg"},
+	{"name": "Shang-Clan-Stadt", "x": 142, "y": 233, "region": 1, "kind": "siedlung"},
+	{"name": "Bai-Gu-Berg", "x": 176, "y": 230, "region": 1, "kind": "berg"},
+	{"name": "Roter Drachenfluss", "x": 62, "y": 214, "region": 1, "kind": "fluss"},
+	{"name": "Gelber Drachenfluss", "x": 124, "y": 208, "region": 1, "kind": "fluss"},
+	{"name": "Jadedrachenfluss", "x": 190, "y": 212, "region": 1, "kind": "fluss"},
+	{"name": "Kaiserhof-Gesegnetes-Land", "x": 150, "y": 52, "region": 0, "kind": "siedlung"},
+	{"name": "Lang-Ya-Gesegnetes-Land", "x": 86, "y": 58, "region": 0, "kind": "ort"},
+	{"name": "Große Oase", "x": 50, "y": 104, "region": 2, "kind": "siedlung"},
+	{"name": "Unpassierbare Dünen", "x": 34, "y": 166, "region": 2, "kind": "gebiet"},
+]
+
+## Kartenart der aktuellen Welt ("gu" oder "random") und ihre benannten Orte (leer bei "random").
+var map_mode: String = "gu"
+var landmarks: Array[Dictionary] = []
+
 var near_img: Image
 var far_img: Image
 var terr_img: Image
@@ -29,6 +51,7 @@ var water_dirty: bool = false
 
 func _init() -> void:
 	Sprites.init()
+	_set_landmarks("gu")
 	alloc()
 	near_img = Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
 	far_img = Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
@@ -111,8 +134,29 @@ func compute_water() -> void:
 				qt += 1
 
 
-func generate(S: int) -> void:
+func _set_landmarks(mode: String) -> void:
+	map_mode = mode
+	landmarks.clear()
+	if mode == "gu":
+		for l: Dictionary in LANDMARKS:
+			landmarks.append(l.duplicate())
+
+
+## mode "gu": kanonische Gu-Weltkarte (Form fest, Samen ändert nur Details); "random": Zufallswelt.
+func generate(S: int, mode: String = "gu") -> void:
 	alloc()
+	var open_sea: PackedByteArray = PackedByteArray()
+	if mode == "random":
+		_base_random(S)
+	else:
+		mode = "gu"
+		open_sea = MapGu.build(self, S)
+	_set_landmarks(mode)
+	_finish(S, open_sea)
+
+
+## Grundgelände der Zufallswelt (Regionen, Höhen, Kacheln) – unveränderter Algorithmus.
+func _base_random(S: int) -> void:
 	var nw: FastNoiseLite = _noise(S + 5, 0.022, 4)
 	var nw2: FastNoiseLite = _noise(S + 9, 0.022, 4)
 	var ne: FastNoiseLite = _noise(S, 0.025, 5)
@@ -174,6 +218,11 @@ func generate(S: int) -> void:
 			else:
 				t = GuData.MOUNT if h > 0.82 else (GuData.HILL if h > 0.76 else GuData.GRASS)
 			tile[i] = t
+
+
+## Gemeinsamer Abschluss: Flachwasser, Regionswände, Strände, Pflanzen.
+## open_sea[i] == 1: offenes Außenmeer – dort entfällt die Wand, wenn sie mehr als 10 Kacheln von Land entfernt ist.
+func _finish(S: int, open_sea: PackedByteArray) -> void:
 	compute_water()
 	for i: int in range(N):
 		if tile[i] == GuData.DEEP and wdist[i] <= 8:
@@ -183,14 +232,14 @@ func generate(S: int) -> void:
 		for x: int in range(W):
 			var i: int = y * W + x
 			var r: int = region[i]
-			var b: bool = false
-			for dy: int in range(-1, 2):
-				for dx: int in range(-1, 2):
-					var xx: int = x + dx
-					var yy: int = y + dy
-					if in_map(xx, yy) and region[yy * W + xx] != r:
-						b = true
-			if b:
+			var b: bool = (x > 0 and region[i - 1] != r) or (x < W - 1 and region[i + 1] != r)
+			if not b and y > 0:
+				var k: int = i - W
+				b = region[k] != r or (x > 0 and region[k - 1] != r) or (x < W - 1 and region[k + 1] != r)
+			if not b and y < H - 1:
+				var k2: int = i + W
+				b = region[k2] != r or (x > 0 and region[k2 - 1] != r) or (x < W - 1 and region[k2 + 1] != r)
+			if b and (open_sea.is_empty() or open_sea[i] == 0 or wdist[i] <= 10):
 				tile[i] = GuData.WALL
 	# Strand mit Zacken
 	var sand: PackedByteArray = PackedByteArray()
@@ -201,13 +250,14 @@ func generate(S: int) -> void:
 			var t: int = tile[i]
 			if not GuData.is_land(t) or t == GuData.WALL or t == GuData.SNOW:
 				continue
-			var w: bool = false
-			for dy: int in range(-1, 2):
-				for dx: int in range(-1, 2):
-					var xx: int = x + dx
-					var yy: int = y + dy
-					if in_map(xx, yy) and GuData.is_water(tile[yy * W + xx]):
-						w = true
+			# Wasser = DEEP (0) oder SHAL (1)
+			var w: bool = (x > 0 and tile[i - 1] <= GuData.SHAL) or (x < W - 1 and tile[i + 1] <= GuData.SHAL)
+			if not w and y > 0:
+				var k: int = i - W
+				w = tile[k] <= GuData.SHAL or (x > 0 and tile[k - 1] <= GuData.SHAL) or (x < W - 1 and tile[k + 1] <= GuData.SHAL)
+			if not w and y < H - 1:
+				var k2: int = i + W
+				w = tile[k2] <= GuData.SHAL or (x > 0 and tile[k2 - 1] <= GuData.SHAL) or (x < W - 1 and tile[k2 + 1] <= GuData.SHAL)
 			if w:
 				sand[i] = 1
 	for i: int in range(N):

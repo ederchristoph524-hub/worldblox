@@ -95,3 +95,17 @@ static func speckle(im: Image, sd: int, from: Color, light: Color, dark: Color, 
 				elif q < prob * 2.0:
 					im.set_pixel(x, y, dark)
 	return im
+
+
+## Neues Bild, 1 Pixel breiter und höher, mit Schlagschatten nach rechts unten.
+static func drop_shadow(im: Image, col: Color) -> Image:
+	var w: int = im.get_width()
+	var h: int = im.get_height()
+	var out: Image = Image.create_empty(w + 1, h + 1, false, Image.FORMAT_RGBA8)
+	out.fill(Color(0, 0, 0, 0))
+	for y: int in range(h):
+		for x: int in range(w):
+			if im.get_pixel(x, y).a > 0.5:
+				out.set_pixel(x + 1, y + 1, col)
+	out.blend_rect(im, Rect2i(0, 0, w, h), Vector2i.ZERO)
+	return out

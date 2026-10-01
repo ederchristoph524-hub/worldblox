@@ -30,6 +30,7 @@ const BTN: int = 43
 const GAP: int = 6
 
 var font_bold: FontVariation
+var font_black: FontVariation
 var font_cjk: SystemFont
 var bar: Panel
 var tabs_box: HBoxContainer
@@ -74,6 +75,10 @@ func _ready() -> void:
 	font_bold = FontVariation.new()
 	font_bold.base_font = ThemeDB.fallback_font
 	font_bold.variation_embolden = 0.7
+	font_black = FontVariation.new()
+	font_black.base_font = ThemeDB.fallback_font
+	font_black.variation_embolden = 1.25
+	font_black.spacing_glyph = 0
 	font_cjk = SystemFont.new()
 	font_cjk.font_names = PackedStringArray(["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Noto Sans SC", "WenQuanYi Micro Hei", "PingFang SC", "Source Han Sans SC"])
 	font_cjk.fallbacks = [ThemeDB.fallback_font]
@@ -100,17 +105,115 @@ static func sb(bg: Color, border: Color = Color.TRANSPARENT, bw: int = 0, radius
 	return s
 
 
-static func well_style(on: bool) -> StyleBoxFlat:
-	var s: StyleBoxFlat = sb(C_WELL, C_RED if on else C_RIM, 3 if on else 2, 6)
-	if on:
-		s.bg_color = Color("#2b3730")
-	s.shadow_color = Color(0, 0, 0, 0.0)
+static var _tex_cache: Dictionary = {}
+
+
+## Vertiefte Knopf-Mulde wie in WorldBox: dunkel, Risse, abgeschrägte Ecken, olivfarbene Unterkante.
+## kind: "n" normal, "on" ausgewählt (rot), "riv" mit Nieten (Hauptmenü).
+static func well_tex(kind: String, w: int = BTN, h: int = BTN) -> ImageTexture:
+	var key: String = "%s%dx%d" % [kind, w, h]
+	if _tex_cache.has(key):
+		return _tex_cache[key]
+	var q: Px = Px.new(w, h)
+	var fill: Color = Color("#263027")
+	var crack: Color = Color("#1c241d")
+	var crack_hi: Color = Color("#2c372d")
+	var inset: int = 2
+	if kind == "riv":
+		q.p(0, 0, w, h, "#151816")
+		q.p(1, 1, w - 2, h - 2, "#6c6a48")
+		q.p(2, 2, w - 4, h - 4, "#101410")
+		inset = 3
+	elif kind == "on":
+		fill = Color("#2e2d27")
+		crack = Color("#24221d")
+		crack_hi = Color("#38362e")
+		q.p(0, 0, w, h, "#7e241a")
+		q.p(1, 1, w - 2, h - 2, "#c74634")
+		q.p(1, 1, w - 2, 1, "#dc5a40")
+		q.p(2, h - 2, w - 4, 1, "#a8321f")
+		q.p(3, 3, w - 6, h - 6, "#3e1c16")
+		inset = 4
+	else:
+		q.p(0, 0, w, h, "#151816")
+		q.p(1, 1, w - 2, h - 2, "#3a3d2b")
+		q.p(1, h - 2, w - 2, 1, "#5e5c3e")
+		q.p(w - 2, 1, 1, h - 2, "#55553a")
+		q.p(2, 2, w - 4, h - 4, "#141a15")
+		inset = 3
+	q.p(inset, inset, w - inset * 2, h - inset * 2, fill)
+	# Risse in der Mulde
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 7 + w * 31 + h + kind.length()
+	for k: int in range(5):
+		var x: int = rng.randi_range(inset + 2, w - inset - 3)
+		var y: int = rng.randi_range(inset + 2, h - inset - 4)
+		var dx: int = 1 if rng.randf() < 0.5 else -1
+		for n: int in range(rng.randi_range(6, 14)):
+			q.p(x, y, 1, 1, crack)
+			q.p(x, y + 1, 1, 1, crack_hi)
+			if rng.randf() < 0.55:
+				x += dx
+			else:
+				y += 1 if rng.randf() < 0.6 else -1
+			x = clampi(x, inset + 1, w - inset - 2)
+			y = clampi(y, inset + 1, h - inset - 3)
+	q.p(inset, inset, w - inset * 2, 1, Color(0, 0, 0, 0.3))
+	q.p(inset, inset, 1, h - inset * 2, Color(0, 0, 0, 0.3))
+	if kind == "riv":
+		for c: Vector2i in [Vector2i(0, 0), Vector2i(w - 3, 0), Vector2i(0, h - 3), Vector2i(w - 3, h - 3)]:
+			q.p(c.x, c.y, 3, 3, "#4a1410")
+			q.p(c.x, c.y, 2, 2, "#d0402e")
+			q.p(c.x, c.y, 1, 1, "#ff8a70")
+	else:
+		_chamfer(q, w, h, 2)
+	var t: ImageTexture = q.tex()
+	_tex_cache[key] = t
+	return t
+
+
+static func _chamfer(q: Px, w: int, h: int, n: int) -> void:
+	for k: int in range(n):
+		for j: int in range(n - k):
+			for c: Vector2i in [Vector2i(j, k), Vector2i(w - 1 - j, k), Vector2i(j, h - 1 - k), Vector2i(w - 1 - j, h - 1 - k)]:
+				q.img.set_pixel(c.x, c.y, Color(0, 0, 0, 0))
+
+
+## Roter WorldBox-Knopf: oben heller, unten dunkler Rand.
+static func red_tex(w: int = 46, h: int = 46) -> ImageTexture:
+	var key: String = "red%dx%d" % [w, h]
+	if _tex_cache.has(key):
+		return _tex_cache[key]
+	var q: Px = Px.new(w, h)
+	q.p(0, 0, w, h, "#5e1a12")
+	q.p(1, 1, w - 2, h - 2, "#7e241a")
+	q.p(2, 2, w - 4, h - 6, "#c74634")
+	q.p(2, 2, w - 4, (h - 6) / 2, "#d2553d")
+	q.p(3, 2, w - 6, 1, "#e8735a")
+	q.p(2, h - 4, w - 4, 2, "#9a2e22")
+	_chamfer(q, w, h, 3)
+	var t: ImageTexture = q.tex()
+	_tex_cache[key] = t
+	return t
+
+
+static func _tex_style(t: Texture2D, m: int) -> StyleBoxTexture:
+	var s: StyleBoxTexture = StyleBoxTexture.new()
+	s.texture = t
+	s.texture_margin_left = m
+	s.texture_margin_right = m
+	s.texture_margin_top = m
+	s.texture_margin_bottom = m
 	return s
 
 
-static func red_style() -> StyleBoxFlat:
-	var s: StyleBoxFlat = sb(C_RED, C_RED_DK, 2, 6)
-	s.border_width_bottom = 4
+static func well_style(on: bool, riv: bool = false) -> StyleBox:
+	return _tex_style(well_tex("on" if on else ("riv" if riv else "n")), 6)
+
+
+static func red_style() -> StyleBox:
+	var s: StyleBoxTexture = _tex_style(red_tex(), 8)
+	s.content_margin_bottom = 4
 	return s
 
 
@@ -145,9 +248,12 @@ func _label(text: String, size: int, col: Color, outline: int = 0, outline_col: 
 
 func _build_bar() -> void:
 	bar = Panel.new()
-	var st: StyleBoxFlat = sb(C_FRAME, C_RIM, 0, 0)
+	var st: StyleBoxFlat = sb(C_FRAME, Color("#2a3526"), 0, 0)
 	st.border_width_top = 2
 	bar.add_theme_stylebox_override("panel", st)
+	bar.draw.connect(func() -> void:
+		bar.draw_rect(Rect2(0, 2, bar.size.x, 1), Color("#5a6e55"))
+		bar.draw_rect(Rect2(0, 3, bar.size.x, 1), Color("#4a5a46")))
 	bar.anchor_left = 0.0
 	bar.anchor_right = 1.0
 	bar.anchor_top = 1.0
@@ -173,9 +279,9 @@ func _build_bar() -> void:
 	tabs_box.anchor_right = 1.0
 	tabs_box.offset_left = 22
 	tabs_box.offset_right = -22
-	tabs_box.offset_top = -28
-	tabs_box.offset_bottom = 2
-	tabs_box.add_theme_constant_override("separation", 6)
+	tabs_box.offset_top = -27
+	tabs_box.offset_bottom = 1
+	tabs_box.add_theme_constant_override("separation", 4)
 	tabs_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_child(tabs_box)
 	for i: int in range(6):
@@ -242,20 +348,27 @@ func _build_bar() -> void:
 	arrow.anchor_right = 1.0
 	arrow.offset_left = -26
 	arrow.offset_right = 0
-	arrow.offset_top = 0
+	arrow.offset_top = -10
 	arrow.offset_bottom = BTN * 2 + GAP + 14
 	arrow.mouse_filter = Control.MOUSE_FILTER_STOP
 	arrow.draw.connect(func() -> void:
 		var h: float = arrow.size.y
-		arrow.draw_rect(Rect2(0, 0, 26, h), Color(C_FRAME, 0.85))
-		arrow.draw_rect(Rect2(17, 0, 6, h), Color("#4a5a46"))
-		arrow.draw_rect(Rect2(15, 0, 2, h), C_LINE)
-		var cy: float = h * 0.5
-		arrow.draw_colored_polygon(PackedVector2Array([Vector2(13, cy - 12), Vector2(26, cy), Vector2(13, cy + 12)]), Color("#6b5a00"))
-		arrow.draw_colored_polygon(PackedVector2Array([Vector2(13, cy - 11), Vector2(25, cy), Vector2(13, cy + 9)]), C_YELLOW))
+		arrow.draw_rect(Rect2(0, 0, 26, h), Color("#2e3a2b"))
+		arrow.draw_rect(Rect2(1, 0, 25, h), Color("#4a5847"))
+		arrow.draw_rect(Rect2(1, 0, 2, h), Color("#5f735b"))
+		arrow.draw_rect(Rect2(3, 0, 1, h), Color("#3c4939"))
+		arrow.draw_rect(Rect2(22, 0, 1, h), Color("#3c4939"))
+		var cy: float = roundf(h * 0.5)
+		for k: int in range(13):
+			var hh: float = 13.0 - k
+			arrow.draw_rect(Rect2(9 + k, cy - hh, 1, hh * 2.0), Color("#5a4a00"))
+		for k: int in range(11):
+			var hh2: float = 11.0 - k
+			arrow.draw_rect(Rect2(9 + k, cy - hh2, 1, hh2 * 2.0 - 1.0), C_YELLOW)
+			arrow.draw_rect(Rect2(9 + k, cy + hh2 * 0.3, 1, hh2 * 0.7 - 1.0), Color("#b89a00")))
 	arrow.pressed.connect(func() -> void: tools_scroll.scroll_horizontal += int(tools_scroll.size.x * 0.7))
 	bar.add_child(arrow)
-	var ver: Label = _label("gu-welt 0.3 · Godot", 10, Color("#7e927f"))
+	var ver: Label = _label("gu-welt 0.3-27@gdt (4)", 10, Color("#a4b0a4"))
 	ver.anchor_left = 1.0
 	ver.anchor_right = 1.0
 	ver.anchor_top = 1.0
@@ -281,15 +394,11 @@ func _separator() -> Control:
 func _tool_button(icon: Texture2D, tip: String, riv: bool = false) -> Button:
 	var b: Button = Button.new()
 	b.custom_minimum_size = Vector2(BTN, BTN)
-	_style_button(b, well_style(false))
+	_style_button(b, well_style(false, riv))
+	b.set_meta("riv", riv)
 	b.icon = icon
 	b.tooltip_text = tip
 	b.mouse_filter = Control.MOUSE_FILTER_PASS
-	if riv:
-		b.draw.connect(func() -> void:
-			var c: Color = Color("#b83a2c")
-			for p: Vector2 in [Vector2(-1, -1), Vector2(BTN - 3, -1), Vector2(-1, BTN - 3), Vector2(BTN - 3, BTN - 3)]:
-				b.draw_rect(Rect2(p, Vector2(4, 4)), c))
 	return b
 
 
@@ -333,7 +442,7 @@ func refresh_tools(active_id: String, weather_type: String) -> void:
 		var t: Dictionary = Powers.tool_by_id(id)
 		var on: bool = id == active_id or (t.has("w") and t["w"] == weather_type)
 		var b: Button = tool_btns[id]
-		var s: StyleBoxFlat = well_style(on)
+		var s: StyleBox = well_style(on, bool(b.get_meta("riv", false)))
 		b.add_theme_stylebox_override("normal", s)
 		b.add_theme_stylebox_override("hover", s)
 		b.add_theme_stylebox_override("pressed", s)
@@ -343,7 +452,7 @@ func refresh_tools(active_id: String, weather_type: String) -> void:
 
 func set_paused(p: bool) -> void:
 	pause_btn.icon = Icons.get_icon("play" if p else "pause")
-	var s: StyleBoxFlat = well_style(p)
+	var s: StyleBox = well_style(p)
 	pause_btn.add_theme_stylebox_override("normal", s)
 	pause_btn.add_theme_stylebox_override("hover", s)
 
@@ -465,7 +574,11 @@ func _build_floaters() -> void:
 	hint_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hint_box.modulate.a = 0.0
 	add_child(hint_box)
-	hint_name = _label("", 28, C_ORANGE, 9, Color("#5a2a06"))
+	hint_name = _label("", 21, Color("#eb9e1a"), 2, Color(0.24, 0.13, 0.02, 0.55))
+	hint_name.label_settings.font = font_black
+	hint_name.label_settings.shadow_color = Color(0.14, 0.08, 0.02, 0.8)
+	hint_name.label_settings.shadow_offset = Vector2(1, 2)
+	hint_name.label_settings.shadow_size = 1
 	hint_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint_name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint_box.add_child(hint_name)
@@ -487,7 +600,7 @@ func _build_floaters() -> void:
 	dp.add_child(hint_desc)
 	hint_box.add_child(dp)
 	wbox = PanelContainer.new()
-	var ws: StyleBoxFlat = sb(Color("#1e2620"), Color("#0e130f"), 2, 5)
+	var ws: StyleBox = _tex_style(well_tex("n", 44, 80), 7)
 	ws.content_margin_left = 4
 	ws.content_margin_right = 4
 	ws.content_margin_top = 5
@@ -536,7 +649,7 @@ func _build_floaters() -> void:
 
 func set_brush(i: int) -> void:
 	for k: int in range(brush_btns.size()):
-		var s: StyleBoxFlat = well_style(k == i)
+		var s: StyleBox = well_style(k == i)
 		brush_btns[k].add_theme_stylebox_override("normal", s)
 		brush_btns[k].add_theme_stylebox_override("hover", s)
 		brush_btns[k].add_theme_stylebox_override("pressed", s)
@@ -580,17 +693,91 @@ func _process(delta: float) -> void:
 
 
 # ---------------- Fenster ----------------
+# WorldBox-Fenster: dunkle Schiefer-Fläche, Titelleiste, Werte-Zeilen mit kleinen Symbolen.
 
-func _rich() -> RichTextLabel:
+const C_SLATE: Color = Color("#27323a")
+const C_SLATE_DK: Color = Color("#1c2429")
+const C_SLATE_ROW: Color = Color("#222b31")
+const C_SLATE_ROW2: Color = Color("#2a343b")
+const C_SLATE_EDGE: Color = Color("#4d5d66")
+const MT_PREFIX: String = "[color=#9db09e]"
+
+var insp_title: Label
+var insp_rows: VBoxContainer
+var insp_sig: String = ""
+var modal_title: Label
+
+const STAT_ICON: Dictionary = {
+	"Bewohner": "person", "Volk": "person", "Vorräte": "apple", "Gebäude": "house", "Clan": "flag", "Stärkster": "crown",
+	"Fehden": "sword", "Bündnisse": "hand", "Alter": "hourglass", "Pfad": "orb", "Begabung": "star", "Essenz": "gem",
+	"Fortschritt": "arrow", "Öffnung": "eye", "Arbeit": "hammer", "Leben": "heart", "Siege": "sword", "Stärke": "sword", "Beute": "skull"}
+
+
+static func stat_icon(id: String) -> ImageTexture:
+	var key: String = "si_" + id
+	if _tex_cache.has(key):
+		return _tex_cache[key]
+	var g: Array = [".......", "..WWW..", ".WWWWW.", ".WWWWW.", ".WWWWW.", "..WWW..", "......."]
+	match id:
+		"person":
+			g = ["..HHH..", "..SSS..", "..SSS..", ".BBBBB.", "S.BBB.S", "..L.L..", "..L.L.."]
+		"heart":
+			g = [".RR.RR.", "RWRRRRR", "RRRRRRR", "RRRRRRR", ".RRRRR.", "..RRR..", "...R..."]
+		"apple":
+			g = ["...g...", "..Gg...", ".RRWRR.", "RRWRRRR", "RRRRRRR", ".RRRRR.", "..R.R.."]
+		"house":
+			g = ["...R...", "..RRR..", ".RRRRR.", "RRRRRRR", ".WWDWW.", ".WWDWW.", ".WWWWW."]
+		"flag":
+			g = ["PFFFF..", "PFFFFF.", "PFFFF..", "PFF....", "P......", "P......", "P......"]
+		"crown":
+			g = [".......", "Y.Y.Y.Y", "YYYYYYY", "YRYBYCY", "YYYYYYY", ".......", "......."]
+		"sword":
+			g = ["......W", ".....WG", "....WG.", "Y..WG..", ".YWG...", "..b....", ".b.Y..."]
+		"skull":
+			g = [".WWWWW.", "WWWWWWW", "WKKWKKW", "WWWKWWW", ".WWWWW.", ".W.W.W.", "......."]
+		"hourglass":
+			g = ["YYYYYYY", ".G...G.", "..GsG..", "...s...", "..GsG..", ".GsssG.", "YYYYYYY"]
+		"star":
+			g = ["...Y...", "..YYY..", "YYYYYYY", ".YYYYY.", "..YYY..", ".YY.YY.", "Y.....Y"]
+		"gem":
+			g = ["..CCC..", ".CWCCC.", "CCCCCCC", ".CCCCC.", "..CCC..", "...C...", "......."]
+		"orb":
+			g = ["..VVV..", ".VWVVV.", "VVVVVVV", "VVVVVVV", ".VVVVV.", "..VVV..", "......."]
+		"arrow":
+			g = ["...G...", "..GGG..", ".GGGGG.", "GGGGGGG", "..GGG..", "..GGG..", "..GGG.."]
+		"eye":
+			g = [".......", "..WWW..", ".WWKWW.", "WWKCKWW", ".WWKWW.", "..WWW..", "......."]
+		"hammer":
+			g = [".GGG...", "GGGGG..", ".GGG...", "..b....", "...b...", "....b..", ".....b."]
+		"hand":
+			g = [".......", "SS...TT", "SSS.TTT", ".SSSTT.", "..SST..", "...S...", "......."]
+	var pal: Dictionary = {"H": "#5a3a22", "S": "#f0c090", "B": "#3d6fd0", "L": "#3a2c26", "R": "#e0402e", "W": "#eef2f0", "g": "#3a7a2a",
+		"G": "#9aa4ac", "D": "#5a3a22", "P": "#8a6a3a", "F": "#3d6fd0", "Y": "#f0c040", "C": "#62d8a4", "K": "#22262a", "s": "#e8d090",
+		"b": "#7a5030", "T": "#c8a070", "V": "#b98cff"}
+	if id == "arrow":
+		pal["G"] = "#6fd24a"
+	if id == "house":
+		pal["R"] = "#c63a2a"
+		pal["W"] = "#e8dcc0"
+	var q: Px = Px.new(9, 9)
+	q.draw_image(Px.grid(g, pal), 1, 1)
+	q.outline(Color("#0e1214"))
+	var t: ImageTexture = q.tex()
+	_tex_cache[key] = t
+	return t
+
+
+func _rich(fs: int = 13) -> RichTextLabel:
 	var r: RichTextLabel = RichTextLabel.new()
 	r.bbcode_enabled = true
 	r.fit_content = true
 	r.scroll_active = false
 	r.selection_enabled = false
+	r.meta_underlined = false
 	r.add_theme_font_override("normal_font", ThemeDB.fallback_font)
 	r.add_theme_font_override("bold_font", font_bold)
-	r.add_theme_font_size_override("normal_font_size", 13)
-	r.add_theme_font_size_override("bold_font_size", 13)
+	r.add_theme_font_size_override("normal_font_size", fs)
+	r.add_theme_font_size_override("bold_font_size", fs)
 	r.add_theme_constant_override("line_separation", 3)
 	r.add_theme_color_override("default_color", Color("#eef3ea"))
 	r.meta_clicked.connect(func(m: Variant) -> void: meta_clicked.emit(str(m)))
@@ -598,19 +785,56 @@ func _rich() -> RichTextLabel:
 
 
 func _win_style() -> StyleBoxFlat:
-	var s: StyleBoxFlat = sb(Color("#2a352c"), C_RIM, 2, 7)
-	s.set_content_margin_all(12)
-	s.shadow_color = Color(0, 0, 0, 0.5)
-	s.shadow_size = 10
+	var s: StyleBoxFlat = sb(C_SLATE, Color("#0c1013"), 2, 4)
+	s.set_content_margin_all(0)
+	s.shadow_color = Color(0, 0, 0, 0.45)
+	s.shadow_size = 8
+	s.shadow_offset = Vector2(0, 3)
 	return s
+
+
+func _win_bevel(c: Control) -> void:
+	var w: float = c.size.x
+	var h: float = c.size.y
+	c.draw_rect(Rect2(2, 2, w - 4, h - 4), C_SLATE_EDGE, false, 1.0)
+
+
+func _title_bar(lbl: Label, close_cb: Callable) -> PanelContainer:
+	var tb: PanelContainer = PanelContainer.new()
+	var ts: StyleBoxFlat = sb(C_SLATE_DK, Color("#3a4850"), 0, 2)
+	ts.border_width_bottom = 2
+	ts.border_color = Color("#11171b")
+	ts.content_margin_left = 10
+	ts.content_margin_right = 4
+	ts.content_margin_top = 4
+	ts.content_margin_bottom = 4
+	tb.add_theme_stylebox_override("panel", ts)
+	tb.draw.connect(func() -> void:
+		tb.draw_rect(Rect2(2, 1, tb.size.x - 4, 1), Color(1, 1, 1, 0.07)))
+	var h: HBoxContainer = HBoxContainer.new()
+	h.add_theme_constant_override("separation", 6)
+	tb.add_child(h)
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.clip_text = true
+	h.add_child(lbl)
+	h.add_child(_close_button(close_cb))
+	return tb
 
 
 func _close_button(cb: Callable) -> Button:
 	var x: Button = Button.new()
-	x.custom_minimum_size = Vector2(28, 28)
-	_style_button(x, red_style())
-	x.text = "✕"
-	x.add_theme_font_size_override("font_size", 14)
+	x.custom_minimum_size = Vector2(26, 26)
+	_style_button(x, _tex_style(red_tex(26, 26), 6))
+	if not _tex_cache.has("closex"):
+		var q: Px = Px.new(12, 12)
+		for k: int in range(8):
+			q.p(2 + k, 2 + k, 2, 2, "#f4f0ea")
+			q.p(8 - k, 2 + k, 2, 2, "#f4f0ea")
+		q.outline(Color("#5a1a12"))
+		_tex_cache["closex"] = q.tex()
+	x.icon = _tex_cache["closex"]
+	x.add_theme_constant_override("icon_max_width", 14)
 	x.pressed.connect(cb)
 	return x
 
@@ -624,22 +848,36 @@ func _build_windows() -> void:
 	insp.offset_right = -12
 	insp.offset_top = 70
 	insp.visible = false
+	insp.draw.connect(_win_bevel.bind(insp))
 	add_child(insp)
 	var v: VBoxContainer = VBoxContainer.new()
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_theme_constant_override("separation", 8)
+	v.add_theme_constant_override("separation", 0)
 	insp.add_child(v)
+	insp_title = _label("", 16, Color("#f2f6f8"), 4, Color("#0c1013"))
+	insp_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(_title_bar(insp_title, close_insp))
+	var inner: MarginContainer = MarginContainer.new()
+	for side: String in ["left", "right", "top", "bottom"]:
+		inner.add_theme_constant_override("margin_" + side, 8)
+	v.add_child(inner)
+	var iv: VBoxContainer = VBoxContainer.new()
+	iv.add_theme_constant_override("separation", 8)
+	inner.add_child(iv)
 	insp_head = HBoxContainer.new()
 	insp_head.add_theme_constant_override("separation", 10)
-	v.add_child(insp_head)
+	iv.add_child(insp_head)
+	insp_rows = VBoxContainer.new()
+	insp_rows.add_theme_constant_override("separation", 1)
+	iv.add_child(insp_rows)
 	insp_text = _rich()
-	insp_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_child(insp_text)
+	insp_text.visible = false
+	iv.add_child(insp_text)
 	insp_btns = HBoxContainer.new()
 	insp_btns.add_theme_constant_override("separation", 6)
-	v.add_child(insp_btns)
+	iv.add_child(insp_btns)
 	modal = ColorRect.new()
-	modal.color = Color(0.02, 0.04, 0.03, 0.55)
+	modal.color = Color(0.02, 0.03, 0.05, 0.55)
 	modal.set_anchors_preset(Control.PRESET_FULL_RECT)
 	modal.visible = false
 	modal.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -658,20 +896,32 @@ func _build_windows() -> void:
 	modal_panel.offset_top = 50
 	modal_panel.offset_bottom = -50
 	modal_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	modal_panel.draw.connect(_win_bevel.bind(modal_panel))
 	modal.add_child(modal_panel)
+	var mvv: VBoxContainer = VBoxContainer.new()
+	mvv.add_theme_constant_override("separation", 0)
+	modal_panel.add_child(mvv)
+	modal_title = _label("", 16, Color("#f2f6f8"), 4, Color("#0c1013"))
+	modal_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mvv.add_child(_title_bar(modal_title, close_modal))
+	var mbg: PanelContainer = PanelContainer.new()
+	var ms: StyleBoxFlat = sb(C_SLATE_ROW, Color.TRANSPARENT, 0, 3)
+	ms.set_content_margin_all(10)
+	mbg.add_theme_stylebox_override("panel", ms)
+	mbg.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var mm: MarginContainer = MarginContainer.new()
+	for side2: String in ["left", "right", "top", "bottom"]:
+		mm.add_theme_constant_override("margin_" + side2, 6)
+	mm.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	mm.add_child(mbg)
+	mvv.add_child(mm)
 	var msc: ScrollContainer = ScrollContainer.new()
 	msc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	modal_panel.add_child(msc)
+	mbg.add_child(msc)
 	var mv: VBoxContainer = VBoxContainer.new()
 	mv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mv.add_theme_constant_override("separation", 10)
 	msc.add_child(mv)
-	var mh: HBoxContainer = HBoxContainer.new()
-	mv.add_child(mh)
-	var sp: Control = Control.new()
-	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mh.add_child(sp)
-	mh.add_child(_close_button(close_modal))
 	modal_text = _rich()
 	modal_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mv.add_child(modal_text)
@@ -687,78 +937,173 @@ func _fill_buttons(box: HBoxContainer, buttons: Array) -> void:
 		var b: Button = Button.new()
 		b.text = e[0]
 		var kind: String = e[2] if e.size() > 2 else ""
-		var col: Color = C_RED if kind == "red" else (Color("#2f7a5c") if kind == "jade" else Color("#3c4a3b"))
-		var st: StyleBoxFlat = sb(col, C_RIM, 2, 5)
+		var col: Color = C_RED if kind == "red" else (Color("#2f8a64") if kind == "jade" else Color("#3e4c56"))
+		var st: StyleBoxFlat = sb(col, col.darkened(0.55), 1, 2)
+		st.border_width_bottom = 3
 		st.content_margin_left = 10
 		st.content_margin_right = 10
-		st.content_margin_top = 5
-		st.content_margin_bottom = 5
+		st.content_margin_top = 4
+		st.content_margin_bottom = 4
 		_style_button(b, st)
-		b.add_theme_font_size_override("font_size", 13)
+		b.add_theme_font_size_override("font_size", 12)
+		b.add_theme_color_override("font_color", Color("#f4f8f4"))
+		b.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+		b.add_theme_constant_override("outline_size", 3)
 		var cb: Callable = e[1]
 		b.pressed.connect(cb)
 		box.add_child(b)
 
 
-## Inspektionskarte oben: Kopf (Bild + Titel), BBCode-Text, Knöpfe [[Text, Callable, Art]].
+## Banner mit Clan-Siegel wie auf den Dorf-Schildern.
+func _banner(col: Color, glyph: String) -> Control:
+	var c: Control = Control.new()
+	c.custom_minimum_size = Vector2(40, 50)
+	c.draw.connect(func() -> void:
+		var w: float = c.size.x
+		var h: float = c.size.y
+		c.draw_rect(Rect2(0, 0, w, h), col.darkened(0.62))
+		c.draw_rect(Rect2(2, 2, w - 4, h - 4), col.darkened(0.08))
+		c.draw_rect(Rect2(4.5, 4.5, w - 9, h - 9), col.lightened(0.38), false, 1.0)
+		c.draw_rect(Rect2(6, 6, w - 12, h - 12), col.darkened(0.18))
+		for q: Vector2 in [Vector2(-1, -1), Vector2(w - 3, -1), Vector2(-1, h - 3), Vector2(w - 3, h - 3)]:
+			c.draw_rect(Rect2(q, Vector2(4, 4)), col.darkened(0.62))
+		var gw: float = font_cjk.get_string_size(glyph, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
+		c.draw_string(font_cjk, Vector2(roundf(w / 2.0 - gw / 2.0), h / 2.0 + 8.0), glyph, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, col.lightened(0.75)))
+	return c
+
+
+## Inspektionskarte oben: Kopf (Bild + Titel), Werte-Zeilen, Knöpfe [[Text, Callable, Art]].
 func open_insp(head_tex: Texture2D, head_glyph: String, head_col: Color, title: String, sub: String, body: String, buttons: Array) -> void:
 	for c: Node in insp_head.get_children():
 		c.queue_free()
+	insp_title.text = title
 	if head_tex != null:
 		var tr: TextureRect = TextureRect.new()
 		tr.texture = head_tex
-		tr.custom_minimum_size = Vector2(52, 52)
+		tr.custom_minimum_size = Vector2(48, 48)
 		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		var pb: PanelContainer = PanelContainer.new()
-		pb.add_theme_stylebox_override("panel", sb(C_WELL, C_RIM, 2, 5))
+		var ps: StyleBox = _tex_style(well_tex("n", 54, 54), 6)
+		ps.content_margin_left = 3
+		ps.content_margin_right = 3
+		ps.content_margin_top = 3
+		ps.content_margin_bottom = 3
+		pb.add_theme_stylebox_override("panel", ps)
 		pb.add_child(tr)
 		insp_head.add_child(pb)
 	elif head_glyph != "":
-		var cr: PanelContainer = PanelContainer.new()
-		cr.add_theme_stylebox_override("panel", sb(head_col, C_RIM, 2, 5))
-		cr.custom_minimum_size = Vector2(50, 50)
-		var gl: Label = Label.new()
-		gl.text = head_glyph
-		gl.add_theme_font_override("font", font_cjk)
-		gl.add_theme_font_size_override("font_size", 30)
-		gl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		gl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		cr.add_child(gl)
-		insp_head.add_child(cr)
+		insp_head.add_child(_banner(head_col, head_glyph))
 	var tv: VBoxContainer = VBoxContainer.new()
 	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tv.alignment = BoxContainer.ALIGNMENT_CENTER
 	tv.add_theme_constant_override("separation", 0)
-	var tl: Label = _label(title, 17, C_BLUE)
-	tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tv.add_child(tl)
+	var first: bool = true
 	for line: String in sub.split("\n"):
 		if line == "":
 			continue
 		var sl: Label = Label.new()
 		sl.text = line
-		sl.add_theme_font_override("font", ThemeDB.fallback_font)
-		sl.add_theme_font_size_override("font_size", 12)
-		sl.add_theme_color_override("font_color", C_MUTED)
+		sl.add_theme_font_override("font", font_bold if first else ThemeDB.fallback_font)
+		sl.add_theme_font_size_override("font_size", 13 if first else 12)
+		sl.add_theme_color_override("font_color", Color("#62a6e6") if first else Color("#a8b8c0"))
+		first = false
 		sl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		tv.add_child(sl)
 	insp_head.add_child(tv)
-	insp_head.add_child(_close_button(close_insp))
-	insp_text.text = body
+	insp_sig = ""
+	update_insp_body(body)
 	_fill_buttons(insp_btns, buttons)
 	insp_btns.visible = not buttons.is_empty()
 	insp.visible = true
 
 
+## Zerlegt den BBCode-Text in Zeilen: "Name  Wert" wird zur Werte-Zeile mit Symbol.
 func update_insp_body(body: String) -> void:
 	insp_text.text = body
+	var lines: PackedStringArray = body.split("\n")
+	var sig: String = ""
+	for line: String in lines:
+		sig += (line.substr(0, line.find("[/color]")) if line.begins_with(MT_PREFIX) else "#") + "|"
+	if sig == insp_sig and insp_rows.get_child_count() == lines.size():
+		for k: int in range(lines.size()):
+			var row: Control = insp_rows.get_child(k)
+			if row.has_meta("val"):
+				(row.get_meta("val") as RichTextLabel).text = _row_value(lines[k])
+			elif row is RichTextLabel:
+				(row as RichTextLabel).text = lines[k]
+		return
+	insp_sig = sig
+	for c: Node in insp_rows.get_children():
+		insp_rows.remove_child(c)
+		c.queue_free()
+	var n: int = 0
+	for line: String in lines:
+		if line.begins_with(MT_PREFIX) and line.find("[/color]  ") > 0:
+			var name: String = line.substr(MT_PREFIX.length(), line.find("[/color]") - MT_PREFIX.length())
+			var row2: PanelContainer = PanelContainer.new()
+			var rs: StyleBoxFlat = sb(C_SLATE_ROW if n % 2 == 0 else C_SLATE_ROW2, Color.TRANSPARENT, 0, 2)
+			rs.content_margin_left = 4
+			rs.content_margin_right = 6
+			rs.content_margin_top = 1
+			rs.content_margin_bottom = 1
+			row2.add_theme_stylebox_override("panel", rs)
+			var h: HBoxContainer = HBoxContainer.new()
+			h.add_theme_constant_override("separation", 6)
+			row2.add_child(h)
+			var ic: TextureRect = TextureRect.new()
+			ic.texture = stat_icon(STAT_ICON.get(name, "dot"))
+			ic.custom_minimum_size = Vector2(18, 18)
+			ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			h.add_child(ic)
+			var nl: Label = Label.new()
+			nl.text = name
+			nl.custom_minimum_size = Vector2(76, 0)
+			nl.add_theme_font_override("font", ThemeDB.fallback_font)
+			nl.add_theme_font_size_override("font_size", 12)
+			nl.add_theme_color_override("font_color", Color("#9fb0b8"))
+			nl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			h.add_child(nl)
+			var val: RichTextLabel = _rich(12)
+			val.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			val.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			val.text = _row_value(line)
+			h.add_child(val)
+			row2.set_meta("val", val)
+			insp_rows.add_child(row2)
+			n += 1
+		elif line.strip_edges() == "":
+			var sp: Control = Control.new()
+			sp.custom_minimum_size = Vector2(0, 4)
+			insp_rows.add_child(sp)
+		else:
+			var r: RichTextLabel = _rich(12)
+			r.text = line
+			insp_rows.add_child(r)
+
+
+static func _row_value(line: String) -> String:
+	var i: int = line.find("[/color]  ")
+	return "[b]" + line.substr(i + 10) + "[/b]" if i >= 0 else line
 
 
 func close_insp() -> void:
 	insp.visible = false
 
 
+const H_PREFIX: String = "[font_size=20][color=#9fd0ff][b]"
+
+
 func open_modal(body: String, buttons: Array = []) -> void:
+	var title: String = ""
+	if body.begins_with(H_PREFIX):
+		var e: int = body.find("[/b]")
+		title = body.substr(H_PREFIX.length(), e - H_PREFIX.length())
+		var rest: int = body.find("[/font_size]")
+		body = body.substr(rest + 12).lstrip("\n")
+	modal_title.text = title
 	modal_text.text = body
 	_fill_buttons(modal_btns, buttons)
 	modal_btns.visible = not buttons.is_empty()
@@ -844,16 +1189,42 @@ class TabButton:
 			accept_event()
 
 	func _draw() -> void:
-		var w: float = size.x
-		var h: float = size.y
-		var inset: float = w * 0.09
-		var outer: PackedVector2Array = PackedVector2Array([Vector2(inset, 0), Vector2(w - inset, 0), Vector2(w, h), Vector2(0, h)])
-		draw_colored_polygon(outer, Color("#151a16"))
-		var inner: PackedVector2Array = PackedVector2Array([Vector2(inset + 2, 2), Vector2(w - inset - 2, 2), Vector2(w - 2, h), Vector2(2, h)])
-		draw_colored_polygon(inner, Color("#c74634") if active else Color("#414f3e"))
-		var hi: PackedVector2Array = PackedVector2Array([Vector2(inset + 2, 2), Vector2(w - inset - 2, 2), Vector2(w - inset - 1.6, 5), Vector2(inset + 1.6, 5)])
-		draw_colored_polygon(hi, Color("#e2664a") if active else Color("#5a6e55"))
+		var w: int = int(size.x)
+		var h: int = int(size.y)
+		var ins: int = 7
+		var dark: Color = Color("#7e241a") if active else Color("#2e3a2b")
+		var face: Color = Color("#c5332b") if active else Color("#4a5847")
+		var bev: Color = Color("#d8603e") if active else Color("#5f735b")
+		var top: Color = Color("#e08048") if active else Color("#6e8367")
+		var key: Color = Color("#a82a22") if active else Color("#3c4939")
+		for y: int in range(h):
+			var l: int = int(round(ins * float(h - 1 - y) / float(h - 1)))
+			draw_rect(Rect2(l, y, w - 2 * l, 1), dark)
+			if y == 0:
+				continue
+			draw_rect(Rect2(l + 1, y, w - 2 * l - 2, 1), bev)
+			draw_rect(Rect2(l + 3, y, w - 2 * l - 6, 1), face)
+		draw_rect(Rect2(ins + 1, 1, w - 2 * ins - 2, 2), top)
+		if active:
+			# schräge Glanzstreifen
+			for k: int in range(2):
+				var x0: float = w * (0.18 + k * 0.08)
+				for y: int in range(4, h):
+					draw_rect(Rect2(x0 + (h - y) * 0.6, y, 2, 1), Color(1, 0.55, 0.35, 0.28))
+		else:
+			# Mäander-Gravur an beiden Seiten
+			for sd: int in [0, 1]:
+				for y: int in range(6, h - 3):
+					var l2: int = int(round(ins * float(h - 1 - y) / float(h - 1))) + 5
+					var xx: int = l2 if sd == 0 else w - 1 - l2
+					draw_rect(Rect2(xx, y, 1, 1), key)
+				var yb: int = h - 4
+				var lb: int = int(round(ins * float(h - 1 - yb) / float(h - 1))) + 5
+				var xa: int = lb if sd == 0 else w - lb - 6
+				draw_rect(Rect2(xa, yb, 6, 1), key)
+				draw_rect(Rect2(xa + (5 if sd == 0 else 0), yb - 4, 1, 4), key)
+				draw_rect(Rect2(xa + (3 if sd == 0 else 0), yb - 4, 3, 1), key)
 		if icon_tex != null:
-			var iw: float = minf(w * 0.72, 42.0)
+			var iw: float = minf(w * 0.62, 40.0)
 			var ih: float = iw * 0.5
-			draw_texture_rect(icon_tex, Rect2((w - iw) * 0.5, (h - ih) * 0.5 + 2, iw, ih), false)
+			draw_texture_rect(icon_tex, Rect2(roundf((w - iw) * 0.5), roundf((h - ih) * 0.5 + 1), roundf(iw), roundf(ih)), false)
