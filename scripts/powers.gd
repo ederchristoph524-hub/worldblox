@@ -1,0 +1,520 @@
+class_name Powers
+extends RefCounted
+## Gottkräfte: alle Werkzeuge der Leiste und was sie auf der Karte bewirken.
+
+const W: int = GuData.W
+const H: int = GuData.H
+
+## Reiter -1 ist das Hauptmenü. m: paint = Pinsel, tap = Tippen, pair = zwei Dörfer, spawn = Setzen, act = Sofort-Aktion.
+const TABS: PackedStringArray = ["Welt formen", "Noosphäre und Leben", "Kreaturen und Bestien", "Natur und Katastrophen", "Zerstörung und Chaos", "Gu und Schicksal"]
+const TOOLS: Array = [
+	{"id": "winfo", "tab": -1, "g": 0, "n": "Weltinfo", "m": "act"},
+	{"id": "help", "tab": -1, "g": 0, "n": "Lexikon", "m": "act"},
+	{"id": "chron", "tab": -1, "g": 0, "n": "Chronik", "m": "act"},
+	{"id": "ages", "tab": -1, "g": 0, "n": "Zeitalter", "m": "act"},
+	{"id": "laws", "tab": -1, "g": 1, "n": "Weltgesetze", "m": "act", "riv": true},
+	{"id": "disp", "tab": -1, "g": 1, "n": "Anzeige", "m": "act", "riv": true},
+	{"id": "rank", "tab": -1, "g": 1, "n": "Rangliste", "m": "act", "riv": true},
+	{"id": "stats", "tab": -1, "g": 1, "n": "Clan-Statistik", "m": "act", "riv": true},
+	{"id": "save", "tab": -1, "g": 2, "n": "Speichern", "m": "act", "riv": true},
+	{"id": "load", "tab": -1, "g": 2, "n": "Laden", "m": "act", "riv": true},
+	{"id": "new", "tab": -1, "g": 2, "n": "Neue Welt", "m": "act", "riv": true},
+	{"id": "hideui", "tab": -1, "g": 2, "n": "Oberfläche ausblenden", "m": "act", "riv": true},
+	{"id": "t_deep", "tab": 0, "g": 0, "n": "Tiefes Meer", "d": "Nur Fischschuppenmenschen und Unsterbliche kommen hindurch.", "m": "paint", "tt": GuData.DEEP},
+	{"id": "t_shal", "tab": 0, "g": 0, "n": "Seichtes Wasser", "d": "Watbar, aber langsam.", "m": "paint", "tt": GuData.SHAL},
+	{"id": "t_sand", "tab": 0, "g": 0, "n": "Strand", "m": "paint", "tt": GuData.SAND},
+	{"id": "t_grass", "tab": 0, "g": 0, "n": "Grasland", "d": "Fruchtbares Land – hier gründen Clans Dörfer.", "m": "paint", "tt": GuData.GRASS},
+	{"id": "t_step", "tab": 0, "g": 0, "n": "Steppe", "d": "Die Grasmeere der Nordebenen.", "m": "paint", "tt": GuData.STEP},
+	{"id": "t_des", "tab": 0, "g": 0, "n": "Wüste", "d": "Der Sand der Westwüste.", "m": "paint", "tt": GuData.DES},
+	{"id": "t_soil", "tab": 0, "g": 0, "n": "Erde", "m": "paint", "tt": GuData.SOIL},
+	{"id": "t_snow", "tab": 0, "g": 0, "n": "Schnee", "m": "paint", "tt": GuData.SNOW},
+	{"id": "t_hill", "tab": 0, "g": 1, "n": "Hügel", "d": "Steinig – hier liegen Urstein-Adern.", "m": "paint", "tt": GuData.HILL},
+	{"id": "t_mount", "tab": 0, "g": 1, "n": "Gebirge", "m": "paint", "tt": GuData.MOUNT},
+	{"id": "t_up", "tab": 0, "g": 1, "n": "Land heben", "m": "paint"},
+	{"id": "t_down", "tab": 0, "g": 1, "n": "Land senken", "m": "paint"},
+	{"id": "t_wall", "tab": 0, "g": 1, "n": "Regionswand", "d": "Trennt die fünf Regionen. Nur Gu-Unsterbliche durchqueren sie.", "m": "paint", "tt": GuData.WALL},
+	{"id": "f_tree", "tab": 0, "g": 2, "n": "Wald", "m": "paint"},
+	{"id": "f_bamb", "tab": 0, "g": 2, "n": "Bambushain", "m": "paint"},
+	{"id": "f_ore", "tab": 0, "g": 2, "n": "Urstein-Ader", "d": "Bergleute bauen Ursteine ab – die Nahrung jeder Kultivierung.", "m": "paint"},
+	{"id": "f_spring", "tab": 0, "g": 2, "n": "Geisterquelle", "d": "Ein Dorf in der Nähe erhält laufend Ursteine.", "m": "paint"},
+	{"id": "f_clear", "tab": 0, "g": 2, "n": "Roden", "m": "paint"},
+	{"id": "inspect", "tab": 1, "g": 0, "n": "Dorf inspizieren", "d": "Tippe auf ein Dorf, einen Gu-Meister oder ein Tier.", "m": "tap"},
+	{"id": "stats2", "tab": 1, "g": 0, "n": "Clan-Statistik", "m": "act"},
+	{"id": "ally", "tab": 1, "g": 0, "n": "Bündnis", "d": "Tippe zwei Dörfer an – ihre Clans verbünden sich.", "m": "pair"},
+	{"id": "feud", "tab": 1, "g": 1, "n": "Fehde", "d": "Tippe zwei Dörfer verschiedener Clans an – sie ziehen in den Krieg.", "m": "pair"},
+	{"id": "discord", "tab": 1, "g": 1, "n": "Zwietracht", "d": "Ein Dorf sagt sich los und gründet einen eigenen Clan.", "m": "tap"},
+	{"id": "peace", "tab": 1, "g": 1, "n": "Frieden", "d": "Tippe ein Dorf an: Sein Clan beendet alle Fehden.", "m": "tap"},
+	{"id": "demon", "tab": 1, "g": 1, "n": "Dämonischer Pfad", "d": "Gu-Meister im Pinsel verlassen ihren Clan und morden für Macht.", "m": "paint"},
+	{"id": "s_0", "tab": 2, "g": 0, "n": "Menschen", "m": "spawn", "sp": "p0"},
+	{"id": "s_1", "tab": 2, "g": 0, "n": "Haarmenschen", "d": "Geborene Gu-Veredler.", "m": "spawn", "sp": "p1"},
+	{"id": "s_2", "tab": 2, "g": 0, "n": "Steinmenschen", "d": "Zäh und langlebig, aber langsam.", "m": "spawn", "sp": "p2"},
+	{"id": "s_3", "tab": 2, "g": 0, "n": "Fischschuppenmenschen", "d": "Schwimmen durch tiefes Wasser.", "m": "spawn", "sp": "p3"},
+	{"id": "s_deer", "tab": 2, "g": 1, "n": "Hirsch", "m": "spawn", "sp": "deer"},
+	{"id": "s_boar", "tab": 2, "g": 1, "n": "Eber", "m": "spawn", "sp": "boar"},
+	{"id": "s_wolf", "tab": 2, "g": 1, "n": "Wolf", "m": "spawn", "sp": "wolf"},
+	{"id": "s_monkey", "tab": 2, "g": 1, "n": "Affe", "m": "spawn", "sp": "monkey"},
+	{"id": "s_crane", "tab": 2, "g": 1, "n": "Kranich", "m": "spawn", "sp": "crane"},
+	{"id": "s_imm", "tab": 2, "g": 2, "n": "Wandernder Unsterblicher", "d": "Ein Rang-6-Gu-Unsterblicher ohne Clan.", "m": "spawn", "sp": "imm"},
+	{"id": "s_kingwolf", "tab": 2, "g": 2, "n": "Donnerkronen-Wolf", "d": "Ein Bestienkönig, der mit Blitzen angreift.", "m": "spawn", "sp": "kingwolf"},
+	{"id": "s_ancient", "tab": 2, "g": 2, "n": "Uralte Wildbestie", "d": "Stark wie ein Rang-8-Unsterblicher. Zertrampelt Dörfer.", "m": "spawn", "sp": "ancient"},
+	{"id": "tide", "tab": 2, "g": 2, "n": "Wolfsflut", "d": "Tippe aufs Land: Eine Wolfsflut stürmt das nächste Dorf.", "m": "tap"},
+	{"id": "w_rain", "tab": 3, "g": 0, "n": "Regen", "d": "Löscht Feuer, lässt Wälder wachsen.", "m": "act", "w": "rain"},
+	{"id": "w_snow", "tab": 3, "g": 0, "n": "Schneefall", "m": "act", "w": "snow"},
+	{"id": "w_drought", "tab": 3, "g": 0, "n": "Dürre", "d": "Gras verdorrt, Feuer breitet sich schneller aus.", "m": "act", "w": "drought"},
+	{"id": "w_sand", "tab": 3, "g": 0, "n": "Sandsturm", "d": "Alle Wanderer kommen nur langsam voran.", "m": "act", "w": "sand"},
+	{"id": "bloom", "tab": 3, "g": 1, "n": "Aufblühen", "d": "Asche, Erde und Wüste werden zu blühendem Land.", "m": "paint"},
+	{"id": "bolt", "tab": 3, "g": 1, "n": "Blitz", "m": "tap"},
+	{"id": "quake", "tab": 3, "g": 1, "n": "Erdkatastrophe", "d": "Die Erde bebt, Gebäude stürzen ein.", "m": "tap"},
+	{"id": "trib", "tab": 3, "g": 1, "n": "Himmelsdrangsal", "d": "Ein Gewitter der Drangsal über einem Gebiet.", "m": "tap"},
+	{"id": "plague", "tab": 3, "g": 1, "n": "Seuchen-Gu", "d": "Eine Seuche, die von Wesen zu Wesen springt.", "m": "paint"},
+	{"id": "fire", "tab": 4, "g": 0, "n": "Feuer", "m": "paint"},
+	{"id": "det", "tab": 4, "g": 0, "n": "Gu-Selbstdetonation", "d": "Ein Gu-Meister opfert seine Gu in einer Explosion.", "m": "tap"},
+	{"id": "cres", "tab": 4, "g": 0, "n": "Mondsichel-Mordzug", "d": "Ein unsterblicher Mordzug aus Mondlicht reißt das Land auf.", "m": "tap"},
+	{"id": "meteor", "tab": 4, "g": 0, "n": "Sternenfall", "m": "tap"},
+	{"id": "wrath", "tab": 4, "g": 1, "n": "Unsterbliche Katastrophe", "d": "Vernichtet alles in einem weiten Umkreis.", "m": "tap"},
+	{"id": "will", "tab": 4, "g": 1, "n": "Himmelswille", "d": "Schlägt den stärksten Gu-Meister der Welt.", "m": "act"},
+	{"id": "smite", "tab": 4, "g": 1, "n": "Auslöschen", "d": "Tötet jedes Wesen im Pinsel.", "m": "paint"},
+	{"id": "hope", "tab": 5, "g": 0, "n": "Hoffnungs-Gu", "d": "Erweckt die Öffnung von Sterblichen – sie werden Rang-1-Gu-Meister.", "m": "paint"},
+	{"id": "enlight", "tab": 5, "g": 0, "n": "Erleuchtung", "d": "Gu-Meister im Pinsel steigen sofort eine Stufe auf.", "m": "paint"},
+	{"id": "luck", "tab": 5, "g": 0, "n": "Großes Glück", "d": "Schnellere Kultivierung und ein sicherer Durchbruch.", "m": "paint"},
+	{"id": "life", "tab": 5, "g": 0, "n": "Lebensspannen-Gu", "d": "Schenkt 100 Jahre Lebenszeit.", "m": "paint"},
+	{"id": "stones", "tab": 5, "g": 1, "n": "Urstein-Regen", "d": "Tippe auf ein Dorf: 50 Ursteine fallen vom Himmel.", "m": "tap"},
+	{"id": "s_wildgu", "tab": 5, "g": 1, "n": "Wilde Gu", "d": "Gu-Meister fangen und veredeln sie.", "m": "spawn", "sp": "wildgu"},
+]
+const BRUSH: PackedInt32Array = [1, 2, 4, 7, 11]
+const LADDER: PackedInt32Array = [GuData.DEEP, GuData.SHAL, GuData.SAND, GuData.GRASS, GuData.HILL, GuData.MOUNT]
+
+var sim: Sim
+var brush_idx: int = 2
+var pair_sel: Village = null
+var stroke_id: int = 0
+
+
+func _init(s: Sim) -> void:
+	sim = s
+
+
+static func tool_by_id(id: String) -> Dictionary:
+	for t: Dictionary in TOOLS:
+		if t["id"] == id:
+			return t
+	return {}
+
+
+func brush_r() -> int:
+	return BRUSH[brush_idx]
+
+
+func _brush_tiles(tx: int, ty: int, fn: Callable) -> void:
+	var r: int = brush_r()
+	for dy: int in range(-r, r + 1):
+		for dx: int in range(-r, r + 1):
+			if dx * dx + dy * dy > r * r + r * 0.8:
+				continue
+			var x: int = tx + dx
+			var y: int = ty + dy
+			if sim.world.in_map(x, y):
+				fn.call(y * W + x, x, y)
+
+
+func _brush_units(x: float, y: float) -> Array[Unit]:
+	return sim.near_units(x, y, brush_r() + 1.5)
+
+
+func _ladder_idx(t: int) -> int:
+	var k: int = LADDER.find(t)
+	if k >= 0:
+		return k
+	if t == GuData.WALL:
+		return -1
+	return 3
+
+
+func begin_stroke() -> void:
+	stroke_id += 1
+
+
+## Ein Pinselstrich-Schritt an Weltposition (wx, wy).
+func apply_paint(t: Dictionary, wx: float, wy: float, stroke: Dictionary) -> void:
+	var tx: int = int(wx)
+	var ty: int = int(wy)
+	if not sim.world.in_map(tx, ty):
+		return
+	var w: World = sim.world
+	if t.has("tt"):
+		var tt: int = t["tt"]
+		_brush_tiles(tx, ty, func(i: int, _x: int, _y: int) -> void:
+			var nt: int = tt
+			if nt == GuData.GRASS and w.region[i] == 0:
+				nt = GuData.STEP
+			sim.set_tile(i, nt))
+		return
+	match str(t["id"]):
+		"t_up", "t_down":
+			var up: bool = t["id"] == "t_up"
+			_brush_tiles(tx, ty, func(i: int, _x: int, _y: int) -> void:
+				if stroke.has(i):
+					return
+				stroke[i] = true
+				var k: int = _ladder_idx(w.tile[i])
+				if k < 0:
+					return
+				var nt: int = LADDER[clampi(k + (1 if up else -1), 0, 5)]
+				if nt == GuData.GRASS:
+					nt = sim.land_for(i)
+				sim.set_tile(i, nt))
+		"f_tree", "f_bamb":
+			var bamb: bool = t["id"] == "f_bamb"
+			_brush_tiles(tx, ty, func(i: int, x: int, y: int) -> void:
+				var tt2: int = w.tile[i]
+				if not GuData.is_land(tt2) or tt2 == GuData.WALL or tt2 == GuData.MOUNT or w.bmap[i] >= 0 or w.feat[i] != 0 or randf() < 0.8:
+					return
+				w.feat[i] = GuData.F_BAMB if bamb else sim.plant_for(i)
+				w.mark_area(x, y))
+		"f_ore":
+			_brush_tiles(tx, ty, func(i: int, x: int, y: int) -> void:
+				var tt3: int = w.tile[i]
+				if not GuData.is_land(tt3) or tt3 == GuData.WALL or w.bmap[i] >= 0 or randf() < 0.85:
+					return
+				w.feat[i] = GuData.F_ORE
+				w.mark_area(x, y))
+		"f_spring":
+			_brush_tiles(tx, ty, func(i: int, x: int, y: int) -> void:
+				var tt4: int = w.tile[i]
+				if not GuData.is_land(tt4) or tt4 == GuData.WALL or tt4 == GuData.MOUNT or w.bmap[i] >= 0 or randf() < 0.93:
+					return
+				w.feat[i] = GuData.F_SPRING
+				w.mark_area(x, y))
+			for v: Village in sim.villages:
+				if v.alive:
+					v.spring = sim.near_feat(v.cx, v.cy, 12, GuData.F_SPRING)
+		"f_clear":
+			_brush_tiles(tx, ty, func(i: int, x: int, y: int) -> void:
+				if w.feat[i] != 0:
+					w.feat[i] = 0
+					w.mark_area(x, y))
+		"bloom":
+			_brush_tiles(tx, ty, func(i: int, x: int, y: int) -> void:
+				var tt5: int = w.tile[i]
+				if tt5 == GuData.ASH or tt5 == GuData.SOIL or tt5 == GuData.DES or tt5 == GuData.SNOW:
+					var lf: int = sim.land_for(i)
+					sim.set_tile(i, GuData.GRASS if lf == GuData.DES else lf)
+				if (w.tile[i] == GuData.GRASS or w.tile[i] == GuData.STEP) and w.feat[i] == 0 and w.bmap[i] < 0 and randf() < 0.06:
+					w.feat[i] = GuData.F_FLOWER if randf() < 0.5 else sim.plant_for(i)
+					w.mark_area(x, y)
+				if randf() < 0.08:
+					sim.parts.append({"x": x + 0.5, "y": y + 0.5, "vx": 0.0, "vy": -3.0, "l": 0.8, "ml": 0.8, "c": [Color("#ff9ad0"), Color("#fff09a"), Color("#9affb0")].pick_random(), "s": 0.6, "g": 0.0}))
+		"fire":
+			_brush_tiles(tx, ty, func(i: int, _x: int, _y: int) -> void:
+				if randf() < 0.5:
+					sim.ignite(i, 1.2))
+		"hope":
+			for u: Unit in _brush_units(wx, wy):
+				if u.k == "p" and u.rank == 0 and sim.uage(u) >= 10.0:
+					sim.awaken(u, true)
+					sim.pillar(u.x, u.y, GuData.ESS_COL[1], 0.5)
+					sim.float_txt(u, "Erweckt · " + ("Extrem" if u.apt == "X" else u.apt), GuData.ESS_COL[1])
+		"enlight":
+			for u: Unit in _brush_units(wx, wy):
+				if u.k != "p" or u.stroke_mark == stroke_id:
+					continue
+				u.stroke_mark = stroke_id
+				if u.rank == 0 and sim.uage(u) >= 10.0:
+					sim.awaken(u, true)
+				elif u.rank > 0:
+					sim.stage_up(u)
+				sim.spark(u.x, u.y - 2.0, Color("#fff3c0"), 6, 4.0)
+		"luck":
+			for u: Unit in _brush_units(wx, wy):
+				if u.k == "p":
+					u.luck = 1.0
+					sim.spark(u.x, u.y - 2.0, Color("#ffe27a"), 3, 3.0)
+		"life":
+			for u: Unit in _brush_units(wx, wy):
+				if u.k == "p" and u.stroke_mark != stroke_id:
+					u.stroke_mark = stroke_id
+					u.life += 100.0
+					sim.float_txt(u, "+100 Jahre", Color("#9affb0"))
+		"demon":
+			for u: Unit in _brush_units(wx, wy):
+				if u.k == "p" and u.rank > 0 and not u.rogue:
+					u.align = 1
+					sim.go_rogue(u)
+					sim.spark(u.x, u.y - 2.0, Color("#ff3030"), 6, 4.0)
+		"plague":
+			for u: Unit in _brush_units(wx, wy):
+				if u.sp != "wildgu":
+					u.sick = 22.0 + randf() * 10.0
+		"smite":
+			for u: Unit in _brush_units(wx, wy):
+				u.dreason = "göttliche Auslöschung"
+				sim.hurt(u, 1e9, null)
+				sim.spark(u.x, u.y - 1.0, Color.WHITE, 5, 6.0)
+
+
+## Setzt ein Wesen. Gibt einen Hinweistext zurück, wenn es nicht geht.
+func spawn_at(t: Dictionary, wx: float, wy: float) -> String:
+	var tx: int = int(wx)
+	var ty: int = int(wy)
+	if not sim.world.in_map(tx, ty):
+		return ""
+	var tt: int = sim.world.tile[ty * W + tx]
+	var s: String = t["sp"]
+	if s.begins_with("p"):
+		var race: int = int(s.substr(1))
+		if tt == GuData.WALL or (tt == GuData.DEEP and race != 3):
+			return "Hier kann niemand leben."
+		var u: Unit = sim.mk_person(wx, wy, race, 16.0 + randf() * 14.0)
+		u.awk = true
+		if randf() < 0.4:
+			sim.awaken(u)
+		sim.puff(wx, wy - 1.0, Color("#fff6d8"), 5)
+		return ""
+	if s == "imm":
+		if tt == GuData.WALL:
+			return ""
+		var im: Unit = sim.mk_person(wx, wy, 0 if randf() < 0.75 else 1, 120.0 + randf() * 80.0)
+		im.awk = true
+		sim.awaken(im)
+		for r: int in range(2, 7):
+			sim.ascend(im, r)
+		im.life = sim.uage(im) + 300.0 + randf() * 200.0
+		im.next_trib = sim.uage(im) + 8.0 + randf() * 10.0
+		sim.pillar(wx, wy, GuData.ESS_COL[6])
+		sim.log_event("Ein wandernder Gu-Unsterblicher erscheint: " + im.pname() + ".", "violet", true)
+		return ""
+	var S: Dictionary = GuData.SPEC[s]
+	if not S["fly"] and (tt == GuData.DEEP or tt == GuData.WALL):
+		return "Hier kann diese Kreatur nicht leben."
+	sim.mk_animal(wx, wy, s)
+	if s == "ancient":
+		sim.shake = 0.8
+		sim.log_event("Eine Uralte Wildbestie ist erwacht.", "war", true)
+	sim.puff(wx, wy - 1.0, Color("#e8dcc0"), 4)
+	return ""
+
+
+## Tipp-Werkzeuge. Gibt einen Hinweistext zurück (leer = nichts anzeigen).
+func tap_tool(t: Dictionary, wx: float, wy: float) -> String:
+	var tx: int = clampi(int(wx), 0, W - 1)
+	var ty: int = clampi(int(wy), 0, H - 1)
+	match str(t["id"]):
+		"feud", "ally":
+			var v: Village = sim.village_at(tx, ty)
+			if v == null:
+				return "Tippe auf ein Dorf."
+			if pair_sel == null:
+				pair_sel = v
+				return sim.clans[v.clan].name + " gewählt – jetzt den zweiten Clan antippen."
+			var a: Clan = sim.clans[pair_sel.clan]
+			var b: Clan = sim.clans[v.clan]
+			pair_sel = null
+			if a == b:
+				return "Wähle zwei verschiedene Clans."
+			if t["id"] == "feud":
+				sim.declare_war(a, b)
+			else:
+				sim.make_ally(a, b)
+		"peace":
+			var v2: Village = sim.village_at(tx, ty)
+			if v2 == null:
+				return "Tippe auf ein Dorf."
+			var c: Clan = sim.clans[v2.clan]
+			if c.war.is_empty():
+				return c.name + " führt keine Fehde."
+			for e: int in c.war.keys():
+				sim.make_peace(c, sim.clans[e])
+		"discord":
+			var v3: Village = sim.village_at(tx, ty)
+			if v3 == null:
+				return "Tippe auf ein Dorf."
+			return discord(v3)
+		"stones":
+			var v4: Village = sim.village_at(tx, ty)
+			if v4 == null:
+				return "Tippe auf ein Dorf."
+			v4.stones += 50.0
+			for k: int in range(24):
+				sim.later(k * 0.04, func() -> void: sim.spark(v4.cx + (randf() - 0.5) * 14.0, v4.cy + (randf() - 0.5) * 10.0, Color("#f4fff8"), 2, 3.0))
+			sim.log_event("Ein Urstein-Regen fällt über " + v4.name + ".", "gold", true)
+		"tide":
+			var rg: int = sim.region_at(wx, wy)
+			var v5: Village = sim.nearest_village(wx, wy, 120.0, func(vv: Village) -> bool: return vv.reg == rg)
+			if v5 == null:
+				return "Kein Dorf in dieser Region."
+			sim.beast_tide(v5, Vector2(wx, wy))
+		"bolt":
+			sim.bolt(wx, wy, 45.0, true)
+		"quake":
+			quake(wx, wy)
+		"trib":
+			for k: int in range(10):
+				sim.later(k * 0.15, func() -> void: sim.bolt(wx + (randf() - 0.5) * 18.0, wy + (randf() - 0.5) * 18.0, 120.0, true))
+			sim.later(1.7, func() -> void:
+				sim.bolt(wx, wy, 400.0, true)
+				sim.ring(wx, wy, 9.0, Color("#b98cff"), 1.0))
+		"det":
+			sim.boom(wx, wy, 5.0, 140.0, {"burn": 0.3, "c": Color("#9affb0")})
+		"cres":
+			crescent(wx, wy)
+		"meteor":
+			sim.fx.append({"k": "met", "x": wx, "y": wy, "l": 0.7, "ml": 0.7, "big": false})
+			sim.later(0.7, func() -> void: sim.boom(wx, wy, 9.0, 400.0, {"ash": true, "burn": 0.4, "c": Color("#ff9a3a")}))
+		"wrath":
+			sim.fx.append({"k": "met", "x": wx, "y": wy, "l": 0.9, "ml": 0.9, "big": true})
+			sim.later(0.9, func() -> void:
+				sim.boom(wx, wy, 26.0, 99999.0, {"ash": true, "lake": true, "burn": 0.3, "c": Color("#ffe4a0")})
+				sim.log_event("Eine unsterbliche Katastrophe verwüstet " + GuData.REGN[sim.region_at(wx, wy)] + ".", "red", true))
+	return ""
+
+
+func discord(v: Village) -> String:
+	var c: Clan = sim.clans[v.clan]
+	var count: int = 0
+	for w2: Village in sim.villages:
+		if w2.alive and w2.clan == c.id:
+			count += 1
+	if count < 2:
+		var gm: Array[Unit] = []
+		for u: Unit in sim.units:
+			if u.k == "p" and u.vil == v.id and u.rank > 0:
+				gm.append(u)
+		if gm.is_empty():
+			return "Hier gibt es keine Gu-Meister, die sich abwenden könnten."
+		for k: int in range(ceili(gm.size() / 2.0)):
+			sim.go_rogue(gm[k])
+		return ""
+	var nc: Clan = sim.new_clan(v.reg, sim.rand_sur(v.reg))
+	v.clan = nc.id
+	for u: Unit in sim.units:
+		if u.k == "p" and u.vil == v.id:
+			u.clan = nc.id
+	sim.log_event(v.name + " sagt sich von " + c.name + " los und gründet " + nc.name + ".", "war", true)
+	sim.declare_war(nc, c, true)
+	sim.terr_dirty = true
+	return ""
+
+
+func quake(x: float, y: float) -> void:
+	sim.shake = 1.3
+	sim.ring(x, y, 18.0, Color("#c9a46a"), 1.1)
+	sim.ring(x, y, 10.0, Color("#c9a46a"), 0.8)
+	var w: World = sim.world
+	for k: int in range(6):
+		var cx: float = x
+		var cy: float = y
+		var a: float = randf() * TAU
+		for s: int in range(26):
+			cx += cos(a)
+			cy += sin(a)
+			a += (randf() - 0.5) * 0.6
+			var tx: int = int(cx)
+			var ty: int = int(cy)
+			if not w.in_map(tx, ty):
+				break
+			var i: int = ty * W + tx
+			var t: int = w.tile[i]
+			if GuData.is_land(t) and t != GuData.WALL:
+				if t == GuData.HILL and randf() < 0.5:
+					sim.set_tile(i, GuData.MOUNT)
+				elif t != GuData.MOUNT:
+					sim.set_tile(i, GuData.SOIL)
+				if w.feat[i] != 0 and randf() < 0.6:
+					w.feat[i] = 0
+					w.mark_area(tx, ty)
+	for b: Building in sim.buildings:
+		if b != null and Vector2(b.x + b.w / 2.0 - x, b.y + b.h / 2.0 - y).length() < 18.0:
+			b.hp -= 120.0 if b.type == "hall" else 70.0
+			if b.hp <= 0.0:
+				sim.remove_building(b)
+	for u: Unit in sim.near_units(x, y, 18.0):
+		if not u.fly:
+			sim.hurt(u, 8.0, null)
+
+
+func crescent(x: float, y: float) -> void:
+	var a0: float = randf() * TAU
+	sim.fx.append({"k": "cres", "x": x, "y": y, "r": 12.0, "a": a0, "l": 0.9, "ml": 0.9})
+	var w: World = sim.world
+	for k: int in range(41):
+		var a: float = a0 - 1.1 + k * (2.2 / 40.0)
+		var rr: float = 10.0
+		while rr <= 13.5:
+			var tx: int = int(x + cos(a) * rr)
+			var ty: int = int(y + sin(a) * rr)
+			rr += 0.5
+			if not w.in_map(tx, ty):
+				continue
+			var i: int = ty * W + tx
+			var t: int = w.tile[i]
+			if GuData.is_land(t) and t != GuData.WALL:
+				if w.feat[i] != 0 and w.feat[i] != GuData.F_SPRING:
+					w.feat[i] = 0
+				sim.set_tile(i, GuData.HILL if t == GuData.MOUNT else GuData.SOIL)
+			var bi: int = w.bmap[i]
+			if bi >= 0 and sim.buildings[bi] != null:
+				sim.remove_building(sim.buildings[bi])
+	for u: Unit in sim.near_units(x, y, 14.0):
+		if Vector2(u.x - x, u.y - y).length() > 8.0:
+			sim.hurt(u, 900.0, null)
+	sim.spark(x, y, Color("#d8eeff"), 50, 16.0)
+	sim.shake = 0.7
+
+
+## Zufallsereignis der Schicksalsgabe.
+func fate() -> Vector2:
+	var gms: Array[Unit] = []
+	var old: Array[Unit] = []
+	for u: Unit in sim.units:
+		if u.k == "p" and u.hp > 0.0:
+			if u.rank >= 1 and u.rank <= 4:
+				gms.append(u)
+			if u.rank >= 3:
+				old.append(u)
+	var vs: Array[Village] = []
+	for v: Village in sim.villages:
+		if v.alive:
+			vs.append(v)
+	var opts: Array[String] = ["bestie"]
+	if not gms.is_empty():
+		opts.append("erbe")
+	if not old.is_empty():
+		opts.append("zikade")
+	if not vs.is_empty():
+		opts.append_array(["steine", "stern"])
+	match opts.pick_random():
+		"erbe":
+			var u: Unit = gms.pick_random()
+			sim.ascend(u, u.rank + 1)
+			sim.log_event(u.pname() + " entdeckt das Erbe eines alten Unsterblichen und erreicht " + GuData.rank_title(u.rank) + ".", "gold", true)
+			return Vector2(u.x, u.y)
+		"zikade":
+			var u2: Unit = old.pick_random()
+			u2.birth = sim.sim_time - 16.0 * 12.0
+			u2.hp = u2.mhp
+			sim.log_event(u2.pname() + " benutzt eine Frühling-Herbst-Zikade und wird wiedergeboren – jung, mit allen Erinnerungen.", "violet", true)
+			sim.pillar(u2.x, u2.y, Color("#ffb6e0"))
+			return Vector2(u2.x, u2.y)
+		"steine":
+			var v: Village = vs.pick_random()
+			v.stones += 80.0
+			sim.log_event("Ein Urstein-Regen fällt über " + v.name + ".", "gold", true)
+			for j: int in range(24):
+				sim.spark(v.cx + (randf() - 0.5) * 14.0, v.cy + (randf() - 0.5) * 10.0, Color("#eef8f2"), 2, 3.0)
+			return Vector2(v.cx, v.cy)
+		"stern":
+			var v2: Village = vs.pick_random()
+			var n: int = 0
+			for u3: Unit in sim.units:
+				if u3.k == "p" and u3.vil == v2.id and u3.hp > 0.0:
+					u3.luck = 1.0
+					if u3.rank == 0 and sim.uage(u3) >= 10.0 and randf() < 0.5:
+						sim.awaken(u3, true)
+						n += 1
+			sim.log_event("Ein Glücksstern steht über %s: %d Öffnungen erwachen." % [v2.name, n], "gold", true)
+			return Vector2(v2.cx, v2.cy)
+	var p: Vector2 = sim.random_tile(func(i: int) -> bool: return (sim.world.tile[i] == GuData.GRASS or sim.world.tile[i] == GuData.STEP) and sim.world.bmap[i] < 0)
+	if p.x >= 0.0:
+		sim.mk_animal(p.x, p.y, "kingwolf")
+		sim.log_event("Ein Bestienkönig erwacht in den " + GuData.REGN[sim.region_at(p.x, p.y)] + ".", "war", true)
+	return p

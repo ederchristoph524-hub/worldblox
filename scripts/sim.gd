@@ -1,0 +1,2095 @@
+class_name Sim
+extends Node
+## Die Simulation: Clans, Dörfer, Gu-Meister, Tiere, Feuer, Wetter, Zeitalter und Gottkräfte.
+
+signal logged(text: String, kind: String, notify: bool)
+signal unit_died(u: Unit)
+
+const W: int = GuData.W
+const H: int = GuData.H
+const N: int = GuData.N
+const DT: float = 0.05
+const GC: int = 16
+const GW: int = W / GC
+const GH: int = H / GC
+
+var world: World
+var units: Array[Unit] = []
+var villages: Array[Village] = []
+var clans: Array[Clan] = []
+var buildings: Array[Building] = []   # Einträge können null sein
+var projs: Array[Dictionary] = []
+var fx: Array[Dictionary] = []
+var parts: Array[Dictionary] = []
+var sched: Array[Dictionary] = []
+var fire: Dictionary = {}              # Kachel-Index -> Stärke
+var sim_time: float = 0.0
+var last_month: int = 0
+var seed_val: int = 1
+var next_id: int = 1
+var log_entries: Array[Dictionary] = []
+var laws: Dictionary = {"war": true, "tide": true, "will": true, "trib": true, "immortal": true, "walls": true, "growth": true, "fire": true}
+var weather: Dictionary = {}           # {type, t}
+var shake: float = 0.0
+var terr_dirty: bool = true
+var presim: bool = false
+var sp_count: Dictionary = {}
+var _grid: Array = []
+var _fire_acc: float = 0.0
+
+
+func _init() -> void:
+	world = World.new()
+	_grid.resize(GW * GH)
+	for k: int in range(GW * GH):
+		_grid[k] = []
+
+
+# ---------------- Hilfen ----------------
+
+func year() -> int:
+	return int(sim_time / 12.0) + 1
+
+
+func age_index() -> int:
+	return int((year() - 1) / GuData.AGE_YEARS) % GuData.AGES.size()
+
+
+func age_data() -> Dictionary:
+	return GuData.AGES[age_index()]
+
+
+func years_to_next_age() -> int:
+	return GuData.AGE_YEARS - ((year() - 1) % GuData.AGE_YEARS)
+
+
+func uage(u: Unit) -> float:
+	return (sim_time - u.birth) / 12.0
+
+
+func pick(a: Array) -> Variant:
+	return a[randi() % a.size()]
+
+
+func log_event(t: String, kind: String = "info", notify: bool = false) -> void:
+	log_entries.push_front({"y": year(), "t": t, "k": kind})
+	if log_entries.size() > 260:
+		log_entries.resize(260)
+	if notify and not presim:
+		logged.emit(t, kind, true)
+
+
+func later(t: float, fn: Callable) -> void:
+	sched.append({"t": sim_time + t, "fn": fn})
+
+
+func region_at(x: float, y: float) -> int:
+	return world.region_at(x, y)
+
+
+func rank_title(r: int) -> String:
+	return GuData.rank_title(r)
+
+
+# ---------------- Effekte ----------------
+
+func puff(x: float, y: float, c: Color, n: int) -> void:
+	for k: int in range(n):
+		parts.append({"x": x, "y": y, "vx": (randf() - 0.5) * 5.0, "vy": -randf() * 4.0, "l": 0.6 + randf() * 0.5, "ml": 1.1, "c": c, "s": 0.6 + randf() * 0.7, "g": 3.0})
+
+
+func spark(x: float, y: float, c: Color, n: int, spd: float = 6.0) -> void:
+	for k: int in range(n):
+		var a: float = randf() * TAU
+		var v: float = spd * (0.4 + randf())
+		parts.append({"x": x, "y": y, "vx": cos(a) * v, "vy": sin(a) * v, "l": 0.4 + randf() * 0.4, "ml": 0.8, "c": c, "s": 0.5 + randf() * 0.5, "g": 0.0})
+
+
+func float_txt(u: Unit, t: String, c: Color) -> void:
+	fx.append({"k": "txt", "x": u.x, "y": u.y - 4.0, "t": t, "c": c, "l": 1.6, "ml": 1.6})
+
+
+func pillar(x: float, y: float, c: Color, sc: float = 1.0) -> void:
+	fx.append({"k": "pillar", "x": x, "y": y, "c": c, "l": 1.8 * sc, "ml": 1.8 * sc, "w": sc})
+
+
+func ring(x: float, y: float, r: float, c: Color, l: float = 0.6) -> void:
+	fx.append({"k": "ring", "x": x, "y": y, "r": r, "c": c, "l": l, "ml": l})
+
+
+func flash(l: float) -> void:
+	fx.append({"k": "flash", "l": l, "ml": l})
+
+
+func bolt(x: float, y: float, dmg: float, ign: bool) -> void:
+	var pts: PackedVector2Array = PackedVector2Array()
+	var px: float = x + (randf() - 0.5) * 8.0
+	var py: float = y - 70.0
+	for k: int in range(11):
+		var t: float = k / 10.0
+		var jit: float = (randf() - 0.5) * 5.0 if (k > 0 and k < 10) else 0.0
+		pts.append(Vector2(px + (x - px) * t + jit, py + (y - py) * t))
+	fx.append({"k": "bolt", "pts": pts, "l": 0.35, "ml": 0.35})
+	flash(0.15)
+	spark(x, y, Color("#fff7b0"), 10, 10.0)
+	var i: int = clampi(int(y), 0, H - 1) * W + clampi(int(x), 0, W - 1)
+	if dmg > 0.0:
+		for o: Unit in near_units(x, y, 3.0):
+			hurt(o, dmg, null)
+		if ign:
+			ignite(i, 1.0)
+	elif ign and randf() < 0.4:
+		ignite(i, 0.8)
+
+
+# ---------------- Raster ----------------
+
+func rebuild_grid() -> void:
+	for c: Array in _grid:
+		c.clear()
+	for u: Unit in units:
+		if u.hp <= 0.0:
+			continue
+		var gx: int = clampi(int(u.x / GC), 0, GW - 1)
+		var gy: int = clampi(int(u.y / GC), 0, GH - 1)
+		_grid[gy * GW + gx].append(u)
+
+
+func near_units(x: float, y: float, r: float) -> Array[Unit]:
+	var out: Array[Unit] = []
+	var x0: int = clampi(int((x - r) / GC), 0, GW - 1)
+	var x1: int = clampi(int((x + r) / GC), 0, GW - 1)
+	var y0: int = clampi(int((y - r) / GC), 0, GH - 1)
+	var y1: int = clampi(int((y + r) / GC), 0, GH - 1)
+	var r2: float = r * r
+	for gy: int in range(y0, y1 + 1):
+		for gx: int in range(x0, x1 + 1):
+			for o: Unit in _grid[gy * GW + gx]:
+				if o.hp <= 0.0:
+					continue
+				var dx: float = o.x - x
+				var dy: float = o.y - y
+				if dx * dx + dy * dy <= r2:
+					out.append(o)
+	return out
+
+
+func nearest(u: Unit, r: float, pred: Callable) -> Unit:
+	var best: Unit = null
+	var bd: float = 1e9
+	for o: Unit in near_units(u.x, u.y, r):
+		if o == u:
+			continue
+		var d2: float = (o.x - u.x) * (o.x - u.x) + (o.y - u.y) * (o.y - u.y)
+		if d2 < bd and pred.call(o):
+			bd = d2
+			best = o
+	return best
+
+
+# ---------------- Wesen ----------------
+
+func rand_sur(r: int) -> String:
+	if r == 4:
+		return GuData.SURN[randi() % 4].pick_random()[0]
+	return GuData.SURN[r].pick_random()[0]
+
+
+func given_name() -> String:
+	var g: String = GuData.GIVEN[randi() % GuData.GIVEN.size()]
+	if randf() < 0.55:
+		g += GuData.GIVEN[randi() % GuData.GIVEN.size()].to_lower()
+	return g
+
+
+func mk_person(x: float, y: float, race: int, p_age: float = 0.0, sur: String = "") -> Unit:
+	var u: Unit = Unit.new()
+	u.id = next_id
+	next_id += 1
+	u.k = "p"
+	u.race = race
+	u.x = x
+	u.y = y
+	u.tx = x
+	u.ty = y
+	u.birth = sim_time - p_age * 12.0
+	u.life = GuData.RACE_LIFE[race] * (0.85 + randf() * 0.3)
+	u.sur = sur if sur != "" else rand_sur(region_at(x, y))
+	u.given = given_name()
+	u.think = randf()
+	u.anim = randf() * 10.0
+	u.swim = race == 3
+	set_stats(u, true)
+	units.append(u)
+	return u
+
+
+func set_stats(u: Unit, full: bool) -> void:
+	var m: float = GuData.RACE_HP[u.race]
+	var f: float = 1.0 + 0.15 * u.stage
+	var ratio: float = u.hp / u.mhp if u.mhp > 1.0 else 1.0
+	u.mhp = GuData.HP[u.rank] * m * f
+	u.atk = GuData.ATK[u.rank] * f * (1.12 if u.race == 1 else 1.0)
+	u.rng = GuData.RNG[u.rank]
+	u.aoe = GuData.AOE[u.rank]
+	u.hp = u.mhp if full else u.mhp * ratio
+	u.speed = GuData.RACE_SP[u.race] * (1.6 if u.rank >= 6 else 1.0 + u.rank * 0.04)
+	if u.rank >= 6:
+		u.fly = true
+
+
+func mk_animal(x: float, y: float, s: String) -> Unit:
+	var S: Dictionary = GuData.SPEC[s]
+	var u: Unit = Unit.new()
+	u.id = next_id
+	next_id += 1
+	u.k = "a"
+	u.sp = s
+	u.x = x
+	u.y = y
+	u.tx = x
+	u.ty = y
+	u.birth = sim_time
+	u.hp = S["hp"]
+	u.mhp = S["hp"]
+	u.atk = S["atk"]
+	u.rng = S["range"]
+	u.aoe = 3.5 if s == "ancient" else 0.0
+	u.speed = S["sp"]
+	u.fly = S["fly"]
+	u.think = randf()
+	u.anim = randf() * 10.0
+	u.hungry = randf() * 0.5
+	u.rank = 4 if s == "kingwolf" else (8 if s == "ancient" else 0)
+	u.life = 900.0 if s == "ancient" else (60.0 if s == "kingwolf" else 12.0 + randf() * 8.0)
+	units.append(u)
+	return u
+
+
+func power(u: Unit) -> float:
+	return (u.atk + 1.0) * (u.mhp + 1.0)
+
+
+func passable(u: Unit, tx: int, ty: int) -> bool:
+	if not world.in_map(tx, ty):
+		return false
+	var t: int = world.tile[ty * W + tx]
+	if t == GuData.WALL:
+		return not laws["walls"] or u.rank >= 6
+	if u.fly:
+		return true
+	if t == GuData.DEEP:
+		return u.swim
+	return true
+
+
+func sp_mul(u: Unit, t: int) -> float:
+	if u.fly:
+		return 1.0
+	if t == GuData.SHAL:
+		return 1.0 if u.swim else 0.55
+	if t == GuData.MOUNT:
+		return 0.5
+	if t == GuData.HILL or t == GuData.SNOW:
+		return 0.8
+	return 1.0
+
+
+func hostile(a: Unit, b: Unit) -> bool:
+	if a == b or b.hp <= 0.0:
+		return false
+	if a.k == "p" and b.k == "p":
+		if a.rogue or b.rogue:
+			return true
+		if a.clan < 0 or b.clan < 0 or a.clan == b.clan:
+			return false
+		var c: Clan = clans[a.clan]
+		return c.alive and c.war.has(b.clan)
+	if a.k == "p":
+		var s: String = b.sp
+		if s == "wildgu":
+			return false
+		if b.tide or s == "kingwolf" or s == "ancient":
+			return true
+		if s == "wolf":
+			return b.aggro == a or a.job == "hunt" or a.rank > 0
+		if s == "deer" or s == "boar":
+			return a.job == "hunt" or b.aggro == a
+		return b.aggro == a
+	if b.k == "p":
+		var s2: String = a.sp
+		if a.tide or s2 == "kingwolf" or s2 == "ancient":
+			return true
+		if s2 == "wolf":
+			return a.hungry > 0.97 or a.aggro == b
+		return a.aggro == b
+	if b.sp == "wildgu":
+		return false
+	if (a.sp == "wolf" or a.sp == "kingwolf") and b.sp == "deer":
+		return a.hungry > 0.4 or a.sp == "kingwolf"
+	if a.sp == "ancient":
+		return b.sp != "ancient"
+	return a.aggro == b
+
+
+# ---------------- Clans, Dörfer, Gebäude ----------------
+
+func village_name() -> String:
+	for k: int in range(20):
+		var n: String = GuData.VPRE[randi() % GuData.VPRE.size()] + GuData.VSUF[randi() % GuData.VSUF.size()]
+		var used: bool = false
+		for v: Village in villages:
+			if v != null and v.alive and v.name == n:
+				used = true
+		if not used:
+			return n
+	return GuData.VPRE[randi() % GuData.VPRE.size()] + GuData.VSUF[randi() % GuData.VSUF.size()]
+
+
+func new_clan(r: int, sur: String) -> Clan:
+	var c: Clan = Clan.new()
+	if r == 4:
+		var s: Array = GuData.SURN[4].pick_random()
+		c.name = s[0] + "-Sekte"
+		c.glyph = s[1]
+		c.kind = "Sekte"
+	else:
+		var list: Array = GuData.SURN[r if (r >= 0 and r < 4) else 1]
+		var found: Array = []
+		for a: Array in list:
+			if a[0] == sur:
+				found = a
+		if found.is_empty():
+			for rr: int in range(4):
+				for a: Array in GuData.SURN[rr]:
+					if a[0] == sur:
+						found = a
+		if found.is_empty():
+			found = list.pick_random()
+		c.kind = "Stamm" if r == 0 else "Clan"
+		c.name = c.kind + " " + found[0]
+		c.glyph = found[1]
+	for o: Clan in clans:
+		if o.alive and o.name == c.name:
+			c.name += " (Zweig)"
+			break
+	var used: Array[String] = []
+	for o: Clan in clans:
+		if o.alive:
+			used.append(o.col.to_html(false))
+	c.col = GuData.CLANCOL.pick_random()
+	for col: Color in GuData.CLANCOL:
+		if not used.has(col.to_html(false)):
+			c.col = col
+			break
+	c.id = clans.size()
+	c.born = year()
+	c.region = r
+	clans.append(c)
+	return c
+
+
+func can_place(x: int, y: int, w: int, h: int, m: int) -> bool:
+	for yy: int in range(y - m, y + h + m):
+		for xx: int in range(x - m, x + w + m):
+			if not world.in_map(xx, yy):
+				return false
+			var i: int = yy * W + xx
+			if world.bmap[i] >= 0:
+				return false
+			if xx >= x and xx < x + w and yy >= y and yy < y + h:
+				if not GuData.buildable(world.tile[i]):
+					return false
+				var f: int = world.feat[i]
+				if f == GuData.F_ROCK or f == GuData.F_ORE or f == GuData.F_SPRING:
+					return false
+				if fire.has(i):
+					return false
+	return true
+
+
+func place_building(v: Village, type: String, x: int, y: int) -> Building:
+	var s: Vector2i = GuData.BSIZE[type]
+	var b: Building = Building.new()
+	b.id = buildings.size()
+	b.type = type
+	b.x = x
+	b.y = y
+	b.w = s.x
+	b.h = s.y
+	b.v = v.id
+	b.hp = GuData.BHP[type]
+	buildings.append(b)
+	v.b.append(b.id)
+	for yy: int in range(y, y + b.h):
+		for xx: int in range(x, x + b.w):
+			var i: int = yy * W + xx
+			world.bmap[i] = b.id
+			if world.feat[i] != 0:
+				world.feat[i] = 0
+				world.mark_area(xx, yy)
+	for yy: int in range(y + b.h, mini(H, y + b.h + 8)):
+		for xx: int in range(x - 2, x + b.w + 2):
+			if xx < 0 or xx >= W:
+				continue
+			var i2: int = yy * W + xx
+			if GuData.is_tree(world.feat[i2]) and randf() < 0.6:
+				world.feat[i2] = 0
+				world.mark_area(xx, yy)
+	recount(v)
+	puff(x + b.w / 2.0, y + b.h / 2.0, Color("#d8c8a0"), 8)
+	terr_dirty = true
+	return b
+
+
+func recount(v: Village) -> void:
+	v.houses = 0
+	v.farms = 0
+	v.forge = false
+	v.towers = 0
+	var keep: PackedInt32Array = PackedInt32Array()
+	for id: int in v.b:
+		var b: Building = buildings[id]
+		if b == null:
+			continue
+		keep.append(id)
+		match b.type:
+			"house":
+				v.houses += 1
+			"farm":
+				v.farms += 1
+			"forge":
+				v.forge = true
+			"tower":
+				v.towers += 1
+	v.b = keep
+	v.cap = 4 + v.houses * 4
+
+
+func remove_building(b: Building, quiet: bool = false) -> void:
+	if buildings[b.id] == null:
+		return
+	buildings[b.id] = null
+	for yy: int in range(b.y, b.y + b.h):
+		for xx: int in range(b.x, b.x + b.w):
+			var i: int = yy * W + xx
+			if world.bmap[i] == b.id:
+				world.bmap[i] = -1
+	if not quiet:
+		puff(b.x + b.w / 2.0, b.y + b.h / 2.0, Color("#6a5a4a"), 12)
+	var v: Village = villages[b.v]
+	recount(v)
+	if b.type == "hall" and v.alive:
+		abandon_village(v, "Die Ahnenhalle von " + v.name + " wurde zerstört.")
+	terr_dirty = true
+
+
+func abandon_village(v: Village, why: String) -> void:
+	v.alive = false
+	var c: Clan = clans[v.clan]
+	for id: int in v.b.duplicate():
+		var b: Building = buildings[id]
+		if b != null:
+			remove_building(b, true)
+	for u: Unit in units:
+		if u.k == "p" and u.vil == v.id:
+			u.vil = -1
+			u.col_clan = v.clan
+	if why != "":
+		log_event(why + " (" + c.name + ")", "war")
+	terr_dirty = true
+
+
+func village_at(tx: int, ty: int) -> Village:
+	if world.in_map(tx, ty):
+		var bi: int = world.bmap[ty * W + tx]
+		if bi >= 0 and buildings[bi] != null:
+			var vv: Village = villages[buildings[bi].v]
+			if vv.alive:
+				return vv
+	var best: Village = null
+	var bd: float = 1e9
+	for v: Village in villages:
+		if not v.alive:
+			continue
+		var d: float = Vector2(v.cx - tx, v.cy - ty).length()
+		if d < 12.0 and d < bd:
+			bd = d
+			best = v
+	return best
+
+
+func site_ok(tx: int, ty: int, reg: int) -> bool:
+	if not can_place(tx - 3, ty - 2, 7, 4, 2):
+		return false
+	if reg >= 0 and world.region[ty * W + tx] != reg:
+		return false
+	for v: Village in villages:
+		if v.alive and Vector2(v.cx - tx, v.cy - ty).length() < 28.0:
+			return false
+	return true
+
+
+func find_site(x: float, y: float, min_d: float, max_d: float, reg: int) -> Vector2:
+	for k: int in range(50):
+		var a: float = randf() * TAU
+		var d: float = min_d + randf() * (max_d - min_d)
+		var tx: int = roundi(x + cos(a) * d)
+		var ty: int = roundi(y + sin(a) * d)
+		if site_ok(tx, ty, reg):
+			return Vector2(tx + 0.5, ty + 0.5)
+	return Vector2(-1, -1)
+
+
+func near_feat(x: float, y: float, r: int, f: int) -> bool:
+	for dy: int in range(-r, r + 1):
+		for dx: int in range(-r, r + 1):
+			var xx: int = int(x) + dx
+			var yy: int = int(y) + dy
+			if world.in_map(xx, yy) and world.feat[yy * W + xx] == f:
+				return true
+	return false
+
+
+func found_village(u: Unit, clan_id: int) -> bool:
+	var tx: int = int(u.x)
+	var ty: int = int(u.y)
+	if not site_ok(tx, ty, -1):
+		return false
+	var c: Clan = null
+	if clan_id >= 0 and clan_id < clans.size() and clans[clan_id].alive:
+		c = clans[clan_id]
+	var is_new: bool = c == null
+	if is_new:
+		c = new_clan(world.region[ty * W + tx], u.sur)
+	var v: Village = Village.new()
+	v.id = villages.size()
+	v.clan = c.id
+	v.x = tx - 3
+	v.y = ty - 2
+	v.cx = tx + 0.5
+	v.cy = ty + 0.5
+	v.name = village_name()
+	v.race = u.race
+	v.born = year()
+	v.spring = near_feat(tx, ty, 12, GuData.F_SPRING)
+	v.reg = world.region[ty * W + tx]
+	villages.append(v)
+	place_building(v, "hall", tx - 3, ty - 2)
+	u.vil = v.id
+	u.clan = c.id
+	u.col_clan = -1
+	u.col_to = Vector2(-1, -1)
+	if is_new:
+		log_event(("Die " if c.kind == "Sekte" else "") + c.name + " wird in " + v.name + " gegründet (" + GuData.REGN[v.reg] + ").", "jade", true)
+	elif randf() < 0.5:
+		log_event(c.name + " besiedelt " + v.name + ".", "jade")
+	terr_dirty = true
+	return true
+
+
+func join_village(u: Unit, v: Village) -> void:
+	u.vil = v.id
+	u.clan = v.clan
+	u.col_clan = -1
+	u.col_to = Vector2(-1, -1)
+	u.job = ""
+
+
+func nearest_village(x: float, y: float, r: float, pred: Callable = Callable()) -> Village:
+	var best: Village = null
+	var bd: float = 1e9
+	for v: Village in villages:
+		if not v.alive:
+			continue
+		var d: float = Vector2(v.cx - x, v.cy - y).length()
+		if d < r and d < bd and (not pred.is_valid() or pred.call(v)):
+			bd = d
+			best = v
+	return best
+
+
+func try_build(v: Village, type: String) -> bool:
+	var s: Vector2i = GuData.BSIZE[type]
+	var r0: float = 6.0 + mini(10, v.houses) * 1.4
+	for k: int in range(40):
+		var a: float = randf() * TAU
+		var d: float = 5.0 + randf() * r0
+		var x: int = roundi(v.cx + cos(a) * d - s.x / 2.0)
+		var y: int = roundi(v.cy + sin(a) * d * 0.85 - s.y / 2.0)
+		if can_place(x, y, s.x, s.y, 1) and world.region[y * W + x] == v.reg:
+			place_building(v, type, x, y)
+			return true
+	return false
+
+
+func pick_sur(v: Village) -> String:
+	var c: Clan = clans[v.clan]
+	if c.kind != "Sekte":
+		return c.name.replace("Clan ", "").replace("Stamm ", "").replace(" (Zweig)", "")
+	return rand_sur(v.reg)
+
+
+# ---------------- Kultivierung ----------------
+
+const APTM: Dictionary = {"X": 4.0, "A": 2.0, "B": 1.4, "C": 1.0, "D": 0.6}
+
+
+func awaken(u: Unit, force: bool = false) -> void:
+	var q: float = randf()
+	u.apt = "X" if q < 0.01 else ("A" if q < 0.07 else ("B" if q < 0.25 else ("C" if q < 0.6 else "D")))
+	if force and u.apt == "D" and randf() < 0.5:
+		u.apt = "C"
+	if u.apt == "X":
+		u.phys_x = true
+	var r: int = villages[u.vil].reg if u.vil >= 0 else region_at(u.x, u.y)
+	u.path = GuData.REGPATH[r].pick_random()
+	u.align = 1 if randf() < 0.3 else 0
+	u.rank = 1
+	u.stage = 0
+	u.prog = 0.0
+	u.awk = true
+	u.gus = PackedStringArray([GuData.STARTGU[u.path]])
+	u.life += GuData.LIFEB[1]
+	u.job = ""
+	set_stats(u, true)
+	if u.phys_x:
+		log_event(u.pname() + " wird mit einer der Zehn Extremkonstitutionen erweckt – ohne Unsterblichen-Hilfe stirbt sie mit 20.", "violet", true)
+
+
+func gain_gu(u: Unit) -> String:
+	var pool: PackedStringArray = GuData.GU_IMM if u.rank >= 6 else (GuData.GU_MID + GuData.GU_LOW if u.rank >= 3 else GuData.GU_LOW)
+	for k: int in range(5):
+		var g: String = pool[randi() % pool.size()]
+		if not u.gus.has(g):
+			u.gus.append(g)
+			if u.gus.size() > 9:
+				u.gus.remove_at(1)
+			return g
+	return ""
+
+
+func cultivate(u: Unit) -> void:
+	if u.rank >= 9:
+		return
+	var v: Village = villages[u.vil] if u.vil >= 0 else null
+	var am: float = APTM.get(u.apt, 1.0)
+	var yps: float = pow(u.rank, 1.15) / am if u.rank <= 5 else 6.0 * pow(u.rank - 5, 1.5) / am
+	var rate: float = 1.0 / (yps * 12.0) * float(age_data()["cult"])
+	if u.rank <= 5:
+		var need: float = 0.04 * u.rank
+		if v != null and v.stones >= need:
+			v.stones -= need
+		elif not u.rogue:
+			rate *= 0.35
+	if u.luck > 0.0:
+		rate *= 2.2
+	u.prog += rate * (0.7 + randf() * 0.6)
+	if u.prog >= 1.0:
+		u.prog = 0.0
+		stage_up(u)
+
+
+func stage_up(u: Unit) -> void:
+	if u.rank >= 9:
+		return
+	if u.stage < 3:
+		u.stage += 1
+		if randf() < 0.35:
+			gain_gu(u)
+		set_stats(u, false)
+		float_txt(u, GuData.STAGE[u.stage], GuData.ESS_COL[u.rank])
+		return
+	rank_up(u)
+
+
+func rank_up(u: Unit) -> void:
+	var r: int = u.rank
+	var nm: String = u.pname()
+	if r == 5:
+		if not laws["immortal"]:
+			u.prog = 0.6
+			return
+		var ch: float = 0.38 + (0.45 if u.luck > 0.0 else 0.0) + (0.1 if u.apt == "A" else 0.0) + (0.2 if u.phys_x else 0.0)
+		u.luck = 0.0
+		if randf() < ch:
+			ascend(u, 6)
+			log_event(nm + " durchbricht zum Gu-Unsterblichen (Rang 6) – das Unsterblichen-Tor öffnet sich.", "gold", true)
+			pillar(u.x, u.y, GuData.ESS_COL[6])
+			bolt(u.x, u.y, 0.0, false)
+		else:
+			log_event(nm + " scheitert beim Aufstieg zum Gu-Unsterblichen und stirbt.", "red", true)
+			bolt(u.x, u.y, 0.0, false)
+			u.dreason = "Aufstieg gescheitert"
+			u.hp = 0.0
+		return
+	if r == 8:
+		for o: Unit in units:
+			if o.k == "p" and o.rank == 9 and o.hp > 0.0:
+				u.prog = 0.5
+				return
+		if randf() < 0.18 + (0.4 if u.luck > 0.0 else 0.0):
+			ascend(u, 9)
+			u.title = ("Dämonen-Ehrwürdiger" if u.align == 1 else "Unsterblicher Ehrwürdiger") + " des " + GuData.PATH_NAME[u.path] + "-Pfades"
+			log_event(nm + " wird zum Rang-9-" + u.title + "! Die Welt erzittert.", "gold", true)
+			pillar(u.x, u.y, GuData.ESS_COL[9])
+			shake = 1.0
+		else:
+			u.prog = 0.3
+		u.luck = 0.0
+		return
+	ascend(u, r + 1)
+	if r + 1 >= 4 and r + 1 <= 5:
+		log_event(nm + " erreicht " + rank_title(r + 1) + ".", "info")
+	if r + 1 >= 7:
+		log_event(nm + " erreicht " + rank_title(r + 1) + ".", "violet", true)
+
+
+func ascend(u: Unit, nr: int) -> void:
+	u.rank = nr
+	u.stage = 0
+	u.prog = 0.0
+	u.life += GuData.LIFEB[nr] - GuData.LIFEB[nr - 1]
+	if nr >= 6:
+		u.next_trib = uage(u) + 10.0 + randf() * 12.0
+	gain_gu(u)
+	set_stats(u, true)
+	float_txt(u, "Rang %d" % nr, GuData.ESS_COL[nr])
+	if nr < 6:
+		pillar(u.x, u.y, GuData.ESS_COL[nr], 0.6)
+
+
+func tribulation(u: Unit) -> void:
+	var nm: String = u.pname()
+	u.next_trib = uage(u) + 12.0 + randf() * 16.0
+	for k: int in range(6):
+		later(k * 0.25, func() -> void:
+			if u.hp > 0.0:
+				bolt(u.x + (randf() - 0.5) * 6.0, u.y + (randf() - 0.5) * 6.0, 0.0, true))
+	later(1.6, func() -> void:
+		if u.hp <= 0.0:
+			return
+		var ch: float = 0.06 + 0.04 * (u.rank - 6) - (0.05 if u.luck > 0.0 else 0.0)
+		bolt(u.x, u.y, 0.0, true)
+		if randf() < ch:
+			u.dreason = "Himmelsdrangsal"
+			u.hp = 0.0
+			log_event(nm + " stirbt in einer Himmelsdrangsal.", "red", true)
+		else:
+			u.prog = minf(0.99, u.prog + 0.3)
+			if u.rank >= 7:
+				log_event(nm + " übersteht eine Erdkatastrophe und Himmelsdrangsal.", "violet"))
+
+
+func go_rogue(u: Unit) -> void:
+	u.rogue = true
+	u.vil = -1
+	u.clan = -1
+	u.job = ""
+	log_event(u.pname() + " (" + rank_title(u.rank) + ") wendet sich dem dämonischen Pfad zu und verlässt den Clan.", "war", u.rank >= 4)
+
+
+# ---------------- Krieg ----------------
+
+func declare_war(a: Clan, b: Clan, quiet: bool = false) -> void:
+	if a == null or b == null or a == b or not a.alive or not b.alive or a.war.has(b.id):
+		return
+	a.ally.erase(b.id)
+	b.ally.erase(a.id)
+	a.war[b.id] = true
+	b.war[a.id] = true
+	a.war_start = sim_time
+	b.war_start = sim_time
+	for u: Unit in units:
+		if u.k == "p" and (u.clan == a.id or u.clan == b.id) and u.rank == 0 and uage(u) >= 16.0 and uage(u) < 55.0:
+			u.militia = randf() < 0.45
+	log_event(a.name + " erklärt " + b.name + " die Fehde!", "war", not quiet)
+
+
+func make_peace(a: Clan, b: Clan, quiet: bool = false) -> void:
+	if a == null or b == null:
+		return
+	a.war.erase(b.id)
+	b.war.erase(a.id)
+	a.calm = sim_time + 72.0
+	b.calm = sim_time + 72.0
+	if not quiet:
+		log_event(a.name + " und " + b.name + " schließen Frieden.", "jade", true)
+	for u: Unit in units:
+		if u.k == "p" and (u.clan == a.id or u.clan == b.id) and clans[u.clan].war.is_empty():
+			u.militia = false
+
+
+func make_ally(a: Clan, b: Clan) -> void:
+	if a == null or b == null or a == b:
+		return
+	make_peace(a, b, true)
+	a.ally[b.id] = true
+	b.ally[a.id] = true
+	log_event(a.name + " und " + b.name + " schmieden ein Bündnis.", "jade", true)
+	for e: int in a.war.keys():
+		declare_war(b, clans[e], true)
+	for e: int in b.war.keys():
+		declare_war(a, clans[e], true)
+
+
+func kill_clan(c: Clan, why: String) -> void:
+	if not c.alive:
+		return
+	c.alive = false
+	for o: Clan in clans:
+		o.war.erase(c.id)
+		o.ally.erase(c.id)
+	for u: Unit in units:
+		if u.k == "p" and u.clan == c.id and u.vil < 0:
+			u.clan = -1
+	log_event(c.name + " " + why, "red", true)
+
+
+func capture(v: Village, nc: Clan) -> void:
+	var oc: Clan = clans[v.clan]
+	v.clan = nc.id
+	for u: Unit in units:
+		if u.k == "p" and u.vil == v.id:
+			u.clan = nc.id
+			u.militia = false
+	log_event(nc.name + " erobert " + v.name + " von " + oc.name + ".", "war", true)
+	terr_dirty = true
+
+
+# ---------------- Feuer ----------------
+
+func ignite(i: int, v: float) -> void:
+	var t: int = world.tile[i]
+	if t == GuData.DEEP or t == GuData.SHAL or t == GuData.WALL or t == GuData.SNOW:
+		return
+	if fire.size() > 6000:
+		return
+	fire[i] = maxf(fire.get(i, 0.0), v)
+
+
+func fire_step() -> void:
+	var wt: String = weather.get("type", "")
+	var rain: bool = wt == "rain"
+	var dry: bool = wt == "drought"
+	var add: Array[int] = []
+	for i: int in fire.keys():
+		var v: float = fire[i] - (0.5 if rain else 0.09)
+		var t: int = world.tile[i]
+		var f: int = world.feat[i]
+		if GuData.is_tree(f):
+			v += 0.04
+		if not rain:
+			var x: int = i % W
+			var y: int = i / W
+			for dy: int in range(-1, 2):
+				for dx: int in range(-1, 2):
+					if dx == 0 and dy == 0:
+						continue
+					var xx: int = x + dx
+					var yy: int = y + dy
+					if not world.in_map(xx, yy):
+						continue
+					var j: int = yy * W + xx
+					if fire.has(j):
+						continue
+					var tj: int = world.tile[j]
+					var fl: float = 0.3 if GuData.is_tree(world.feat[j]) else (0.045 if tj == GuData.GRASS else (0.06 if tj == GuData.STEP else 0.0))
+					if world.bmap[j] >= 0:
+						fl = 0.2
+					if not laws["fire"]:
+						fl *= 0.15
+					if dry:
+						fl *= 2.0
+					if randf() < fl:
+						add.append(j)
+		var bi: int = world.bmap[i]
+		if bi >= 0 and buildings[bi] != null:
+			buildings[bi].hp -= 3.0
+			if buildings[bi].hp <= 0.0:
+				remove_building(buildings[bi])
+		if v <= 0.0:
+			fire.erase(i)
+			if f != 0 and (GuData.is_tree(f) or f == GuData.F_SHRUB or f == GuData.F_TUFT or f == GuData.F_FLOWER):
+				world.feat[i] = 0
+			if t == GuData.GRASS or t == GuData.STEP or t == GuData.SOIL:
+				world.tile[i] = GuData.ASH
+			world.mark_area(i % W, i / W)
+		else:
+			fire[i] = v
+	for j: int in add:
+		ignite(j, 1.0)
+
+
+# ---------------- Schaden ----------------
+
+func hurt(t: Unit, dmg: float, src: Unit) -> void:
+	if t.hp <= 0.0:
+		return
+	t.hp -= dmg
+	t.flash = 0.12
+	if src != null and src != t:
+		t.aggro = src
+		if t.k == "p" and t.st == "work":
+			t.st = "idle"
+	if t.hp <= 0.0:
+		t.hp = 0.0
+		if src != null:
+			src.kills += 1
+			on_kill(src, t)
+
+
+func on_kill(s: Unit, t: Unit) -> void:
+	if s.k == "p":
+		if s.rank >= 1:
+			s.prog += 0.03 * (1 + t.rank) * (3.0 if (s.rogue or s.align == 1) else 1.0)
+			if s.prog >= 1.0:
+				s.prog = 0.0
+				stage_up(s)
+		if t.k == "a" and (t.sp == "deer" or t.sp == "boar") and s.vil >= 0:
+			villages[s.vil].food += 7.0 if t.sp == "boar" else 5.0
+		if t.k == "p" and s.clan >= 0:
+			clans[s.clan].kills += 1
+	elif s.sp == "wolf" or s.sp == "kingwolf":
+		s.hungry = 0.0
+	if t.k == "p" and t.dreason == "":
+		t.dreason = ("getötet von " + s.pname()) if s.k == "p" else ("gerissen von " + str(GuData.SPEC[s.sp]["n"]))
+
+
+func boom(x: float, y: float, r: float, dmg: float, o: Dictionary = {}) -> void:
+	for ty: int in range(floori(y - r), ceili(y + r) + 1):
+		for tx: int in range(floori(x - r), ceili(x + r) + 1):
+			if not world.in_map(tx, ty):
+				continue
+			var d: float = Vector2(tx + 0.5 - x, ty + 0.5 - y).length()
+			if d > r:
+				continue
+			var i: int = ty * W + tx
+			var t: int = world.tile[i]
+			if o.get("lake", false) and d < r * 0.28:
+				world.set_tile(i, GuData.DEEP if d < r * 0.15 else GuData.SHAL)
+				_after_set_tile(i)
+				continue
+			if o.get("ash", false) and d < r * 0.8 and t != GuData.WALL and not GuData.is_water(t):
+				if t == GuData.MOUNT and d < r * 0.5:
+					world.set_tile(i, GuData.HILL)
+				elif t != GuData.MOUNT and t != GuData.HILL:
+					world.set_tile(i, GuData.ASH if randf() < 0.85 else GuData.SOIL)
+				_after_set_tile(i)
+				var f: int = world.feat[i]
+				if f != 0 and f != GuData.F_ORE and f != GuData.F_ROCK:
+					world.feat[i] = 0
+					world.mark_area(tx, ty)
+			if randf() < float(o.get("burn", 0.0)):
+				ignite(i, 1.0)
+			var bi: int = world.bmap[i]
+			if bi >= 0 and buildings[bi] != null:
+				buildings[bi].hp -= dmg * (1.0 - d / (r + 1.0)) * 0.4 + 5.0
+				if buildings[bi].hp <= 0.0:
+					remove_building(buildings[bi])
+	for u: Unit in near_units(x, y, r + 1.0):
+		var d2: float = Vector2(u.x - x, u.y - y).length()
+		hurt(u, dmg * (1.0 - 0.6 * d2 / (r + 1.0)), null)
+	var c: Color = o.get("c", Color("#ffd27a"))
+	ring(x, y, r, c, 0.7)
+	ring(x, y, r * 0.6, Color.WHITE, 0.4)
+	spark(x, y, c, mini(70, int(12 + r * 4)), 6.0 + r * 1.5)
+	for k: int in range(int(r * 2)):
+		puff(x + (randf() - 0.5) * r, y + (randf() - 0.5) * r, Color("#5a4a40"), 1)
+	if r >= 5.0:
+		shake = minf(1.2, shake + r * 0.03)
+	flash(0.12 + r * 0.005)
+
+
+## Nach einer Geländeänderung: Gebäude auf unbebaubarem Grund abreißen, Feuer im Wasser löschen.
+func _after_set_tile(i: int) -> void:
+	var t: int = world.tile[i]
+	if fire.has(i) and (GuData.is_water(t) or t == GuData.WALL):
+		fire.erase(i)
+	var bi: int = world.bmap[i]
+	if bi >= 0 and not GuData.buildable(t) and buildings[bi] != null:
+		remove_building(buildings[bi])
+	terr_dirty = true
+
+
+func set_tile(i: int, t: int) -> void:
+	world.set_tile(i, t)
+	_after_set_tile(i)
+
+
+# ---------------- Monat und Jahr ----------------
+
+func monthly() -> void:
+	for v: Village in villages:
+		v.pop = 0
+		v.adults = 0
+		v.gm = 0
+	var n_persons: int = 0
+	for u: Unit in units:
+		if u.k != "p" or u.hp <= 0.0:
+			continue
+		n_persons += 1
+		if u.vil < 0:
+			continue
+		var v: Village = villages[u.vil]
+		if not v.alive:
+			u.vil = -1
+			continue
+		v.pop += 1
+		if uage(u) >= 14.0:
+			v.adults += 1
+		if u.rank > 0:
+			v.gm += 1
+	var ad: Dictionary = age_data()
+	for v: Village in villages:
+		if not v.alive:
+			continue
+		var c: Clan = clans[v.clan]
+		if v.pop == 0:
+			if randf() < 0.08:
+				abandon_village(v, v.name + " liegt verlassen.")
+			continue
+		v.food += v.farms * 0.55 * float(ad["grow"]) + 0.25 - v.pop * 0.07
+		if v.food < 0.0:
+			v.food = 0.0
+			if randf() < 0.05:
+				for u: Unit in units:
+					if u.k == "p" and u.vil == v.id and u.rank == 0 and u.hp > 0.0:
+						u.dreason = "Hunger"
+						u.hp = 0.0
+						break
+		v.food = minf(v.food, 60.0 + v.pop * 3.0)
+		if v.spring:
+			v.stones += 0.6
+		if v.lvl == 0 and v.pop >= 10:
+			v.lvl = 1
+		if laws["growth"] and v.pop < v.cap and v.food > v.pop * 0.35 and n_persons < GuData.MAXU:
+			if randf() < minf(0.5, 0.02 * v.adults + 0.03) * float(ad["grow"]):
+				var kid: Unit = mk_person(v.cx + randf() * 2.0 - 1.0, v.cy + 2.5, v.race, 0.0, pick_sur(v))
+				join_village(kid, v)
+				v.food -= 2.0
+		if v.wood >= 10.0 and v.houses < 12 and v.pop >= v.cap - 3:
+			if try_build(v, "house"):
+				v.wood -= 10.0
+		elif v.wood >= 6.0 and v.farms < ceili(v.pop / 7.0):
+			if try_build(v, "farm"):
+				v.wood -= 6.0
+		elif not v.forge and v.gm > 0 and v.wood >= 12.0:
+			if try_build(v, "forge"):
+				v.wood -= 12.0
+		elif not c.war.is_empty() and v.towers < 2 and v.wood >= 12.0 and v.pop > 10:
+			if try_build(v, "tower"):
+				v.wood -= 12.0
+		if v.pop >= mini(v.cap, 40) - 1 and v.houses >= 6 and randf() < 0.035:
+			colonize(v)
+	for u: Unit in units:
+		if u.hp <= 0.0:
+			continue
+		if u.k == "p":
+			person_month(u)
+		else:
+			animal_month(u)
+	for c: Clan in clans:
+		if not c.alive:
+			continue
+		var vs: Array[Village] = []
+		for v: Village in villages:
+			if v.alive and v.clan == c.id:
+				vs.append(v)
+		if vs.is_empty():
+			var any: bool = false
+			for u: Unit in units:
+				if u.k == "p" and u.hp > 0.0 and u.clan == c.id:
+					any = true
+					break
+			if not any:
+				kill_clan(c, "ist untergegangen.")
+			continue
+		c.wt = -1
+		if not c.war.is_empty():
+			var bd: float = 1e9
+			for v: Village in villages:
+				if not v.alive or not c.war.has(v.clan):
+					continue
+				var d: float = Vector2(v.cx - vs[0].cx, v.cy - vs[0].cy).length()
+				if d < bd:
+					bd = d
+					c.wt = v.id
+		if laws["war"] and randf() < 0.006 * float(ad["war"]) and not (c.calm > sim_time):
+			var cands: Array[Clan] = []
+			for o: Clan in clans:
+				if not o.alive or o == c or o.calm > sim_time or c.war.has(o.id) or c.ally.has(o.id):
+					continue
+				var close: bool = false
+				for v: Village in villages:
+					if v.alive and v.clan == o.id:
+						for w2: Village in vs:
+							if v.reg == w2.reg and Vector2(v.cx - w2.cx, v.cy - w2.cy).length() < 110.0:
+								close = true
+				if close:
+					cands.append(o)
+			if not cands.is_empty():
+				declare_war(c, cands.pick_random())
+		for e: int in c.war.keys():
+			var o2: Clan = clans[e]
+			if not o2.alive:
+				c.war.erase(e)
+				continue
+			if (sim_time - c.war_start > 36.0 and randf() < 0.012) or (not laws["war"] and randf() < 0.2):
+				make_peace(c, o2)
+		if randf() < 0.0015:
+			var cands2: Array[Clan] = []
+			for o: Clan in clans:
+				if o.alive and o != c and not c.war.has(o.id) and not c.ally.has(o.id):
+					cands2.append(o)
+			if not cands2.is_empty():
+				make_ally(c, cands2.pick_random())
+	for v: Village in villages:
+		if not v.alive:
+			continue
+		var c: Clan = clans[v.clan]
+		if c.war.is_empty():
+			continue
+		var att: int = 0
+		var def: int = 0
+		var tally: Dictionary = {}
+		for u: Unit in near_units(v.cx, v.cy, 14.0):
+			if u.k != "p":
+				continue
+			var d: float = Vector2(u.x - v.cx, u.y - v.cy).length()
+			if u.clan == v.clan:
+				def += 1
+			elif c.war.has(u.clan) and d < 10.0:
+				att += 1
+				tally[u.clan] = tally.get(u.clan, 0) + 1
+		if att >= 2 and def == 0:
+			var best: int = -1
+			var bn: int = 0
+			for kk: int in tally.keys():
+				if tally[kk] > bn:
+					bn = tally[kk]
+					best = kk
+			if best >= 0:
+				capture(v, clans[best])
+	if int(sim_time) % 12 == 0:
+		yearly()
+	nature_spawns()
+	update_leaders()
+	terr_dirty = true
+
+
+func colonize(v: Village) -> void:
+	var s: Vector2 = find_site(v.cx, v.cy, 32.0, 64.0, v.reg)
+	if s.x < 0.0:
+		return
+	var n: int = 0
+	for u: Unit in units:
+		if n >= 4:
+			break
+		if u.k == "p" and u.vil == v.id and u.hp > 0.0 and uage(u) >= 16.0 and uage(u) < 50.0 and u.rank < 6:
+			u.vil = -1
+			u.col_clan = v.clan
+			u.col_to = s + (Vector2(randf() * 3.0 - 1.5, randf() * 3.0 - 1.5) if n > 0 else Vector2.ZERO)
+			u.st = "idle"
+			u.tgt = null
+			u.job = ""
+			n += 1
+
+
+func person_month(u: Unit) -> void:
+	var a: float = uage(u)
+	if a > u.life:
+		u.dreason = "Alter"
+		u.hp = 0.0
+		return
+	if u.phys_x and u.rank < 6 and a > 20.0:
+		u.dreason = "Extremkonstitution"
+		u.hp = 0.0
+		log_event(u.pname() + " stirbt an der Extremkonstitution.", "red")
+		return
+	if not u.awk and a >= 14.0:
+		u.awk = true
+		if randf() < GuData.RACE_AWK[u.race]:
+			awaken(u)
+	if u.rank > 0:
+		cultivate(u)
+	if u.luck > 0.0:
+		u.luck = maxf(0.0, u.luck - 1.0 / 48.0)
+	if u.rank >= 6 and u.rank < 9 and laws["trib"] and a >= u.next_trib:
+		tribulation(u)
+	if u.rank >= 2 and u.align == 1 and not u.rogue and randf() < 0.0014:
+		go_rogue(u)
+	if u.rank == 0 and a >= 14.0 and u.vil >= 0 and (u.job == "" or randf() < 0.03):
+		assign_job(u)
+	u.hp = minf(u.mhp, u.hp + u.mhp * 0.1)
+
+
+func assign_job(u: Unit) -> void:
+	var v: Village = villages[u.vil]
+	var w: Array = [["wood", 0.4 if v.wood < 25.0 else 0.2], ["farm", 0.3 if v.farms > 0 else 0.0], ["gather", 0.3 if v.food < v.pop else 0.12], ["mine", 0.16], ["hunt", 0.12]]
+	var s: float = 0.0
+	for e: Array in w:
+		s += e[1]
+	var q: float = randf() * s
+	for e: Array in w:
+		q -= e[1]
+		if q <= 0.0:
+			u.job = e[0]
+			return
+	u.job = "wood"
+
+
+func animal_month(u: Unit) -> void:
+	var s: String = u.sp
+	if s != "wildgu" and s != "ancient" and uage(u) > u.life:
+		u.hp = 0.0
+		return
+	u.hp = minf(u.mhp, u.hp + u.mhp * 0.15)
+	if laws["growth"] and s in ["deer", "boar", "wolf", "monkey", "crane"] and randf() < 0.006 and sp_count.get(s, 0) < int(GuData.SPEC[s]["cap"]) / 2:
+		mk_animal(u.x + (randf() - 0.5) * 2.0, u.y + (randf() - 0.5) * 2.0, s)
+
+
+func random_tile(pred: Callable, tries: int = 80) -> Vector2:
+	for k: int in range(tries):
+		var i: int = randi() % N
+		if pred.call(i):
+			return Vector2(i % W + 0.5, i / W + 0.5)
+	return Vector2(-1, -1)
+
+
+func nature_spawns() -> void:
+	sp_count = {}
+	for u: Unit in units:
+		if u.k == "a" and u.hp > 0.0:
+			sp_count[u.sp] = sp_count.get(u.sp, 0) + 1
+	if not laws["growth"]:
+		return
+	var tries: Array = [["deer", [GuData.GRASS, GuData.STEP], [0, 1, 4]], ["boar", [GuData.GRASS], [1, 4]], ["wolf", [GuData.STEP, GuData.SNOW, GuData.GRASS], [0, 1]], ["monkey", [GuData.GRASS], [1, 4, 3]], ["crane", [GuData.GRASS, GuData.SAND], [3, 4]]]
+	for e: Array in tries:
+		var s: String = e[0]
+		if sp_count.get(s, 0) < int(GuData.SPEC[s]["cap"]) * 0.12 and randf() < 0.25:
+			var ts: Array = e[1]
+			var rs: Array = e[2]
+			var p: Vector2 = random_tile(func(i: int) -> bool: return world.tile[i] in ts and world.region[i] in rs)
+			if p.x >= 0.0:
+				mk_animal(p.x, p.y, s)
+	if sp_count.get("wildgu", 0) < 50 and randf() < 0.6:
+		var p2: Vector2 = random_tile(func(i: int) -> bool: return (world.tile[i] == GuData.GRASS or world.tile[i] == GuData.HILL) and world.region[i] in [0, 1, 4])
+		if p2.x >= 0.0:
+			for k: int in range(randi_range(1, 3)):
+				mk_animal(p2.x + (randf() - 0.5) * 4.0, p2.y + (randf() - 0.5) * 4.0, "wildgu")
+
+
+func yearly() -> void:
+	var y: int = year()
+	if (y - 1) % GuData.AGE_YEARS == 0 and y > 1:
+		log_event("Das " + str(age_data()["n"]) + " beginnt.", "violet", true)
+	if laws["tide"] and randf() < 0.06:
+		var vs: Array[Village] = []
+		for v: Village in villages:
+			if v.alive and v.pop >= 8 and v.reg in [0, 1, 4]:
+				vs.append(v)
+		if not vs.is_empty():
+			beast_tide(vs.pick_random(), Vector2(-1, -1))
+	if laws["will"] and randf() < 0.04:
+		var top: Array[Unit] = strongest(1)
+		if not top.is_empty() and top[0].rank >= 7:
+			heavens_will(top[0])
+
+
+func strongest(n: int) -> Array[Unit]:
+	var arr: Array[Unit] = []
+	for u: Unit in units:
+		if u.k == "p" and u.hp > 0.0 and u.rank > 0:
+			arr.append(u)
+	arr.sort_custom(func(a: Unit, b: Unit) -> bool: return a.rank * 4 + a.stage + a.prog > b.rank * 4 + b.stage + b.prog)
+	return arr.slice(0, n)
+
+
+func beast_tide(v: Village, at: Vector2) -> void:
+	var p: Vector2 = at
+	if p.x < 0.0:
+		for k: int in range(50):
+			var a: float = randf() * TAU
+			var d: float = 36.0 + randf() * 16.0
+			var x: float = v.cx + cos(a) * d
+			var y: float = v.cy + sin(a) * d
+			if x < 2 or y < 2 or x >= W - 2 or y >= H - 2:
+				continue
+			var i: int = int(y) * W + int(x)
+			if GuData.is_land(world.tile[i]) and world.tile[i] != GuData.WALL and world.region[i] == v.reg:
+				p = Vector2(x, y)
+				break
+	if p.x < 0.0:
+		return
+	var n: int = mini(30, 10 + v.pop / 3)
+	for k: int in range(n):
+		var w: Unit = mk_animal(p.x + (randf() - 0.5) * 8.0, p.y + (randf() - 0.5) * 8.0, "wolf")
+		w.tide = true
+		w.tide_v = v.id
+		w.hungry = 1.0
+	var kw: Unit = mk_animal(p.x, p.y, "kingwolf")
+	kw.tide = true
+	kw.tide_v = v.id
+	log_event("Wolfsflut! Ein Donnerkronen-Wolf führt %d Wölfe gegen %s (%s)." % [n, v.name, clans[v.clan].name], "war", true)
+
+
+func heavens_will(u: Unit) -> void:
+	var nm: String = u.pname()
+	log_event("Der Himmelswille richtet sich gegen " + nm + ".", "violet", true)
+	for k: int in range(9):
+		later(k * 0.18, func() -> void:
+			if u.hp > 0.0:
+				bolt(u.x + (randf() - 0.5) * 10.0, u.y + (randf() - 0.5) * 10.0, 0.0, true))
+	later(1.9, func() -> void:
+		if u.hp <= 0.0:
+			return
+		bolt(u.x, u.y, 0.0, true)
+		ring(u.x, u.y, 12.0, Color("#b98cff"), 1.0)
+		var ch: float = 0.12 if u.rank >= 9 else (0.3 if u.rank >= 8 else 0.45)
+		if randf() < ch:
+			u.dreason = "Himmelswille"
+			u.hp = 0.0
+			log_event(nm + " wird vom Himmelswillen ausgelöscht.", "red", true)
+		else:
+			u.hp = maxf(1.0, u.hp * 0.25)
+			log_event(nm + " trotzt dem Himmelswillen.", "gold", true))
+
+
+func update_leaders() -> void:
+	for v: Village in villages:
+		v.lead = null
+	for u: Unit in units:
+		if u.k != "p" or u.hp <= 0.0 or u.vil < 0:
+			continue
+		var v: Village = villages[u.vil]
+		if not v.alive:
+			continue
+		var L: Unit = v.lead
+		if L == null or u.rank * 4 + u.stage > L.rank * 4 + L.stage or (u.rank == L.rank and u.stage == L.stage and uage(u) > uage(L)):
+			v.lead = u
+
+
+# ---------------- Denken ----------------
+
+func go_to(u: Unit, x: float, y: float) -> void:
+	u.tx = clampf(x, 0.5, W - 0.5)
+	u.ty = clampf(y, 0.5, H - 0.5)
+
+
+func wander(u: Unit, r: float) -> void:
+	var rg: int = region_at(u.x, u.y)
+	for k: int in range(6):
+		var x: float = u.x + (randf() - 0.5) * 2.0 * r
+		var y: float = u.y + (randf() - 0.5) * 2.0 * r
+		if x < 0 or y < 0 or x >= W or y >= H:
+			continue
+		if passable(u, int(x), int(y)) and (u.fly or world.region[int(y) * W + int(x)] == rg):
+			go_to(u, x, y)
+			return
+
+
+func wander_near(u: Unit, cx: float, cy: float, r: float) -> void:
+	for k: int in range(6):
+		var x: float = cx + (randf() - 0.5) * 2.0 * r
+		var y: float = cy + (randf() - 0.5) * 2.0 * r
+		if x < 0 or y < 0 or x >= W or y >= H:
+			continue
+		if passable(u, int(x), int(y)):
+			go_to(u, x, y)
+			return
+
+
+func flee(u: Unit, e: Unit, v: Village) -> void:
+	if v != null and Vector2(v.cx - u.x, v.cy - u.y).length() > 6.0:
+		go_to(u, v.cx + randf() * 4.0 - 2.0, v.cy + randf() * 4.0 - 2.0)
+	else:
+		var d: Vector2 = Vector2(u.x - e.x, u.y - e.y)
+		if d.length() < 0.01:
+			d = Vector2(1, 0)
+		d = d.normalized() * 12.0
+		go_to(u, u.x + d.x, u.y + d.y)
+	u.st = "idle"
+
+
+func find_feat(cx: float, cy: float, r: float, pred: Callable) -> int:
+	var best: int = -1
+	var bd: float = 1e9
+	for k: int in range(90):
+		var x: int = roundi(cx + (randf() - 0.5) * 2.0 * r)
+		var y: int = roundi(cy + (randf() - 0.5) * 2.0 * r)
+		if not world.in_map(x, y):
+			continue
+		var i: int = y * W + x
+		if pred.call(world.feat[i]) and world.bmap[i] < 0 and not fire.has(i):
+			var d: float = (x - cx) * (x - cx) + (y - cy) * (y - cy)
+			if d < bd:
+				bd = d
+				best = i
+	return best
+
+
+func work_at(u: Unit, i: int, t: float, type: String) -> void:
+	var x: float = i % W + 0.5
+	var y: float = i / W + 0.5
+	if Vector2(x - u.x, y - u.y).length() < 1.6:
+		u.st = "work"
+		u.wt = t
+		u.wtype = type
+		u.wi = i
+		u.face = 1 if x > u.x else -1
+	else:
+		go_to(u, x + (-1.2 if randf() < 0.5 else 1.2), y + 0.3)
+
+
+func finish_work(u: Unit) -> void:
+	u.st = "idle"
+	if u.vil < 0:
+		return
+	var v: Village = villages[u.vil]
+	var i: int = u.wi
+	if i < 0:
+		return
+	var x: int = i % W
+	var y: int = i / W
+	match u.wtype:
+		"wood":
+			if GuData.is_tree(world.feat[i]):
+				world.feat[i] = 0
+				world.mark_area(x, y)
+				v.wood += 4.0
+				puff(x + 0.5, y - 4.0, Color("#7a9a3a"), 6)
+		"mine":
+			if world.feat[i] == GuData.F_ORE:
+				v.stones += 1.4
+				spark(x + 0.5, y, Color("#dff6ec"), 4, 4.0)
+				if randf() < 0.07:
+					world.feat[i] = GuData.F_ROCK
+					world.mark_area(x, y)
+		"farm":
+			v.food += 2.2
+		"gather":
+			v.food += 1.1
+
+
+func think_p(u: Unit) -> void:
+	var v: Village = villages[u.vil] if u.vil >= 0 else null
+	var a: float = uage(u)
+	var c: Clan = clans[u.clan] if u.clan >= 0 else null
+	var sight: float = 22.0 if u.rank >= 6 else 10.0 + u.rank * 1.2
+	if u.tgt == null or randf() < 0.25:
+		var e: Unit = nearest(u, sight, func(o: Unit) -> bool: return hostile(u, o))
+		if e != null:
+			if a < 14.0 or (u.rank == 0 and not u.militia and u.job != "hunt" and power(e) > power(u) * 1.5):
+				flee(u, e, v)
+				return
+			if u.rank > 0 and u.rank < 6 and power(e) > power(u) * 12.0 and e.k == "p":
+				flee(u, e, v)
+				return
+			u.tgt = e
+			u.st = "idle"
+			return
+	if u.tgt != null:
+		return
+	if u.rogue:
+		var prey: Unit = nearest(u, 24.0, func(o: Unit) -> bool: return o.k == "p" and not o.rogue and power(o) < power(u) * 1.3)
+		if prey != null:
+			u.tgt = prey
+			return
+		wander(u, 20.0)
+		return
+	if v == null:
+		lone_think(u, a)
+		return
+	if a < 14.0:
+		if randf() < 0.7:
+			wander_near(u, v.cx, v.cy + 3.0, 7.0)
+		return
+	if c != null and not c.war.is_empty() and (u.rank > 0 or u.militia) and c.wt >= 0:
+		var ev: Village = villages[c.wt]
+		if ev.alive and c.war.has(ev.clan):
+			go_to(u, ev.cx + randf() * 8.0 - 4.0, ev.cy + randf() * 8.0 - 4.0)
+			u.st = "idle"
+			return
+	if u.st == "work":
+		return
+	if u.rank > 0:
+		var g: Unit = nearest(u, 18.0, func(o: Unit) -> bool: return o.sp == "wildgu")
+		if g != null and randf() < 0.6:
+			if Vector2(g.x - u.x, g.y - u.y).length() < 1.8:
+				g.hp = 0.0
+				g.caught = true
+				u.prog += 0.12
+				var nm: String = gain_gu(u)
+				float_txt(u, ("+" + nm) if nm != "" else "+Gu", Color("#cfe8ff"))
+				spark(g.x, g.y, Color("#cfe8ff"), 8, 5.0)
+				if u.prog >= 1.0:
+					u.prog = 0.0
+					stage_up(u)
+			else:
+				go_to(u, g.x, g.y)
+			return
+		if randf() < 0.42:
+			wander_near(u, v.cx, v.cy, 12.0 + v.houses * 1.5 + (18.0 if u.rank >= 6 else 0.0))
+		else:
+			var hx: float = v.cx
+			var hy: float = v.cy + 4.0
+			for id: int in v.b:
+				var b: Building = buildings[id]
+				if b != null and b.type == "forge":
+					hx = b.x + 3.0
+					hy = b.y + 4.5
+			go_to(u, hx + randf() * 6.0 - 3.0, hy + randf() * 3.0)
+		return
+	do_job(u, v)
+
+
+func do_job(u: Unit, v: Village) -> void:
+	match u.job:
+		"wood":
+			var i: int = u.wi
+			if i < 0 or not GuData.is_tree(world.feat[i]):
+				i = find_feat(v.cx, v.cy, 30.0, func(f: int) -> bool: return GuData.is_tree(f))
+			if i < 0:
+				u.job = "gather"
+				return
+			u.wi = i
+			work_at(u, i, 2.4, "wood")
+		"mine":
+			var i: int = u.wi
+			if i < 0 or world.feat[i] != GuData.F_ORE:
+				i = find_feat(v.cx, v.cy, 38.0, func(f: int) -> bool: return f == GuData.F_ORE)
+			if i < 0:
+				u.job = "wood"
+				return
+			u.wi = i
+			work_at(u, i, 3.0, "mine")
+		"farm":
+			var fs: Array[Building] = []
+			for id: int in v.b:
+				var b: Building = buildings[id]
+				if b != null and b.type == "farm":
+					fs.append(b)
+			if fs.is_empty():
+				u.job = "gather"
+				return
+			var bb: Building = fs.pick_random()
+			work_at(u, (bb.y + randi_range(1, bb.h - 2)) * W + bb.x + randi_range(1, bb.w - 2), 3.0, "farm")
+		"gather":
+			var i: int = find_feat(v.cx, v.cy, 20.0, func(f: int) -> bool: return GuData.is_tree(f) or f == GuData.F_SHRUB or f == GuData.F_TUFT)
+			if i < 0:
+				wander_near(u, v.cx, v.cy, 10.0)
+				return
+			work_at(u, i, 2.0, "gather")
+		"hunt":
+			var p: Unit = nearest(u, 28.0, func(o: Unit) -> bool: return o.sp == "deer" or o.sp == "boar")
+			if p != null and Vector2(p.x - v.cx, p.y - v.cy).length() < 36.0:
+				u.tgt = p
+			else:
+				u.job = "wood"
+		_:
+			wander_near(u, v.cx, v.cy, 10.0)
+
+
+func lone_think(u: Unit, a: float) -> void:
+	if u.has_col_target():
+		var d: float = (u.col_to - Vector2(u.x, u.y)).length()
+		if d < 3.0:
+			var cc: int = u.col_clan
+			var nv: Village = nearest_village(u.x, u.y, 12.0, func(v: Village) -> bool: return v.clan == cc)
+			if nv != null:
+				join_village(u, nv)
+				return
+			if not found_village(u, u.col_clan):
+				u.col_to = find_site(u.x, u.y, 3.0, 20.0, region_at(u.x, u.y))
+		else:
+			go_to(u, u.col_to.x, u.col_to.y)
+		return
+	var rg: int = region_at(u.x, u.y)
+	var cc2: int = u.col_clan
+	var race: int = u.race
+	var vv: Village = nearest_village(u.x, u.y, 44.0 if cc2 >= 0 else 20.0, func(v: Village) -> bool: return (v.clan == cc2 if cc2 >= 0 else v.race == race) and v.reg == rg)
+	if vv != null and a >= 4.0:
+		if Vector2(vv.cx - u.x, vv.cy - u.y).length() < 6.0:
+			join_village(u, vv)
+		else:
+			go_to(u, vv.cx, vv.cy)
+		return
+	if a >= 16.0 and randf() < 0.3:
+		if found_village(u, u.col_clan):
+			return
+	wander(u, 16.0)
+
+
+func think_a(u: Unit) -> void:
+	var s: String = u.sp
+	if s == "wildgu":
+		wander(u, 6.0)
+		return
+	if s == "deer" or s == "monkey" or s == "crane":
+		var th: Unit = nearest(u, 8.0, func(o: Unit) -> bool: return (o.k == "p" and o.job == "hunt") or o.sp == "wolf" or o.sp == "kingwolf" or o.sp == "ancient")
+		if th != null:
+			var d: Vector2 = Vector2(u.x - th.x, u.y - th.y)
+			if d.length() < 0.01:
+				d = Vector2(1, 0)
+			d = d.normalized() * 12.0
+			go_to(u, u.x + d.x, u.y + d.y)
+		elif randf() < 0.6:
+			wander(u, 10.0)
+		return
+	if u.tgt == null:
+		var r: float = 14.0 if s == "ancient" else (18.0 if (s == "kingwolf" or u.tide) else 10.0)
+		var e: Unit = nearest(u, r, func(o: Unit) -> bool: return hostile(u, o))
+		if e != null:
+			u.tgt = e
+			return
+	if u.tgt != null:
+		return
+	if u.tide and u.tide_v >= 0:
+		var v: Village = villages[u.tide_v]
+		if v.alive:
+			go_to(u, v.cx + randf() * 8.0 - 4.0, v.cy + randf() * 8.0 - 4.0)
+			return
+		u.tide = false
+	wander(u, 20.0 if s == "ancient" else 12.0)
+
+
+# ---------------- Schritt ----------------
+
+func move_unit(u: Unit, dt: float) -> void:
+	var dx: float = u.tx - u.x
+	var dy: float = u.ty - u.y
+	var d: float = sqrt(dx * dx + dy * dy)
+	if d < 0.2:
+		u.moving = false
+		return
+	var ti: int = int(u.y) * W + int(u.x)
+	var mul: float = sp_mul(u, world.tile[ti])
+	if weather.get("type", "") == "sand" and not u.fly:
+		mul *= 0.6
+	var spd: float = minf(u.speed * mul * dt, d)
+	var ang: float = atan2(dy, dx)
+	var cur_ok: bool = passable(u, int(u.x), int(u.y))
+	for off: float in [0.0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9]:
+		var a: float = ang + off
+		var nx: float = u.x + cos(a) * spd
+		var ny: float = u.y + sin(a) * spd
+		if nx < 0 or ny < 0 or nx >= W or ny >= H:
+			continue
+		if not cur_ok or passable(u, int(nx), int(ny)):
+			u.x = nx
+			u.y = ny
+			u.moving = true
+			if absf(dx) > 0.05:
+				u.face = 1 if dx > 0 else -1
+			if off != 0.0:
+				u.stuck += dt * 0.5
+			else:
+				u.stuck = maxf(0.0, u.stuck - dt)
+			if u.stuck > 2.5:
+				u.stuck = 0.0
+				u.tgt = null
+				wander(u, 12.0)
+			return
+	u.stuck += dt * 3.0
+	u.moving = false
+	if u.stuck > 2.0:
+		u.stuck = 0.0
+		u.tgt = null
+		u.col_to = Vector2(-1, -1)
+		wander(u, 12.0)
+
+
+func attack(u: Unit, e: Unit) -> void:
+	u.cd = (1.1 if u.rank >= 6 else 0.9) if u.k == "p" else (1.6 if u.sp == "ancient" else 0.85)
+	u.face = 1 if e.x > u.x else -1
+	if u.rng > 3.0:
+		var c: Color = GuData.PATH_COL[u.path] if (u.k == "p" and u.path >= 0) else (Color("#fff27a") if u.sp == "kingwolf" else Color("#ff6a3a"))
+		projs.append({"x": u.x, "y": u.y - 1.5, "t": e, "sp": 30.0 if u.rank >= 6 else 22.0, "dmg": u.atk * (0.85 + randf() * 0.3), "src": u, "c": c, "aoe": u.aoe, "path": u.path if u.k == "p" else -1, "big": u.rank >= 6, "l": 3.0, "a": 0.0})
+	else:
+		hurt(e, u.atk * (0.8 + randf() * 0.4), u)
+		spark(e.x, e.y - 1.0, Color("#ffe0b0"), 2, 3.0)
+		if u.aoe > 0.0:
+			for o: Unit in near_units(e.x, e.y, u.aoe):
+				if o != e and hostile(u, o):
+					hurt(o, u.atk * 0.5, u)
+
+
+func step_unit(u: Unit, dt: float) -> void:
+	u.anim += dt
+	if u.flash > 0.0:
+		u.flash -= dt
+	if u.cd > 0.0:
+		u.cd -= dt
+	var ti: int = clampi(int(u.y), 0, H - 1) * W + clampi(int(u.x), 0, W - 1)
+	var t: int = world.tile[ti]
+	if t == GuData.DEEP and not u.swim and not u.fly:
+		hurt(u, 4.0 * dt, null)
+	if not u.fly and fire.has(ti):
+		hurt(u, 3.0 * dt, null)
+	if u.sick > 0.0:
+		u.sick -= dt
+		hurt(u, (0.15 if u.rank >= 3 else 1.1) * dt, null)
+		if randf() < dt * 0.6:
+			var o: Unit = nearest(u, 2.5, func(q: Unit) -> bool: return q.k == u.k and q.sick <= 0.0)
+			if o != null and not (o.k == "p" and o.rank >= 5):
+				o.sick = 18.0 + randf() * 12.0
+		if randf() < dt * 3.0:
+			parts.append({"x": u.x, "y": u.y - 3.0, "vx": 0.0, "vy": -2.0, "l": 0.6, "ml": 0.6, "c": Color("#86e04a"), "s": 0.6, "g": 0.0})
+	if u.k == "a" and (u.sp == "wolf" or u.sp == "kingwolf"):
+		u.hungry = minf(1.0, u.hungry + dt * 0.006)
+	if u.sp == "ancient" and world.bmap[ti] >= 0:
+		var b: Building = buildings[world.bmap[ti]]
+		if b != null:
+			b.hp -= 60.0 * dt
+			if b.hp <= 0.0:
+				remove_building(b)
+	u.think -= dt
+	if u.think <= 0.0:
+		u.think = 0.35 + randf() * 0.45
+		if u.k == "p":
+			think_p(u)
+		else:
+			think_a(u)
+	if u.tgt != null:
+		var e: Unit = u.tgt
+		if e.hp <= 0.0:
+			u.tgt = null
+		else:
+			var d: float = Vector2(e.x - u.x, e.y - u.y).length()
+			if d > (44.0 if u.rank >= 6 else 32.0):
+				u.tgt = null
+			elif d <= u.rng:
+				u.tx = u.x
+				u.ty = u.y
+				u.moving = false
+				if u.cd <= 0.0:
+					attack(u, e)
+				return
+			else:
+				u.tx = e.x
+				u.ty = e.y
+				if u.st == "work":
+					u.st = "idle"
+	if u.st == "work":
+		u.wt -= dt
+		u.moving = false
+		if u.wt <= 0.0:
+			finish_work(u)
+	else:
+		move_unit(u, dt)
+	if u.k == "p" and u.rank > 0 and not u.moving and u.tgt == null and randf() < dt * 0.5:
+		parts.append({"x": u.x + (randf() - 0.5) * 2.0, "y": u.y - 2.0, "vx": 0.0, "vy": -2.5, "l": 0.9, "ml": 0.9, "c": GuData.ESS_COL[u.rank], "s": 0.5, "g": 0.0})
+
+
+func step(dt: float) -> void:
+	sim_time += dt
+	var m: int = int(sim_time)
+	if m != last_month:
+		last_month = m
+		monthly()
+	rebuild_grid()
+	for k: int in range(units.size()):
+		var u: Unit = units[k]
+		if u.hp > 0.0:
+			step_unit(u, dt)
+	var pi: int = projs.size() - 1
+	while pi >= 0:
+		var p: Dictionary = projs[pi]
+		var tu: Unit = p["t"]
+		var tx: float = tu.x
+		var ty: float = tu.y - 1.2
+		var dx: float = tx - p["x"]
+		var dy: float = ty - p["y"]
+		var d: float = sqrt(dx * dx + dy * dy)
+		var s: float = p["sp"] * dt
+		p["l"] -= dt
+		if d <= s + 0.4 or tu.hp <= 0.0 or p["l"] <= 0.0:
+			if tu.hp > 0.0:
+				hurt(tu, p["dmg"], p["src"])
+			if p["aoe"] > 0.0:
+				for o: Unit in near_units(tu.x, tu.y, p["aoe"]):
+					if o != tu and hostile(p["src"], o):
+						hurt(o, p["dmg"] * 0.6, p["src"])
+				ring(tu.x, tu.y, p["aoe"], p["c"], 0.45)
+				if p["big"]:
+					var i: int = clampi(int(tu.y), 0, H - 1) * W + clampi(int(tu.x), 0, W - 1)
+					if p["path"] == 2 or p["path"] == 5:
+						ignite(i, 1.0)
+					elif randf() < 0.25 and (world.tile[i] == GuData.GRASS or world.tile[i] == GuData.STEP):
+						world.tile[i] = GuData.SOIL
+						if GuData.is_tree(world.feat[i]):
+							world.feat[i] = 0
+						world.mark_area(i % W, i / W)
+			spark(p["x"], p["y"], p["c"], 10 if p["big"] else 4, 8.0 if p["big"] else 4.0)
+			projs.remove_at(pi)
+		else:
+			p["x"] += dx / d * s
+			p["y"] += dy / d * s
+			p["a"] = atan2(dy, dx)
+		pi -= 1
+	var si: int = sched.size() - 1
+	while si >= 0:
+		if si < sched.size() and sched[si]["t"] <= sim_time:
+			var fn: Callable = sched[si]["fn"]
+			sched.remove_at(si)
+			fn.call()
+		si -= 1
+	_fire_acc += dt
+	if _fire_acc >= 0.25:
+		_fire_acc = 0.0
+		fire_step()
+	env_step(dt)
+	var dead: bool = false
+	for u: Unit in units:
+		if u.hp <= 0.0:
+			dead = true
+			break
+	if dead:
+		var alive: Array[Unit] = []
+		for u: Unit in units:
+			if u.hp > 0.0:
+				alive.append(u)
+			else:
+				on_death(u)
+		units = alive
+
+
+func on_death(u: Unit) -> void:
+	unit_died.emit(u)
+	if u.k == "p":
+		if not u.caught:
+			puff(u.x, u.y - 1.0, Color("#7a2020"), 3)
+		if u.rank >= 4 and not (u.dreason in ["Himmelswille", "Aufstieg gescheitert", "Himmelsdrangsal"]):
+			log_event("%s (%s) ist gestorben – %s." % [u.pname(), rank_title(u.rank), u.dreason if u.dreason != "" else "im Kampf"], "red" if u.rank >= 6 else "info", u.rank >= 6)
+		if u.rank == 9:
+			log_event("Der " + u.title + " ist gefallen. Eine Ära endet.", "red", true)
+
+
+func plant_for(i: int) -> int:
+	var t: int = world.tile[i]
+	var r: int = world.region[i]
+	if t == GuData.SNOW:
+		return GuData.F_PINE
+	if t == GuData.SAND or t == GuData.DES:
+		return GuData.F_PALM
+	if t == GuData.HILL:
+		return GuData.F_PINE if r == 0 else GuData.F_TREE
+	if r == 1 and randf() < 0.3:
+		return GuData.F_BAMB
+	return GuData.F_TREE
+
+
+func land_for(i: int) -> int:
+	var r: int = world.region[i]
+	return GuData.STEP if r == 0 else (GuData.DES if r == 2 else GuData.GRASS)
+
+
+func env_step(dt: float) -> void:
+	var wt: String = weather.get("type", "")
+	if not weather.is_empty():
+		weather["t"] -= dt
+		if weather["t"] <= 0.0:
+			weather = {}
+	var rain: bool = wt == "rain"
+	var dry: bool = wt == "drought"
+	var snow: bool = wt == "snow" or age_index() == 7
+	var grow: float = float(age_data()["grow"])
+	var n: int = 26 if rain else 10
+	for k: int in range(n):
+		var i: int = randi() % N
+		var t: int = world.tile[i]
+		var x: int = i % W
+		var y: int = i / W
+		if laws["growth"] and not dry and (t == GuData.GRASS or t == GuData.STEP) and world.feat[i] == 0 and world.bmap[i] < 0:
+			var near: int = 0
+			for dd: int in [2, 5]:
+				if x >= dd and GuData.is_tree(world.feat[i - dd]):
+					near += 1
+				if x < W - dd and GuData.is_tree(world.feat[i + dd]):
+					near += 1
+				if y >= dd and GuData.is_tree(world.feat[i - dd * W]):
+					near += 1
+				if y < H - dd and GuData.is_tree(world.feat[i + dd * W]):
+					near += 1
+			if (near > 0 and randf() < 0.012 * grow) or randf() < 0.0004 * grow:
+				world.feat[i] = plant_for(i)
+				world.mark_area(x, y)
+		elif t == GuData.SOIL and not dry and world.bmap[i] < 0 and randf() < 0.08:
+			world.tile[i] = land_for(i)
+			world.mark_dirty(x, y)
+		elif t == GuData.ASH and randf() < 0.05:
+			world.tile[i] = GuData.SOIL
+			world.mark_dirty(x, y)
+		elif t == GuData.SNOW and world.temp_snow[i] > 0 and not snow and randf() < 0.3:
+			world.tile[i] = world.temp_snow[i] - 1
+			world.temp_snow[i] = 0
+			world.mark_dirty(x, y)
+	if snow:
+		for k: int in range(40 if wt == "snow" else 6):
+			var i: int = randi() % N
+			var t: int = world.tile[i]
+			if (t == GuData.GRASS or t == GuData.STEP or t == GuData.SOIL or t == GuData.DES) and world.bmap[i] < 0:
+				world.temp_snow[i] = t + 1
+				world.tile[i] = GuData.SNOW
+				world.mark_dirty(i % W, i / W)
+	if dry:
+		for k: int in range(16):
+			var i: int = randi() % N
+			if world.tile[i] == GuData.GRASS and randf() < 0.4:
+				world.tile[i] = GuData.DES if world.region[i] == 2 else GuData.SOIL
+				world.mark_dirty(i % W, i / W)
+			if GuData.is_tree(world.feat[i]) and randf() < 0.01:
+				ignite(i, 1.0)
+	if rain:
+		for i: int in fire.keys():
+			fire[i] -= dt
+
+
+# ---------------- Welt starten ----------------
+
+func reset_state() -> void:
+	units.clear()
+	villages.clear()
+	clans.clear()
+	buildings.clear()
+	projs.clear()
+	fx.clear()
+	parts.clear()
+	sched.clear()
+	log_entries.clear()
+	fire.clear()
+	sim_time = 0.0
+	last_month = 0
+	next_id = 1
+	weather = {}
+
+
+func seed_life() -> void:
+	var plan: Array = [[0, 2], [1, 3], [2, 1], [3, 1], [4, 3]]
+	for e: Array in plan:
+		var r: int = e[0]
+		for k: int in range(int(e[1])):
+			var p: Vector2 = random_tile(func(i: int) -> bool: return world.region[i] == r and GuData.buildable(world.tile[i]) and world.tile[i] != GuData.SAND and site_ok(i % W, i / W, r), 900)
+			if p.x < 0.0:
+				continue
+			var race: int = 3 if r == 3 else ((2 if randf() < 0.5 else 0) if r == 2 else ((1 if randf() < 0.3 else 0) if r == 4 else (1 if (r == 1 and randf() < 0.2) else 0)))
+			var sur: String = rand_sur(4) if r == 4 else GuData.SURN[r].pick_random()[0]
+			var lead: Unit = mk_person(p.x, p.y, race, 24.0, sur)
+			lead.awk = true
+			awaken(lead)
+			ascend(lead, 2)
+			if not found_village(lead, -1):
+				continue
+			var v: Village = villages[lead.vil]
+			for j: int in range(8):
+				var u: Unit = mk_person(p.x + (randf() - 0.5) * 6.0, p.y + 2.0 + (randf() - 0.5) * 4.0, race, 6.0 if j < 1 else 15.0 + randf() * 15.0, sur)
+				u.awk = j >= 1
+				join_village(u, v)
+	nature_only()
+
+
+func nature_only() -> void:
+	for e: Array in [["deer", 22], ["boar", 10], ["wolf", 12], ["monkey", 8], ["crane", 8], ["wildgu", 36]]:
+		var s: String = e[0]
+		for k: int in range(int(e[1])):
+			var p: Vector2 = random_tile(func(i: int) -> bool:
+				var t: int = world.tile[i]
+				if s == "crane" or s == "wildgu":
+					return GuData.is_land(t) and t != GuData.WALL
+				return t == GuData.GRASS or t == GuData.STEP or t == GuData.SNOW, 300)
+			if p.x >= 0.0:
+				mk_animal(p.x, p.y, s)
+
+
+func new_world(live: bool) -> void:
+	reset_state()
+	seed_val = randi()
+	world.generate(seed_val)
+	if live:
+		presim = true
+		seed_life()
+	else:
+		nature_only()
+
+
+## Läuft die Vorgeschichte in Häppchen; gibt den Fortschritt 0..1 zurück.
+func presim_chunk(budget_ms: int, target_years: float) -> float:
+	var total: float = target_years * 12.0
+	var t0: int = Time.get_ticks_msec()
+	while sim_time < total and Time.get_ticks_msec() - t0 < budget_ms:
+		step(0.1)
+	if sim_time >= total:
+		presim = false
+		log_event("Die Welt erwacht. Jahr %d." % year(), "jade")
+		return 1.0
+	return sim_time / total
+
+
+# ---------------- Speichern ----------------
+
+func serialize() -> Dictionary:
+	var hb: PackedByteArray = world.hgt.to_byte_array()
+	var us: Array = []
+	for u: Unit in units:
+		if u.hp > 0.0:
+			us.append(u.to_dict())
+	var vs: Array = []
+	for v: Village in villages:
+		vs.append(v.to_dict())
+	var cs: Array = []
+	for c: Clan in clans:
+		cs.append(c.to_dict())
+	var bs: Array = []
+	for b: Building in buildings:
+		bs.append(b.to_dict() if b != null else null)
+	var fr: Array = []
+	for i: int in fire.keys():
+		fr.append([i, fire[i]])
+	return {"v": 1, "seed": seed_val, "sim_time": sim_time, "next_id": next_id,
+		"tile": Marshalls.raw_to_base64(world.tile), "feat": Marshalls.raw_to_base64(world.feat), "region": Marshalls.raw_to_base64(world.region),
+		"hgt": Marshalls.raw_to_base64(hb), "ts": Marshalls.raw_to_base64(world.temp_snow),
+		"units": us, "villages": vs, "clans": cs, "buildings": bs, "laws": laws, "log": log_entries.slice(0, 120), "fire": fr}
+
+
+func deserialize(d: Dictionary) -> bool:
+	if int(d.get("v", 0)) != 1:
+		return false
+	reset_state()
+	world.alloc()
+	world.tile = Marshalls.base64_to_raw(d["tile"])
+	world.feat = Marshalls.base64_to_raw(d["feat"])
+	world.region = Marshalls.base64_to_raw(d["region"])
+	world.hgt = Marshalls.base64_to_raw(d["hgt"]).to_float32_array()
+	world.temp_snow = Marshalls.base64_to_raw(d["ts"])
+	seed_val = int(d["seed"])
+	sim_time = d["sim_time"]
+	last_month = int(sim_time)
+	next_id = int(d["next_id"])
+	for e: Dictionary in d["units"]:
+		units.append(Unit.from_dict(e))
+	for e: Dictionary in d["villages"]:
+		villages.append(Village.from_dict(e))
+	for e: Dictionary in d["clans"]:
+		clans.append(Clan.from_dict(e))
+	for e: Variant in d["buildings"]:
+		buildings.append(Building.from_dict(e) if e != null else null)
+	for k: String in d["laws"].keys():
+		laws[k] = d["laws"][k]
+	for e: Dictionary in d["log"]:
+		log_entries.append(e)
+	for e: Array in d["fire"]:
+		fire[int(e[0])] = float(e[1])
+	for b: Building in buildings:
+		if b == null:
+			continue
+		for y: int in range(b.y, b.y + b.h):
+			for x: int in range(b.x, b.x + b.w):
+				world.bmap[y * W + x] = b.id
+	for v: Village in villages:
+		recount(v)
+	world.compute_water()
+	world.render_all()
+	update_leaders()
+	terr_dirty = true
+	return true
