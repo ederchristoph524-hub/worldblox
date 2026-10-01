@@ -47,6 +47,8 @@ Mit `-- --fresh --selftest` wird kein Spielstand geladen oder überschrieben. L�
 - Tierverhalten über `Unit.beh` (`GuData.B_*`), nicht über Artnamen abfragen. Abgeleitete Felder (`beh`, `aqua`, `ig_*`, `igf`) werden nach dem Laden in `Sim.deserialize` neu berechnet (`init_animal`, `apply_igu`).
 - Unsterbliche Gu wirken über `Sim.apply_igu` (Faktoren `ig_atk/ig_hp/ig_sp/ig_cult/ig_rng`, Merker `igf` = `Sim.F_*`). Neue Wirkung: `fx` in `Lore.IGU`, Fall in `apply_igu`, Text in `Lore.FX_TEXT`.
 - Einzigartig: Ehrwürdige und Figuren über `Unit.fig` (Fang Yuan als Figur und als Ehrwürdiger teilen sich `fang_yuan`), Orte über `uniq` in `Lore.PLACE`, Organisationen über `Clan.org`.
+- Die Vorgeschichte läuft im Hintergrund (`GuMain.presim_on`): die Karte ist nach ~1–2 s sichtbar, `Sim.presim_chunk` bekommt pro Bild ein anpassbares Zeitbudget, oben links steht „Vorgeschichte … n %“. Greift der Spieler mit einer Gottkraft ein, endet sie sofort (`_end_presim`).
+- Kamera: Übersicht passt immer ganz und mittig über die Leiste (`min_z`, `_clamp_cam`), weiches Zoomen über `zoom_smooth`, Schwung nach dem Wischen (`fling`), Doppeltippen/-klick zoomt hinein. Desktop-Querformat nutzt Basis 400 × 760 (`_on_resize`).
 - In der Vorgeschichte (`Sim.presim`) entzündet nichts Feuer, sonst verascht der Zentralkontinent durch Drangsal-Blitze der Unsterblichen.
 - Neue Welt: `Sim.new_world(live, mode)` mit `mode` „gu“ (Standard, kanonische Mächte über `Sim.seed_canon`) oder „random“.
 - Spielstand liegt in `user://gu_weltenbox.json`. Bei Formatänderungen `v` in `Sim.serialize` erhöhen. Aktuell **v2** (neu: `map_mode`, `places`, `next_pid`, Unit-Felder `gname/igu/fig/ow/hx/hy/notrib`, Clan-Felder `org/align/sur`); v1 wird weiter geladen (Kartenmodus dann „random“).

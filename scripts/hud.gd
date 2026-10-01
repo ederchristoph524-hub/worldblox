@@ -28,6 +28,13 @@ const C_MUTED: Color = Color("#9db09e")
 const C_BLUE: Color = Color("#9fd0ff")
 const BTN: int = 43
 const GAP: int = 6
+const ROW_Y: int = 10  ## Abstand Reiter-Unterkante → Knöpfe (WorldBox: etwas Luft)
+const TAB_L: int = 14  ## Reiterzeile: Abstand links (Mäander-Streifen)
+const TAB_R: int = 30  ## rechts frei für die Pfeil-Spalte
+const TAB_SEP: int = 2
+const TAB_MAX: int = 66
+const ARROW_W: int = 26
+const TOAST_MAX_W: float = 360.0
 
 var font_bold: FontVariation
 var font_black: FontVariation
@@ -68,6 +75,7 @@ var load_label: Label
 var load_bar: ProgressBar
 var age_lbl: Label
 var show_btn: Button
+var bar_hidden: bool = false
 
 
 func _ready() -> void:
@@ -264,7 +272,7 @@ func _build_bar() -> void:
 	add_child(bar)
 	# Mäander-Streifen links
 	var meander: Control = Control.new()
-	meander.position = Vector2(2, 6)
+	meander.position = Vector2(2, ROW_Y - 1)
 	meander.size = Vector2(6, BTN * 2 + GAP)
 	meander.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	meander.draw.connect(func() -> void:
@@ -277,29 +285,29 @@ func _build_bar() -> void:
 	tabs_box = HBoxContainer.new()
 	tabs_box.anchor_left = 0.0
 	tabs_box.anchor_right = 1.0
-	tabs_box.offset_left = 22
-	tabs_box.offset_right = -22
+	tabs_box.offset_left = TAB_L
+	tabs_box.offset_right = -TAB_R
 	tabs_box.offset_top = -27
 	tabs_box.offset_bottom = 1
-	tabs_box.add_theme_constant_override("separation", 4)
+	tabs_box.add_theme_constant_override("separation", TAB_SEP)
 	tabs_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_child(tabs_box)
 	for i: int in range(Powers.TABS.size()):
 		var tb: TabButton = TabButton.new()
 		tb.icon_tex = Icons.get_icon("tab%d" % i)
 		tb.tooltip_text = Powers.TABS[i]
-		tb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tb.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		tb.pressed_cb = func() -> void: tab_pressed.emit(i)
 		tabs_box.add_child(tb)
 		tab_buttons.append(tb)
 	# Inhalt
 	var row: HBoxContainer = HBoxContainer.new()
-	row.position = Vector2(12, 7)
+	row.position = Vector2(12, ROW_Y)
 	row.anchor_right = 1.0
 	row.offset_left = 12
 	row.offset_right = 0
-	row.offset_top = 7
-	row.offset_bottom = 7 + BTN * 2 + GAP
+	row.offset_top = ROW_Y
+	row.offset_bottom = ROW_Y + BTN * 2 + GAP
 	row.add_theme_constant_override("separation", 0)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_child(row)
@@ -336,6 +344,18 @@ func _build_bar() -> void:
 	tools_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	tools_scroll.scroll_deadzone = 8
 	tools_scroll.mouse_filter = Control.MOUSE_FILTER_PASS
+	tools_scroll.gui_input.connect(func(e: InputEvent) -> void:
+		# Mausrad über der Leiste blättert waagrecht (Desktop)
+		if e is InputEventMouseButton and e.pressed:
+			var mbe: InputEventMouseButton = e
+			var dir: int = 0
+			if mbe.button_index == MOUSE_BUTTON_WHEEL_DOWN or mbe.button_index == MOUSE_BUTTON_WHEEL_RIGHT:
+				dir = 1
+			elif mbe.button_index == MOUSE_BUTTON_WHEEL_UP or mbe.button_index == MOUSE_BUTTON_WHEEL_LEFT:
+				dir = -1
+			if dir != 0:
+				tools_scroll.scroll_horizontal += dir * (BTN + 7)
+				tools_scroll.accept_event())
 	row.add_child(tools_scroll)
 	tools_box = HBoxContainer.new()
 	tools_box.add_theme_constant_override("separation", 7)
@@ -346,7 +366,7 @@ func _build_bar() -> void:
 	arrow.focus_mode = Control.FOCUS_NONE
 	arrow.anchor_left = 1.0
 	arrow.anchor_right = 1.0
-	arrow.offset_left = -26
+	arrow.offset_left = -ARROW_W
 	arrow.offset_right = 0
 	arrow.offset_top = -10
 	arrow.offset_bottom = BTN * 2 + GAP + 14
@@ -534,6 +554,9 @@ func _build_top() -> void:
 	add_child(show_btn)
 
 
+const MAX_TOASTS: int = 3
+
+
 func toast(text: String, kind: String, year: int) -> void:
 	var p: PanelContainer = PanelContainer.new()
 	var s: StyleBoxFlat = sb(Color(0.07, 0.094, 0.078, 0.84), Color.TRANSPARENT, 0, 4)
@@ -550,7 +573,7 @@ func toast(text: String, kind: String, year: int) -> void:
 	r.fit_content = true
 	r.scroll_active = false
 	r.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	r.custom_minimum_size = Vector2(200, 0)
+	r.custom_minimum_size = Vector2(160, 0)
 	r.add_theme_font_override("normal_font", ThemeDB.fallback_font)
 	r.add_theme_font_override("bold_font", font_bold)
 	r.add_theme_font_size_override("normal_font_size", 12)
@@ -559,14 +582,15 @@ func toast(text: String, kind: String, year: int) -> void:
 	r.text = "[b][color=#%s]J%d[/color][/b] %s" % [GuData.KCOL.get(kind, C_YELLOW).to_html(false), year, _esc(text)]
 	p.add_child(r)
 	toasts.add_child(p)
-	while toasts.get_child_count() > 3:
+	while toasts.get_child_count() > MAX_TOASTS:
 		var old: Node = toasts.get_child(0)
 		toasts.remove_child(old)
 		old.queue_free()
-	var tw: Tween = create_tween()
+	var tw: Tween = p.create_tween()
 	tw.tween_interval(5.0)
 	tw.tween_property(p, "modulate:a", 0.0, 0.6)
 	tw.tween_callback(p.queue_free)
+	tick_layout()
 
 
 static func _esc(s: String) -> String:
@@ -673,6 +697,12 @@ func show_hint(n: String, d: String) -> void:
 	hint_desc.get_parent().visible = d != ""
 	hint_box.modulate.a = 1.0
 	hint_t = 3.2 if d != "" else 1.8
+	tick_layout()
+
+
+func hide_hint() -> void:
+	hint_t = 0.0
+	hint_box.modulate.a = 0.0
 
 
 func show_weather(type: String) -> void:
@@ -684,15 +714,73 @@ func show_weather(type: String) -> void:
 func layout_floaters() -> void:
 	var b: float = bar_height()
 	var vs: Vector2 = get_viewport_rect().size
-	hint_box.offset_top = -(b + 120)
-	hint_box.offset_bottom = -(b + 14)
-	hint_box.offset_left = 16
-	hint_box.offset_right = -16
-	hint_desc.custom_minimum_size.x = minf(vs.x - 60, 340)
-	wbox.position = Vector2(12, vs.y - b - 14 - 80)
-	brush_box.position = Vector2(vs.x - 192, vs.y - b - 14 - 42)
+	_layout_tabs(vs.x)
+	wbox.position = Vector2(12, vs.y - b - 12 - 80)
+	brush_box.position = Vector2(vs.x - 192, vs.y - b - 12 - 42)
 	age_lbl.position = Vector2(12, 8)
-	toasts.offset_top = 28
+	# Fenster: auf breiten Bildschirmen schmal und mittig statt über die ganze Breite
+	var iw: float = minf(vs.x - 24.0, 400.0)
+	insp.offset_left = roundf((vs.x - iw) / 2.0)
+	insp.offset_right = -roundf((vs.x - iw) / 2.0)
+	var mw: float = minf(vs.x - 24.0, 480.0)
+	modal_panel.offset_left = roundf((vs.x - mw) / 2.0)
+	modal_panel.offset_right = -roundf((vs.x - mw) / 2.0)
+	var mh: float = vs.y - 100.0
+	if mh > 760.0:
+		modal_panel.offset_top = roundf((vs.y - 760.0) / 2.0)
+		modal_panel.offset_bottom = -roundf((vs.y - 760.0) / 2.0)
+	else:
+		modal_panel.offset_top = 50
+		modal_panel.offset_bottom = -50
+	tick_layout()
+
+
+## Reiter so breit wie möglich, aber alle sieben passen in die Zeile (360–1600 px); nie gestreckt.
+func _layout_tabs(w: float) -> void:
+	var n: int = tab_buttons.size()
+	if n == 0:
+		return
+	var avail: float = w - TAB_L - TAB_R
+	var tw: int = clampi(int(floor((avail - TAB_SEP * (n - 1)) / n)), 30, TAB_MAX)
+	for tb: TabButton in tab_buttons:
+		tb.custom_minimum_size = Vector2(tw, 28)
+		tb.queue_redraw()
+
+
+## Hinweis und Meldungen so legen, dass sie nichts verdecken (läuft jedes Bild, billig).
+func tick_layout() -> void:
+	var b: float = bar_height()
+	var vs: Vector2 = get_viewport_rect().size
+	# Hinweis: mittig über der Leiste; seitlich frei für Wetter-Kasten, über dem Pinsel-Kasten
+	var side: float = 16.0
+	if wbox.visible:
+		side = maxf(side, wbox.position.x + wbox.size.x + 8.0)
+	var bottom: float = b + 10.0
+	if brush_box.visible and brush_box.position.x < vs.x / 2.0 + 180.0:
+		bottom = b + 12.0 + 42.0 + 8.0
+	hint_box.offset_left = side
+	hint_box.offset_right = -side
+	hint_box.offset_bottom = -bottom
+	hint_box.offset_top = -(bottom + 120.0)
+	hint_desc.custom_minimum_size.x = minf(vs.x - side * 2.0 - 24.0, 340.0)
+	# Titel lieber etwas kleiner als umbrechen
+	var avail: float = vs.x - side * 2.0 - 8.0
+	var fs: int = 21
+	while fs > 15 and font_black.get_string_size(hint_name.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > avail:
+		fs -= 1
+	if hint_name.label_settings.font_size != fs:
+		hint_name.label_settings.font_size = fs
+	# Meldungen: oben links, nie unter Stern/Geschenk; liegt der Inspektor darüber, rutschen sie darunter
+	var tw: float = minf(vs.x - 10.0 - (vs.x - top_r.get_rect().position.x) - 8.0, TOAST_MAX_W)
+	var ty: float = 28.0
+	toasts.offset_left = 10
+	toasts.offset_right = -(vs.x - 10.0 - tw)
+	if insp.visible:
+		var ir: Rect2 = insp.get_global_rect()
+		if ir.position.x < 10.0 + tw:
+			ty = ir.end.y + 6.0
+	toasts.offset_top = ty
+	toasts.visible = not bar_hidden and ty + 40.0 < vs.y - b - 60.0
 
 
 func _process(delta: float) -> void:
@@ -1174,6 +1262,7 @@ func set_loading(visible_now: bool, text: String = "", progress: float = 0.0) ->
 
 
 func set_ui_hidden(h: bool) -> void:
+	bar_hidden = h
 	bar.visible = not h
 	top_r.visible = not h
 	toasts.visible = not h

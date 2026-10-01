@@ -48,6 +48,8 @@ var insp_t: float = 0.0
 var terr_t: float = 0.0
 var auto_t: float = 0.0
 var hover: Vector2 = Vector2(-1, -1)
+var presim_on: bool = false  ## Vorgeschichte läuft im Hintergrund, die Karte ist schon sichtbar
+var t_boot: int = 0
 var fresh: bool = false  ## Entwickler: --fresh lädt und speichert nichts
 
 # Eingabe
@@ -55,9 +57,20 @@ var touches: Dictionary = {}
 var gesture: Dictionary = {}
 var stroke: Dictionary = {}
 var last_spawn: int = 0
+var zoom_goal: float = -1.0  ## weiches Zoomen: Ziel (< 0 = aus)
+var zoom_pt: Vector2 = Vector2.ZERO
+var fling: Vector2 = Vector2.ZERO  ## Schwung nach dem Wischen (Bildschirm-Pixel/s)
+var pan_vel: Vector2 = Vector2.ZERO
+var pan_us: int = 0
+var last_tap_ms: int = -10000
+var last_tap_pos: Vector2 = Vector2(-999, -999)
+const PRESIM_FRAME_MS: float = 34.0  ## Vorgeschichte im Hintergrund: Bildzeit-Ziel (~30 fps)
+var presim_budget: float = 12.0
+var presim_ms0: int = 0
 
 
 func _ready() -> void:
+	t_boot = Time.get_ticks_msec()
 	randomize()
 	sim = Sim.new()
 	add_child(sim)
@@ -158,6 +171,12 @@ func _build_scene() -> void:
 
 
 func _on_resize() -> void:
+	# Desktop-Fenster im Querformat: etwas größere Oberfläche (Basis 760 statt 880 Pixel hoch)
+	var win: Window = get_window()
+	if win != null and win.content_scale_mode == Window.CONTENT_SCALE_MODE_CANVAS_ITEMS:
+		var want: Vector2i = Vector2i(400, 760) if win.size.x > win.size.y * 1.1 else Vector2i(400, 880)
+		if win.content_scale_size != want:
+			win.content_scale_size = want
 	var vs: Vector2 = get_viewport_rect().size
 	hud.position = Vector2.ZERO
 	hud.size = vs
@@ -174,17 +193,21 @@ func view_h() -> float:
 	return maxf(120.0, get_viewport_rect().size.y - hud.bar_height())
 
 
+## Kamera begrenzen: ist die Karte kleiner als der Bildausschnitt, bleibt sie ganz sichtbar;
+## sonst darf man höchstens um einen halben Bildschirm über den Rand hinaus schieben.
 func _clamp_cam() -> void:
 	z = clampf(z, min_z, MAX_Z)
 	var vs: Vector2 = get_viewport_rect().size
 	var hw: float = vs.x / 2.0 / z
 	var hh: float = view_h() / 2.0 / z
-	var mx: float = minf(hw * 1.1, W * 0.6)
-	var my: float = minf(hh * 1.1, H * 0.6)
-	cam.x = clampf(cam.x, hw - mx, W - hw + mx)
-	cam.y = clampf(cam.y, hh - my, H - hh + my)
-	if W * z <= vs.x * 0.9:
-		cam.x = clampf(cam.x, W / 2.0 - hw * 0.4, W / 2.0 + hw * 0.4)
+	if W <= hw * 2.0:
+		cam.x = clampf(cam.x, W - hw, hw)
+	else:
+		cam.x = clampf(cam.x, hw * 0.5, W - hw * 0.5)
+	if H <= hh * 2.0:
+		cam.y = clampf(cam.y, H - hh, hh)
+	else:
+		cam.y = clampf(cam.y, hh * 0.5, H - hh * 0.5)
 
 
 func world_origin() -> Vector2:
@@ -206,9 +229,24 @@ func zoom_at(p: Vector2, nz: float) -> void:
 
 
 func zoom_to(x: float, y: float, nz: float) -> void:
+	zoom_goal = -1.0
+	fling = Vector2.ZERO
 	z = maxf(z, nz)
 	cam = Vector2(x, y)
 	_clamp_cam()
+
+
+## Weiches Zoomen (Mausrad, Tasten, Doppeltippen): Ziel setzen, _process nähert sich an.
+func zoom_smooth(p: Vector2, factor: float) -> void:
+	var base: float = zoom_goal if zoom_goal > 0.0 else z
+	zoom_goal = clampf(base * factor, min_z, MAX_Z)
+	zoom_pt = p
+	fling = Vector2.ZERO
+	follow = false
+
+
+func view_center() -> Vector2:
+	return Vector2(get_viewport_rect().size.x / 2.0, view_h() / 2.0)
 
 
 # ---------------- Ablauf ----------------
@@ -226,16 +264,20 @@ func _start_new_world(live: bool, mode: String = "gu") -> void:
 	await get_tree().process_frame
 	sim.new_world(live, mode)
 	sim.world.render_all()
-	if not live:
-		_finish_start()
-	else:
-		hud.set_loading(true, "Die Vorgeschichte vergeht …", 0.1)
+	# Karte sofort zeigen; die Vorgeschichte läuft danach in Häppchen im Hintergrund.
+	presim_on = live
+	presim_ms0 = Time.get_ticks_msec()
+	presim_budget = 12.0
+	_finish_start()
+	print("WORLD VISIBLE ms ", Time.get_ticks_msec() - t_boot)
 
 
 func _finish_start() -> void:
 	loading = false
 	hud.set_loading(false)
 	z = min_z
+	zoom_goal = -1.0
+	fling = Vector2.ZERO
 	cam = Vector2(W / 2.0, H / 2.0)
 	_clamp_cam()
 	sim.update_leaders()
@@ -243,16 +285,33 @@ func _finish_start() -> void:
 	sim.world.render_all()
 
 
+## Vorgeschichte sofort beenden (der Spieler greift ein oder sie ist fertig).
+func _end_presim() -> void:
+	if not presim_on:
+		return
+	presim_on = false
+	if sim.presim:
+		sim.presim = false
+		sim.log_event("Die Welt erwacht. Jahr %d." % sim.year(), "jade")
+	sim.update_leaders()
+	sim.terr_dirty = true
+
+
 func _process(delta: float) -> void:
 	var rdt: float = minf(delta, 0.1)
 	if loading:
-		if load_live:
-			var p: float = sim.presim_chunk(40, PRESIM_YEARS)
-			hud.set_loading(true, "Die Vorgeschichte vergeht …", 0.1 + p * 0.9)
-			if p >= 1.0:
-				_finish_start()
 		return
-	if not paused:
+	if presim_on:
+		# Budget anpassen: was vom letzten Bild nicht Vorgeschichte war, ist Zeichnen/Eingabe
+		var overhead: float = delta * 1000.0 - presim_budget
+		# Untergrenze wächst mit der Zeit, damit die Vorgeschichte auch auf langsamen Geräten zügig endet
+		var lo: float = clampf(6.0 + (Time.get_ticks_msec() - presim_ms0) / 1000.0 * 2.5 - 7.5, 6.0, 45.0)
+		presim_budget = clampf(lerpf(presim_budget, PRESIM_FRAME_MS - overhead, 0.3), lo, maxf(28.0, lo))
+		var pp: float = sim.presim_chunk(int(presim_budget), PRESIM_YEARS)
+		if pp >= 1.0:
+			print("PRESIM DONE ms ", Time.get_ticks_msec() - t_boot)
+			_end_presim()
+	elif not paused:
 		sim_acc += rdt * SPEEDS[speed_idx]
 		var n: int = 0
 		while sim_acc >= Sim.DT and n < 14:
@@ -261,6 +320,20 @@ func _process(delta: float) -> void:
 			n += 1
 		if n >= 14:
 			sim_acc = 0.0
+	# weiches Zoomen und Schwung
+	if zoom_goal > 0.0:
+		var nz: float = lerpf(z, zoom_goal, 1.0 - exp(-rdt * 13.0))
+		if absf(nz - zoom_goal) < zoom_goal * 0.003:
+			nz = zoom_goal
+			zoom_goal = -1.0
+		zoom_at(zoom_pt, nz)
+	if fling != Vector2.ZERO:
+		cam -= fling * rdt / z
+		fling *= exp(-rdt * 4.2)
+		var c0: Vector2 = cam
+		_clamp_cam()
+		if fling.length() < 12.0 or c0 != cam:
+			fling = Vector2.ZERO
 	if follow and sel_unit != null and sel_unit.hp > 0.0:
 		cam += (Vector2(sel_unit.x, sel_unit.y) - cam) * minf(1.0, rdt * 6.0)
 		_clamp_cam()
@@ -268,7 +341,8 @@ func _process(delta: float) -> void:
 		sim.world.refresh_water()
 	sim.world.flush_dirty(4)
 	terr_t -= rdt
-	if sim.terr_dirty and show_terr and terr_t <= 0.0 and z < 2.6:
+	var tz: float = terr_zoom()
+	if sim.terr_dirty and show_terr and terr_t <= 0.0 and z < tz:
 		terr_t = 1.5
 		sim.terr_dirty = false
 		sim.world.update_territory(sim.villages, sim.clans)
@@ -283,8 +357,8 @@ func _process(delta: float) -> void:
 	var lod: float = clampf((z - 2.0) / 0.9, 0.0, 1.0)
 	near_spr.modulate.a = lod
 	near_spr.visible = lod > 0.0
-	terr_spr.visible = show_terr and z < 2.6
-	terr_spr.modulate.a = clampf((2.6 - z) / 0.8, 0.0, 0.75)
+	terr_spr.visible = show_terr and z < tz
+	terr_spr.modulate.a = clampf((tz - z) / 0.8, 0.0, 0.75)
 	ents.queue_redraw()
 	clouds.tick(rdt)
 	clouds.queue_redraw()
@@ -297,12 +371,21 @@ func _process(delta: float) -> void:
 	if gift_cd > 0.0:
 		gift_cd -= rdt
 		hud.gift_btn.disabled = gift_cd > 0.0
-	var ad: Dictionary = sim.age_data()
-	hud.age_lbl.text = "%s · Jahr %d · nächstes in %d Jahren" % [ad["n"], sim.year(), sim.years_to_next_age()]
+	if presim_on:
+		hud.age_lbl.text = "Vorgeschichte … %d %%" % int(clampf(sim.sim_time / (PRESIM_YEARS * 12.0), 0.0, 0.99) * 100.0)
+	else:
+		var ad: Dictionary = sim.age_data()
+		hud.age_lbl.text = "%s · Jahr %d · nächstes in %d Jahren" % [ad["n"], sim.year(), sim.years_to_next_age()]
+	hud.tick_layout()
 	auto_t += rdt
-	if auto_t > 60.0:
+	if auto_t > 60.0 and not presim_on:
 		auto_t = 0.0
 		_save_game()
+
+
+## Bis zu dieser Zoomstufe sind Clan-Gebiete sichtbar (auf großen Bildschirmen entsprechend höher).
+func terr_zoom() -> float:
+	return 2.6 * maxf(1.0, min_z / 1.44)
 
 
 # ---------------- Eingabe ----------------
@@ -314,10 +397,10 @@ func _unhandled_input(e: InputEvent) -> void:
 		_toggle_pause()
 		return
 	if e.is_action_pressed("zoom_in"):
-		zoom_at(get_viewport_rect().size * Vector2(0.5, 0.0) + Vector2(0, view_h() / 2.0), z * 1.25)
+		zoom_smooth(view_center(), 1.35)
 		return
 	if e.is_action_pressed("zoom_out"):
-		zoom_at(get_viewport_rect().size * Vector2(0.5, 0.0) + Vector2(0, view_h() / 2.0), z / 1.25)
+		zoom_smooth(view_center(), 1.0 / 1.35)
 		return
 	if e.is_action_pressed("ui_back"):
 		_go_back()
@@ -329,11 +412,25 @@ func _unhandled_input(e: InputEvent) -> void:
 		_save_game()
 		hud.toast("Welt gespeichert (Jahr %d)." % sim.year(), "jade", sim.year())
 		return
+	if e is InputEventMagnifyGesture:
+		var mg: InputEventMagnifyGesture = e
+		zoom_goal = -1.0
+		zoom_at(mg.position, z * mg.factor)
+		follow = false
+		return
+	if e is InputEventPanGesture:
+		var pg: InputEventPanGesture = e
+		cam += pg.delta * 6.0 / z
+		_clamp_cam()
+		follow = false
+		return
 	if e is InputEventScreenTouch:
 		var st: InputEventScreenTouch = e
 		if st.pressed:
 			touches[st.index] = st.position
+			fling = Vector2.ZERO
 			if touches.size() == 2:
+				zoom_goal = -1.0
 				var ps: Array = touches.values()
 				var a: Vector2 = ps[0]
 				var b: Vector2 = ps[1]
@@ -364,14 +461,15 @@ func _unhandled_input(e: InputEvent) -> void:
 	if e is InputEventMouseButton:
 		var mb: InputEventMouseButton = e
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
-			zoom_at(mb.position, z * 1.15)
-			follow = false
+			zoom_smooth(mb.position, 1.0 + 0.2 * (mb.factor if mb.factor > 0.0 else 1.0))
 			return
 		if mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
-			zoom_at(mb.position, z / 1.15)
-			follow = false
+			zoom_smooth(mb.position, 1.0 / (1.0 + 0.2 * (mb.factor if mb.factor > 0.0 else 1.0)))
 			return
 		if mb.pressed:
+			fling = Vector2.ZERO
+			pan_vel = Vector2.ZERO
+			pan_us = Time.get_ticks_usec()
 			var t: Dictionary = Powers.tool_by_id(tool_id)
 			var pan_btn: bool = mb.button_index != MOUSE_BUTTON_LEFT
 			if not pan_btn and not t.is_empty() and (t["m"] == "paint" or t["m"] == "spawn"):
@@ -382,8 +480,12 @@ func _unhandled_input(e: InputEvent) -> void:
 			else:
 				gesture = {"type": "pan", "last": mb.position, "moved": 0.0, "tap": not pan_btn}
 		else:
-			if gesture.get("type", "") == "pan" and gesture["tap"] and float(gesture["moved"]) < 8.0:
-				_tap_at(mb.position)
+			if gesture.get("type", "") == "pan":
+				if gesture["tap"] and float(gesture["moved"]) < 8.0:
+					_tap_or_double(mb.position)
+				elif float(gesture["moved"]) > 6.0 and Time.get_ticks_usec() - pan_us < 90000 and touches.size() < 2:
+					# Schwung: nach einem schnellen Wischen gleitet die Karte weiter
+					fling = pan_vel.limit_length(2600.0) if pan_vel.length() > 120.0 else Vector2.ZERO
 			if gesture.get("type", "") != "pinch":
 				gesture = {}
 		return
@@ -414,13 +516,35 @@ func _unhandled_input(e: InputEvent) -> void:
 				cam -= d2 / z
 				_clamp_cam()
 				follow = false
+				zoom_goal = -1.0
+			var now_us: int = Time.get_ticks_usec()
+			var dt_s: float = maxf(0.004, (now_us - pan_us) / 1000000.0)
+			pan_vel = pan_vel.lerp(d2 / dt_s, 0.45) if now_us - pan_us < 100000 else d2 / dt_s
+			pan_us = now_us
 			gesture["last"] = mm.position
+
+
+## Einfaches Tippen löst das Werkzeug aus; zweimal schnell hintereinander (ohne Werkzeug) zoomt hinein.
+func _tap_or_double(p: Vector2) -> void:
+	var now: int = Time.get_ticks_msec()
+	var t: Dictionary = Powers.tool_by_id(tool_id)
+	var zoomable: bool = t.is_empty() or t["id"] == "inspect"
+	if zoomable and now - last_tap_ms < 340 and p.distance_to(last_tap_pos) < 28.0:
+		last_tap_ms = -10000
+		if insp_kind == "t":
+			_close_insp()
+		zoom_smooth(p, 2.2)
+		return
+	last_tap_ms = now
+	last_tap_pos = p
+	_tap_at(p)
 
 
 func _paint_at(p: Vector2) -> void:
 	var t: Dictionary = Powers.tool_by_id(tool_id)
 	if t.is_empty():
 		return
+	_end_presim()
 	var w: Vector2 = to_world(p)
 	if w.x < 0 or w.y < 0 or w.x >= W or w.y >= H:
 		return
@@ -441,6 +565,7 @@ func _tap_at(p: Vector2) -> void:
 		if t["id"] == "inspect":
 			_inspect_at(w.x, w.y)
 			return
+		_end_presim()
 		var msg: String = powers.tap_tool(t, w.x, w.y)
 		if msg != "":
 			hud.show_hint("", msg)
@@ -460,6 +585,8 @@ func _apply_tab(i: int) -> void:
 	hud.refresh_tools(tool_id, sim.weather.get("type", ""))
 	if i >= 0:
 		hud.show_hint(Powers.TABS[i], "")
+	else:
+		hud.hide_hint()
 
 
 func _click_tool(t: Dictionary) -> void:
@@ -1754,6 +1881,11 @@ class ScreenLayer:
 func _dev_shots(dir: String) -> void:
 	while loading:
 		await get_tree().process_frame
+	# P: Karte sichtbar, Vorgeschichte läuft noch im Hintergrund
+	await _wait(1.0)
+	await _shot(dir + "/P.png")
+	while presim_on:
+		await get_tree().process_frame
 	for k: int in range(40):
 		await get_tree().process_frame
 	_apply_tab(1)
@@ -1803,6 +1935,20 @@ func _dev_shots(dir: String) -> void:
 	await _wait(0.3)
 	await _shot(dir + "/G.png")
 	hud.close_modal()
+	# Q: Reiter 6 mit Wetter-Kasten und Hinweis; R: Malwerkzeug mit Pinsel-Kasten und Beschreibung, drei Meldungen
+	_apply_tab(6)
+	_set_weather("rain")
+	await _wait(0.3)
+	await _shot(dir + "/Q.png")
+	_apply_tab(0)
+	_click_tool(Powers.tool_by_id("t_deep"))
+	for k: int in range(5):
+		hud.toast("Testmeldung %d: Ein Gu-Meister durchbricht zum nächsten Rang." % k, "jade", sim.year())
+	await _wait(0.3)
+	await _shot(dir + "/R.png")
+	_set_weather("")
+	tool_id = ""
+	hud.refresh_tools("", "")
 	# Leisten der Reiter (jeweils Anfang und weiter rechts)
 	for tb: int in [0, 1, 2, 5, 6]:
 		_apply_tab(tb)
@@ -1948,6 +2094,68 @@ func _dev_sheets(dir: String) -> void:
 	get_tree().quit()
 
 
+## Kamera-Prüfung: Übersicht passt, weiches Zoomen per Mausrad, Schwung nach dem Wischen, Doppeltippen.
+func _selftest_camera() -> void:
+	_close_insp()
+	hud.close_modal()
+	tool_id = ""
+	z = min_z
+	cam = Vector2(W / 2.0, H / 2.0)
+	_clamp_cam()
+	var o: Vector2 = world_origin()
+	var vs: Vector2 = get_viewport_rect().size
+	var fits: bool = o.x >= -0.5 and o.y >= -0.5 and o.x + W * z <= vs.x + 0.5 and o.y + H * z <= view_h() + 0.5
+	print("cam overview fits ", fits, " z ", snappedf(z, 0.01))
+	var wheel: InputEventMouseButton = InputEventMouseButton.new()
+	wheel.button_index = MOUSE_BUTTON_WHEEL_UP
+	wheel.pressed = true
+	wheel.position = view_center()
+	_unhandled_input(wheel)
+	var z0: float = z
+	for k: int in range(3):
+		await get_tree().process_frame
+	var mid: float = z
+	for k: int in range(90):
+		await get_tree().process_frame
+	print("cam smooth zoom ", mid > z0 and mid < z0 * 1.2, " -> ", snappedf(z / z0, 0.01))
+	# Wischen: Druck, schnelle Bewegung, Loslassen -> Karte gleitet weiter
+	z = min_z * 3.0
+	cam = Vector2(W / 2.0, H / 2.0)
+	_clamp_cam()
+	var p: Vector2 = view_center()
+	var down: InputEventMouseButton = InputEventMouseButton.new()
+	down.button_index = MOUSE_BUTTON_LEFT
+	down.pressed = true
+	down.position = p
+	_unhandled_input(down)
+	for k: int in range(6):
+		await get_tree().process_frame
+		var mv: InputEventMouseMotion = InputEventMouseMotion.new()
+		p += Vector2(-18, 0)
+		mv.position = p
+		_unhandled_input(mv)
+	var up: InputEventMouseButton = InputEventMouseButton.new()
+	up.button_index = MOUSE_BUTTON_LEFT
+	up.position = p
+	_unhandled_input(up)
+	var c1: Vector2 = cam
+	for k: int in range(30):
+		await get_tree().process_frame
+	print("cam fling ", cam.x > c1.x + 1.0, " glide ", snappedf(cam.x - c1.x, 0.1))
+	# Doppeltippen zoomt hinein
+	var zt: float = z
+	for k: int in range(2):
+		var d2: InputEventMouseButton = down.duplicate()
+		d2.position = view_center()
+		_unhandled_input(d2)
+		var u2: InputEventMouseButton = up.duplicate()
+		u2.position = view_center()
+		_unhandled_input(u2)
+	for k: int in range(90):
+		await get_tree().process_frame
+	print("cam double tap ", z > zt * 1.5, " insp ", hud.insp.visible)
+
+
 func _wait(t: float) -> void:
 	await get_tree().create_timer(t).timeout
 
@@ -1958,7 +2166,7 @@ func _shot(path: String) -> void:
 
 
 func _selftest() -> void:
-	while loading:
+	while loading or presim_on:
 		await get_tree().process_frame
 	var t0: int = Time.get_ticks_msec()
 	var c: Vector2 = Vector2(W / 2.0, H / 2.0)
@@ -2048,5 +2256,6 @@ func _selftest() -> void:
 	fresh = true
 	for k: int in range(100):
 		sim.step(Sim.DT)
+	await _selftest_camera()
 	print("SELFTEST DONE ms ", Time.get_ticks_msec() - t0)
 	get_tree().quit()
