@@ -47,6 +47,10 @@ var far_tex: ImageTexture
 var terr_tex: ImageTexture
 var dirty: PackedByteArray
 var water_dirty: bool = false
+## Kartenebene der Gebietsanzeige: 0 Clan-Gebiete, 1 Dorf-Gebiete, 2 Regionen.
+var layer: int = 0
+const LAYER_NAME: PackedStringArray = ["Clan-Gebiete", "Dorf-Gebiete", "Regionen"]
+const REG_COL: Array[Color] = [Color("#e8e0a0"), Color("#5ac85a"), Color("#e8a040"), Color("#40a8e8"), Color("#c070e8")]
 
 
 func _init() -> void:
@@ -392,6 +396,13 @@ func tile_color(x: int, y: int) -> Color:
 		c = GuData.PAL[t][k]
 	if t == GuData.SAND and y < H - 1 and GuData.is_water(tile[i + W]):
 		c = Color8(244, 240, 196)
+	elif t == GuData.LAVA:
+		# glühende Adern und dunkle Kruste am Rand
+		var edge2: bool = (x > 0 and tile[i - 1] != t) or (x < W - 1 and tile[i + 1] != t) or (y > 0 and tile[i - W] != t) or (y < H - 1 and tile[i + W] != t)
+		if edge2:
+			c = Color8(120, 40, 24)
+		elif n > 0.9:
+			c = Color8(255, 222, 120)
 	return c
 
 
@@ -430,6 +441,8 @@ func _far_dot(i: int) -> void:
 		far_img.set_pixel(x, y, Color8(120, 220, 240))
 	elif f == GuData.F_FLOWER:
 		far_img.set_pixel(x, y, Color8(232, 122, 200))
+	elif f == GuData.F_ROAD:
+		far_img.set_pixel(x, y, Color8(176, 142, 96))
 
 
 func _render_rect(x0: int, y0: int, x1: int, y1: int) -> void:
@@ -530,6 +543,11 @@ func set_tile(i: int, t: int) -> int:
 
 func update_territory(villages: Array, clans: Array) -> void:
 	terr.fill(-1)
+	terr_img.fill(Color(0, 0, 0, 0))
+	if layer == 2:
+		_region_layer()
+		terr_tex.update(terr_img)
+		return
 	for v: Village in villages:
 		if v == null or not v.alive:
 			continue
@@ -548,7 +566,7 @@ func update_territory(villages: Array, clans: Array) -> void:
 				var i: int = y * W + x
 				if terr[i] < 0 and tile[i] != GuData.DEEP and tile[i] != GuData.WALL and region[i] == rg:
 					terr[i] = v.id
-	terr_img.fill(Color(0, 0, 0, 0))
+	var by_vil: bool = layer == 1
 	for y: int in range(H):
 		for x: int in range(W):
 			var i: int = y * W + x
@@ -558,11 +576,36 @@ func update_territory(villages: Array, clans: Array) -> void:
 			var v: Village = villages[t]
 			var k: int = v.clan
 			var cl: Clan = clans[k]
-			var border: bool = (x == 0 or _clan_of(i - 1, villages) != k) or (x == W - 1 or _clan_of(i + 1, villages) != k) or (y == 0 or _clan_of(i - W, villages) != k) or (y == H - 1 or _clan_of(i + W, villages) != k)
+			var border: bool
+			if by_vil:
+				border = x == 0 or terr[i - 1] != t or x == W - 1 or terr[i + 1] != t or y == 0 or terr[i - W] != t or y == H - 1 or terr[i + W] != t
+			else:
+				border = (x == 0 or _clan_of(i - 1, villages) != k) or (x == W - 1 or _clan_of(i + 1, villages) != k) or (y == 0 or _clan_of(i - W, villages) != k) or (y == H - 1 or _clan_of(i + W, villages) != k)
 			var col: Color = cl.col
-			col.a = 0.9 if border else 0.13
+			if by_vil:
+				# Dörfer eines Clans abwechselnd heller und dunkler, die Hauptstadt golden umrandet
+				col = col.lightened(0.25) if t % 2 == 0 else col.darkened(0.2)
+				if border and cl.cap == t:
+					col = Color("#ffd24a")
+			col.a = 0.9 if border else (0.3 if by_vil else 0.13)
 			terr_img.set_pixel(x, y, col)
 	terr_tex.update(terr_img)
+
+
+## Ebene „Regionen“: die fünf Regionen in eigenen Farben mit Rand.
+func _region_layer() -> void:
+	for y: int in range(H):
+		for x: int in range(W):
+			var i: int = y * W + x
+			if tile[i] == GuData.WALL:
+				continue
+			var r: int = region[i]
+			var border: bool = (x > 0 and region[i - 1] != r) or (x < W - 1 and region[i + 1] != r) or (y > 0 and region[i - W] != r) or (y < H - 1 and region[i + W] != r)
+			if not border and x > 1 and x < W - 2 and y > 1 and y < H - 2:
+				border = tile[i - 1] == GuData.WALL or tile[i + 1] == GuData.WALL or tile[i - W] == GuData.WALL or tile[i + W] == GuData.WALL
+			var col: Color = REG_COL[r]
+			col.a = 0.95 if border else (0.12 if GuData.is_water(tile[i]) else 0.42)
+			terr_img.set_pixel(x, y, col)
 
 
 func _clan_of(i: int, villages: Array) -> int:

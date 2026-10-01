@@ -480,6 +480,10 @@ func _unhandled_input(e: InputEvent) -> void:
 			else:
 				gesture = {"type": "pan", "last": mb.position, "moved": 0.0, "tap": not pan_btn}
 		else:
+			# Göttliche Hand: beim Loslassen fallen die gehaltenen Wesen herab
+			if gesture.get("type", "") == "paint":
+				var wr: Vector2 = to_world(mb.position)
+				powers.end_stroke(wr.x, wr.y)
 			if gesture.get("type", "") == "pan":
 				if gesture["tap"] and float(gesture["moved"]) < 8.0:
 					_tap_or_double(mb.position)
@@ -654,6 +658,19 @@ func _run_action(t: Dictionary) -> void:
 					_start_new_world(false, "random"), ""]])
 		"hideui":
 			_set_ui_hidden(true)
+		# Gottkräfte-Parität (Logik in Powers/Sim)
+		"layer":
+			sim.world.layer = (sim.world.layer + 1) % World.LAYER_NAME.size()
+			show_terr = true
+			sim.terr_dirty = true
+			terr_t = 0.0
+			hud.show_hint("Kartenebene", World.LAYER_NAME[sim.world.layer] + " (in der Übersicht sichtbar)")
+		"plans":
+			_open_plans()
+		"brushshape":
+			hud.show_hint("Pinselform", powers.cycle_shape())
+		"coin":
+			hud.show_hint(t["n"], powers.coin())
 		"ev_war", "ev_dream", "ev_inherit":
 			var r: Dictionary = powers.event_act(t["id"])
 			if str(r["msg"]) != "":
@@ -874,7 +891,7 @@ func _unit_body(u: Unit) -> String:
 					s += "\n[color=#9db09e]" + str(vd["d"]) + "[/color]"
 		if u.luck > 0.0:
 			s += "\n[color=#ffd23a]Großes Glück[/color]"
-		if u.sick > 0.0:
+		if u.sick > 0.0 and not u.undead:
 			s += "\n[color=#86e04a]Seuchen-Gu[/color]"
 	else:
 		var S: Dictionary = GuData.SPEC[u.sp]
@@ -893,6 +910,7 @@ func _unit_body(u: Unit) -> String:
 		s += mt + "Beute[/color]  %d" % u.kills
 		if S.has("d"):
 			s += "\n[color=#9db09e]" + str(S["d"]) + "[/color]"
+	s += powers.unit_lines(u)
 	return s
 
 
@@ -939,6 +957,7 @@ func _village_body(v: Village) -> String:
 	s += mt + "Vorräte[/color]  %d Nahrung · %d Holz · %d Ursteine\n" % [int(v.food), int(v.wood), int(v.stones)]
 	s += mt + "Gebäude[/color]  " + ("Ahnenhalle" if v.lvl > 0 else "Lagerfeuer") + " · %d Hütten · %d Felder" % [v.houses, v.farms] + (" · Gu-Veredelung" if v.forge else "") + ((" · %d Türme" % v.towers) if v.towers > 0 else "") + "\n"
 	s += mt + "Clan[/color]  %d Dörfer · gegründet Jahr %d\n" % [nv, c.born]
+	s += powers.village_lines(v)
 	if top != null:
 		s += mt + "Stärkster[/color]  " + _swatch(GuData.ESS_COL[top.rank]) + top.pname() + ", " + GuData.rank_title(top.rank) + "\n"
 	if not c.war.is_empty():
@@ -1179,9 +1198,13 @@ func _switch(on: bool) -> String:
 
 func _open_laws() -> void:
 	var s: String = _h("Weltgesetze") + "Tippe auf ein Gesetz, um es umzuschalten.\n\n"
-	for l: Array in LAWS:
+	for l: Array in LAWS + Sim.LAWS_EXTRA:
 		s += "[url=law:%s]%s  [b]%s[/b][/url]\n    [color=#9db09e]%s[/color]\n" % [l[0], _switch(sim.laws[l[0]]), l[1], l[2]]
 	hud.open_modal(s)
+
+
+func _open_plans() -> void:
+	hud.open_modal(_h("Pläne und Kriege") + powers.plans_text())
 
 
 func _open_display() -> void:
@@ -2027,7 +2050,81 @@ func _dev_shots(dir: String) -> void:
 	_run_action(Powers.tool_by_id("new"))
 	await _wait(0.3)
 	await _shot(dir + "/O.png")
+	hud.close_modal()
+	await _dev_shots_parity(dir, c)
 	get_tree().quit()
+
+
+## Entwickler: Aufnahmen der Gottkräfte-Parität (Vulkan, Wirbel, Krater, Kartenebenen, Pläne und Kriege).
+func _dev_shots_parity(dir: String, c: Vector2) -> void:
+	paused = false
+	var vp: Vector2 = sim.random_tile(func(i: int) -> bool: return sim.world.region[i] == 1 and (sim.world.tile[i] == GuData.GRASS or sim.world.tile[i] == GuData.HILL) and sim.nearest_village(i % W, i / W, 20.0) == null, 2000)
+	if vp.x < 0.0:
+		vp = c + Vector2(-30, -20)
+	sim.volcano(vp.x, vp.y)
+	paused = true
+	for k: int in range(60):
+		sim.step(Sim.DT)
+	z = 6.0
+	cam = vp + Vector2(0, 4)
+	_clamp_cam()
+	await _wait(0.5)
+	await _shot(dir + "/P_vulkan.png")
+	for k2: int in range(500):
+		sim.step(Sim.DT)
+	await _wait(0.5)
+	await _shot(dir + "/P_vulkan2.png")
+	var tp: Vector2 = vp + Vector2(24, 10)
+	sim.tornado(tp.x, tp.y)
+	sim.acid_rain(tp.x + 16.0, tp.y + 2.0)
+	z = 5.0
+	cam = tp + Vector2(8, 0)
+	_clamp_cam()
+	for k3: int in range(12):
+		sim.step(Sim.DT)
+		await get_tree().process_frame
+	await _shot(dir + "/Q_wirbel.png")
+	var kp: Vector2 = c + Vector2(40, 30)
+	sim.ladder_move(kp.x, kp.y, 2)
+	z = 3.0
+	cam = kp + Vector2(0, -6)
+	_clamp_cam()
+	for k4: int in range(16):
+		sim.step(Sim.DT)
+	await _wait(0.7)
+	await _shot(dir + "/R_mordzug.png")
+	for k5: int in range(60):
+		sim.step(Sim.DT)
+	await _wait(1.5)
+	await _shot(dir + "/S_krater.png")
+	paused = false
+	z = min_z
+	cam = Vector2(W / 2.0, H / 2.0)
+	_clamp_cam()
+	for L: int in range(3):
+		sim.world.layer = L
+		sim.terr_dirty = true
+		terr_t = 0.0
+		await _wait(0.6)
+		await _shot(dir + "/T_ebene%d.png" % L)
+	sim.world.layer = 0
+	sim.terr_dirty = true
+	for v: Village in sim.villages:
+		if v.alive:
+			sel_vil = v
+			_open_village()
+			break
+	await _wait(0.3)
+	await _shot(dir + "/U_dorf.png")
+	_close_insp()
+	_open_plans()
+	await _wait(0.3)
+	await _shot(dir + "/V_plaene.png")
+	hud.close_modal()
+	_open_laws()
+	await _wait(0.3)
+	await _shot(dir + "/W_gesetze.png")
+	hud.close_modal()
 
 
 ## Entwickler: Icon- und Sprite-Bögen als PNG (läuft auch headless): <ordner>/icons.png, sprites.png

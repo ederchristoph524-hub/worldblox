@@ -127,6 +127,7 @@ static func _build_tools() -> Array:
 	L.append({"id": "ev_ow", "tab": 4, "g": 2, "n": "Fremdweltdämon", "d": "Eine fremde Seele: lernt mehrere Pfade ohne Konflikt, kultiviert rasend schnell – und wird von allen gejagt.", "m": "spawn", "sp": "ow"})
 	L.append({"id": "ev_war", "tab": 4, "g": 2, "n": "Rechtschaffen gegen Dämonisch", "d": "Alle rechtschaffenen Clans erklären allen dämonischen den Krieg.", "m": "act"})
 	L.append({"id": "ev_frag", "tab": 4, "g": 2, "n": "Himmelsfragment", "d": "Ein Trümmerstück eines zerstörten Himmels stürzt herab und bleibt als Schatz liegen.", "m": "tap"})
+	_parity_tools(L)
 	for k: int in range(L.size()):
 		L[k]["o"] = k
 	L.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
@@ -145,10 +146,57 @@ var sim: Sim
 var brush_idx: int = 2
 var pair_sel: Village = null
 var stroke_id: int = 0
+## Pinselform: 0 Kreis, 1 Quadrat, 2 Linie (ein Feld breit)
+var shape: int = 0
+const SHAPE_NAME: PackedStringArray = ["Kreis", "Quadrat", "Linie"]
+var _seg_from: Vector2 = Vector2(-1, -1)
+## Göttliche Hand: gehaltene Wesen und ihr Abstand zum Finger
+var held: Array[Unit] = []
+var held_off: Array[Vector2] = []
 
 
 func _init(s: Sim) -> void:
 	sim = s
+
+
+## Gottkräfte nach dem Vorbild von WorldBox (Gelände-Werkzeuge, Naturgewalten, Mordzug-Leiter, Zivilisation).
+static func _parity_tools(L: Array) -> void:
+	L.append_array([
+		{"id": "layer", "tab": -1, "g": 1, "n": "Kartenebene", "d": "Wechselt die Gebietsanzeige: Clan-Gebiete, Dorf-Gebiete, Regionen.", "m": "act", "riv": true},
+		{"id": "plans", "tab": -1, "g": 1, "n": "Pläne und Kriege", "d": "Kriegs- und Bündnispläne der Clans, laufende Fehden und unruhige Dörfer.", "m": "act", "riv": true},
+		{"id": "brushshape", "tab": 0, "g": -1, "n": "Pinselform", "d": "Wechselt die Form des Pinsels: Kreis, Quadrat oder Linie (ein Feld breit).", "m": "act"},
+		{"id": "t_dig", "tab": 0, "g": 1, "n": "Erdschaufel", "d": "Gräbt Kanäle und Gräben: Land wird zu seichtem Wasser.", "m": "paint"},
+		{"id": "t_sponge", "tab": 0, "g": 1, "n": "Wassersaug-Gu", "d": "Saugt Wasser auf – Meer und Flüsse werden zu Strand.", "m": "paint"},
+		{"id": "t_axe", "tab": 0, "g": 2, "n": "Klingen-Axt", "d": "Fällt Bäume; das Holz geht an das nächste Dorf.", "m": "paint"},
+		{"id": "t_erase", "tab": 0, "g": 2, "n": "Weltradierer", "d": "Löscht Lava, Asche, Feuer, Eis, Minen, Gu-Schwärme und Straßen – das Land kehrt in seinen natürlichen Zustand zurück.", "m": "paint"},
+		{"id": "seed_grass", "tab": 0, "g": 2, "n": "Grasland-Samen", "d": "Ein Same, der sich zu blühendem Grasland mit Bäumen ausbreitet.", "m": "tap", "seed": GuData.GRASS},
+		{"id": "seed_des", "tab": 0, "g": 2, "n": "Wüsten-Samen", "d": "Ein Same, aus dem sich eine Wüste ausbreitet.", "m": "tap", "seed": GuData.DES},
+		{"id": "seed_snow", "tab": 0, "g": 2, "n": "Frost-Samen", "d": "Ein Same, aus dem sich ewiger Schnee mit Kiefern ausbreitet.", "m": "tap", "seed": GuData.SNOW},
+		{"id": "inspire", "tab": 1, "g": 0, "n": "Gründungsgeist", "d": "Clanlose im Pinsel gründen einen eigenen Clan; Dörfer im Pinsel sagen sich von ihrem Clan los.", "m": "paint"},
+		{"id": "bless", "tab": 1, "g": 1, "n": "Segen", "d": "Gesegnete werden stärker, zäher, schneller und kultivieren rascher (goldener Schimmer). Heilt die Leichen-Seuche.", "m": "paint"},
+		{"id": "curse", "tab": 1, "g": 1, "n": "Fluch", "d": "Verfluchte werden schwach und langsam und kultivieren nur halb so schnell (dunkler Schleier).", "m": "paint"},
+		{"id": "shield", "tab": 1, "g": 1, "n": "Himmelsschutz", "d": "20 Jahre lang trifft die Gu-Meister im Pinsel weder Drangsal noch Himmelswille noch Irdische Kalamität.", "m": "paint"},
+		{"id": "hand", "tab": 2, "g": 5, "n": "Göttliche Hand", "d": "Halten und ziehen: Wesen im Pinsel werden hochgehoben und folgen dem Finger; loslassen lässt sie fallen.", "m": "paint"},
+		{"id": "possess", "tab": 2, "g": 5, "n": "Seelenbesitz", "d": "Seelen-Pfad: Tippe ein Wesen an, um es zu besetzen. Danach lenkt ein Tippen es dorthin (oder auf einen Gegner). Tippe es erneut an, um es freizugeben.", "m": "tap"},
+		{"id": "ctrlbeast", "tab": 2, "g": 5, "n": "Gelenkte Ödbestie", "d": "Ruft eine Urzeitliche Ödbestie unter deine Kontrolle – jedes weitere Tippen lenkt sie durch Dörfer und Gebirge.", "m": "tap"},
+		{"id": "fert", "tab": 3, "g": 1, "n": "Frühlingsgras-Gu-Regen", "d": "Dünger: Erde und Asche ergrünen, Bäume, Sträucher und Blumen sprießen, Dörfer ernten mehr.", "m": "paint"},
+		{"id": "sunray", "tab": 3, "g": 1, "n": "Sonnenstrahl", "d": "Feuer-Pfad: Ein Strahl der Sonne verbrennt Wesen und Wälder, lässt Wasser verdampfen, Eis schmelzen und Fels zu Lava werden.", "m": "paint"},
+		{"id": "frost", "tab": 3, "g": 1, "n": "Frostodem", "d": "Eis-Pfad: Friert Wasser zu begehbarem Eis, löscht Feuer, lässt Lava erstarren und Wesen erstarren.", "m": "paint"},
+		{"id": "volcano", "tab": 3, "g": 1, "n": "Erdfeuer-Vulkan", "d": "Ein Vulkan bricht aus: Lava fließt bergab, setzt alles in Brand und erkaltet zu Fels; Lavabomben und Asche regnen herab.", "m": "tap"},
+		{"id": "tornado", "tab": 3, "g": 1, "n": "Windpfad-Wirbel", "d": "Ein Wirbelsturm des Wind-Pfades zieht über das Land, entwurzelt Bäume, reißt Häuser ein und schleudert Wesen fort.", "m": "tap"},
+		{"id": "acid", "tab": 3, "g": 1, "n": "Giftregen", "d": "Gift-Pfad: Eine giftige Wolke zieht umher; ihr Regen verätzt Wesen, lässt Gras und Wälder welken und zerfrisst Gebäude.", "m": "tap"},
+		{"id": "undead", "tab": 3, "g": 1, "n": "Leichen-Seuche", "d": "Seelen-Pfad: Angesteckte erheben sich als wandelnde Leichen, deren Biss die Seuche weiterträgt. Unsterbliche sind immun, Segen heilt.", "m": "paint"},
+		{"id": "lava", "tab": 4, "g": 0, "n": "Erdfeuer-Lava", "d": "Gießt glühende Lava aus, die bergab fließt und zu Fels erkaltet.", "m": "paint"},
+		{"id": "tnt", "tab": 4, "g": 3, "n": "Donnerkugel-Gu", "d": "Ein kleiner Sprengkörper aus Donner-Gu.", "m": "tap"},
+		{"id": "mine", "tab": 4, "g": 3, "n": "Erdminen-Gu", "d": "Versteckte Erdminen-Gu explodieren, sobald jemand darauf tritt.", "m": "paint"},
+		{"id": "napalm", "tab": 4, "g": 3, "n": "Feuerregen-Mordzug", "d": "Eine Reihe von Feuereinschlägen setzt alles in Brand.", "m": "tap"},
+		{"id": "km6", "tab": 4, "g": 3, "n": "Rang-6-Mordzug", "d": "Ein unsterblicher Mordzug: Krater, Feuer und Druckwelle.", "m": "tap"},
+		{"id": "km8", "tab": 4, "g": 3, "n": "Rang-8-Mordzug", "d": "Ein Mordzug fast auf Ehrwürdigen-Stufe: riesiger Krater, Pilzwolke, Druckwelle, die alles fortschleudert.", "m": "tap"},
+		{"id": "km9", "tab": 4, "g": 3, "n": "Ehrwürdigen-Mordzug", "d": "Der Mordzug eines Rang-9-Ehrwürdigen löscht ganze Landstriche aus.", "m": "tap"},
+		{"id": "void", "tab": 4, "g": 3, "n": "Leere-Mordzug", "d": "Raum-Pfad: Alles im Umkreis wird vom Raum verschlungen – zurück bleibt nur Meer.", "m": "tap"},
+		{"id": "goo", "tab": 4, "g": 3, "n": "Verzehrender Gu-Schwarm", "d": "Ein Schwarm gefräßiger Gu breitet sich aus und frisst Land, Wälder, Gebäude und Wesen, bis er sich erschöpft.", "m": "tap"},
+		{"id": "coin", "tab": 4, "g": 3, "n": "Schicksals-Münze", "d": "Das Schicksals-Gu wirft eine Münze: Die Hälfte aller Lebewesen stirbt. Nur wer das Schicksal überlistet (Frühling-Herbst-Zikade), kehrt zurück.", "m": "act"},
+	])
 
 
 static var _tool_idx: Dictionary = {}
@@ -162,14 +210,33 @@ static func tool_by_id(id: String) -> Dictionary:
 
 
 func brush_r() -> int:
-	return BRUSH[brush_idx]
+	return 0 if shape == 2 else BRUSH[brush_idx]
+
+
+func cycle_shape() -> String:
+	shape = (shape + 1) % SHAPE_NAME.size()
+	return SHAPE_NAME[shape]
 
 
 func _brush_tiles(tx: int, ty: int, fn: Callable) -> void:
+	if shape == 2:
+		# Linie: alle Felder zwischen dem letzten und dem aktuellen Pinselpunkt
+		var a: Vector2 = _seg_from if _seg_from.x >= 0.0 else Vector2(tx, ty)
+		var b: Vector2 = Vector2(tx, ty)
+		var n: int = maxi(1, ceili(a.distance_to(b) * 2.0))
+		var last: int = -1
+		for k: int in range(n + 1):
+			var p: Vector2 = a.lerp(b, float(k) / n)
+			var x0: int = int(p.x)
+			var y0: int = int(p.y)
+			if sim.world.in_map(x0, y0) and y0 * W + x0 != last:
+				last = y0 * W + x0
+				fn.call(last, x0, y0)
+		return
 	var r: int = brush_r()
 	for dy: int in range(-r, r + 1):
 		for dx: int in range(-r, r + 1):
-			if dx * dx + dy * dy > r * r + r * 0.8:
+			if shape == 0 and dx * dx + dy * dy > r * r + r * 0.8:
 				continue
 			var x: int = tx + dx
 			var y: int = ty + dy
@@ -192,6 +259,16 @@ func _ladder_idx(t: int) -> int:
 
 func begin_stroke() -> void:
 	stroke_id += 1
+	_seg_from = Vector2(-1, -1)
+	if not held.is_empty():
+		drop_held(-1.0, -1.0)
+
+
+## Ende eines Pinselstrichs (Finger/Maus losgelassen): Die Göttliche Hand lässt los.
+func end_stroke(wx: float, wy: float) -> void:
+	_seg_from = Vector2(-1, -1)
+	if not held.is_empty():
+		drop_held(wx, wy)
 
 
 ## Ein Pinselstrich-Schritt an Weltposition (wx, wy).
@@ -199,6 +276,13 @@ func apply_paint(t: Dictionary, wx: float, wy: float, stroke: Dictionary) -> voi
 	var tx: int = int(wx)
 	var ty: int = int(wy)
 	if not sim.world.in_map(tx, ty):
+		return
+	if stroke.has("lp"):
+		_seg_from = stroke["lp"]
+	else:
+		_seg_from = Vector2(-1, -1)
+	stroke["lp"] = Vector2(tx, ty)
+	if paint_parity(t, wx, wy, stroke):
 		return
 	var w: World = sim.world
 	if t.has("tt"):
@@ -402,6 +486,15 @@ func tap_tool(t: Dictionary, wx: float, wy: float) -> String:
 		return ""
 	if t.has("org"):
 		return sim.found_org(Lore.org(t["org"]), wx, wy)
+	if t.has("seed"):
+		if not sim._solid(ty * W + tx):
+			return "Samen brauchen festen Boden."
+		sim.plant_seed(wx, wy, int(t["seed"]))
+		sim.spark(wx, wy - 1.0, Color("#e8d8a0"), 8, 3.0)
+		return ""
+	var pm: String = tap_parity(t, wx, wy)
+	if pm != "-":
+		return pm
 	match str(t["id"]):
 		"ev_calam":
 			calamity(wx, wy)
@@ -555,40 +648,7 @@ func discord(v: Village) -> String:
 
 
 func quake(x: float, y: float) -> void:
-	sim.shake = 1.3
-	sim.ring(x, y, 18.0, Color("#c9a46a"), 1.1)
-	sim.ring(x, y, 10.0, Color("#c9a46a"), 0.8)
-	var w: World = sim.world
-	for k: int in range(6):
-		var cx: float = x
-		var cy: float = y
-		var a: float = randf() * TAU
-		for s: int in range(26):
-			cx += cos(a)
-			cy += sin(a)
-			a += (randf() - 0.5) * 0.6
-			var tx: int = int(cx)
-			var ty: int = int(cy)
-			if not w.in_map(tx, ty):
-				break
-			var i: int = ty * W + tx
-			var t: int = w.tile[i]
-			if GuData.is_land(t) and t != GuData.WALL:
-				if t == GuData.HILL and randf() < 0.5:
-					sim.set_tile(i, GuData.MOUNT)
-				elif t != GuData.MOUNT:
-					sim.set_tile(i, GuData.SOIL)
-				if w.feat[i] != 0 and randf() < 0.6:
-					w.feat[i] = 0
-					w.mark_area(tx, ty)
-	for b: Building in sim.buildings:
-		if b != null and Vector2(b.x + b.w / 2.0 - x, b.y + b.h / 2.0 - y).length() < 18.0:
-			b.hp -= 120.0 if b.type == "hall" else 70.0
-			if b.hp <= 0.0:
-				sim.remove_building(b)
-	for u: Unit in sim.near_units(x, y, 18.0):
-		if not u.fly:
-			sim.hurt(u, 8.0, null)
+	sim.quake(x, y)
 
 
 func crescent(x: float, y: float) -> void:
@@ -677,3 +737,454 @@ func fate() -> Vector2:
 		sim.mk_animal(p.x, p.y, "kingwolf")
 		sim.log_event("Ein Bestienkönig erwacht in den " + GuData.REGN[sim.region_at(p.x, p.y)] + ".", "war", true)
 	return p
+
+
+# =====================================================================
+# Gottkräfte-Parität (WorldBox)
+# =====================================================================
+
+## Pinsel-Werkzeuge der Parität. true = behandelt.
+func paint_parity(t: Dictionary, wx: float, wy: float, stroke: Dictionary) -> bool:
+	var w: World = sim.world
+	var tx: int = int(wx)
+	var ty: int = int(wy)
+	match str(t["id"]):
+		"t_dig":
+			_brush_tiles(tx, ty, func(i: int, _x: int, _y: int) -> void:
+				var tt: int = w.tile[i]
+				if GuData.is_land(tt) and tt != GuData.WALL:
+					sim.lava.erase(i)
+					sim.set_tile(i, GuData.SHAL))
+		"t_sponge":
+			_brush_tiles(tx, ty, func(i: int, _x: int, _y: int) -> void:
+				var tt: int = w.tile[i]
+				if GuData.is_water(tt) or (tt == GuData.SNOW and w.temp_snow[i] in [1, 2]):
+					sim.set_tile(i, GuData.SAND)
+				sim.fire.erase(i))
+			if randf() < 0.3:
+				sim.spark(wx, wy, Color("#9fd6ff"), 4, 4.0)
+		"t_axe":
+			_brush_tiles(tx, ty, func(i: int, x: int, y: int) -> void:
+				if GuData.is_tree(w.feat[i]):
+					w.feat[i] = 0
+					w.mark_area(x, y)
+					sim.puff(x + 0.5, y - 3.0, Color("#7a9a3a"), 2)
+					stroke["cut"] = int(stroke.get("cut", 0)) + 1)
+			var nc: int = int(stroke.get("cut", 0))
+			if nc > 0:
+				var v: Village = sim.nearest_village(wx, wy, 40.0)
+				if v != null:
+					v.wood += nc * 2.0
+				stroke["cut"] = 0
+		"t_erase":
+			_brush_tiles(tx, ty, func(i: int, x: int, y: int) -> void:
+				var tt: int = w.tile[i]
+				sim.fire.erase(i)
+				var mi: int = sim.mines.find(i)
+				if mi >= 0:
+					sim.mines.remove_at(mi)
+				if tt == GuData.LAVA or tt == GuData.ASH or tt == GuData.SOIL:
+					sim.lava.erase(i)
+					sim.set_tile(i, sim.land_for(i))
+				elif tt == GuData.SNOW and w.temp_snow[i] > 0:
+					sim.thaw(i)
+				if w.feat[i] == GuData.F_ROAD or w.feat[i] == GuData.F_ROCK:
+					w.feat[i] = 0
+					w.mark_area(x, y))
+			var gi: int = sim.goo.size() - 1
+			while gi >= 0:
+				var gx: int = int(sim.goo[gi]["i"]) % W
+				var gy: int = int(sim.goo[gi]["i"]) / W
+				if absi(gx - tx) <= brush_r() + 1 and absi(gy - ty) <= brush_r() + 1:
+					sim.goo.remove_at(gi)
+				gi -= 1
+		"inspire":
+			for u: Unit in _brush_units(wx, wy):
+				if u.k != "p" or u.vil >= 0 or u.rogue or u.undead or sim.uage(u) < 14.0 or u.stroke_mark == stroke_id:
+					continue
+				u.stroke_mark = stroke_id
+				if sim.found_village(u, -1):
+					sim.pillar(u.x, u.y, Color("#ffe27a"), 0.6)
+				else:
+					var st: Vector2 = sim.find_site(u.x, u.y, 3.0, 24.0, sim.region_at(u.x, u.y))
+					if st.x >= 0.0:
+						u.col_to = st
+						u.col_clan = -1
+						sim.float_txt(u, "Gründungsgeist", Color("#ffe27a"))
+			var v2: Village = sim.village_at(tx, ty)
+			if v2 != null and not stroke.has("v%d" % v2.id):
+				stroke["v%d" % v2.id] = true
+				var c: Clan = sim.clans[v2.clan]
+				var cnt: int = 0
+				for o: Village in sim.villages:
+					if o.alive and o.clan == c.id:
+						cnt += 1
+				if cnt >= 2:
+					if c.cap == v2.id:
+						c.cap = -1
+					sim.rebel(v2)
+					sim.pillar(v2.cx, v2.cy, Color("#ffe27a"), 0.8)
+		"bless", "curse", "shield":
+			var id: String = t["id"]
+			for u: Unit in _brush_units(wx, wy):
+				if u.k != "p" or u.stroke_mark == stroke_id:
+					continue
+				u.stroke_mark = stroke_id
+				u.fxm = true
+				match id:
+					"bless":
+						if u.undead:
+							u.dreason = "durch Segen erlöst"
+							sim.hurt(u, 1e9, null)
+							sim.pillar(u.x, u.y, Color("#ffe27a"), 0.4)
+							continue
+						u.bless = 1
+						u.zin = -1.0
+						u.sick = 0.0
+						sim.set_stats(u, false)
+						u.hp = u.mhp
+						sim.float_txt(u, "Gesegnet", Color("#ffe27a"))
+						sim.spark(u.x, u.y - 3.0, Color("#ffe27a"), 6, 4.0)
+					"curse":
+						u.bless = -1
+						sim.set_stats(u, false)
+						sim.float_txt(u, "Verflucht", Color("#b070d0"))
+						sim.puff(u.x, u.y - 3.0, Color("#3a1a4a"), 5)
+					_:
+						u.prot = sim.sim_time + 240.0
+						sim.float_txt(u, "Himmelsschutz", Color("#bfe8ff"))
+						sim.ring(u.x, u.y - 2.0, 3.0, Color("#bfe8ff"), 0.6)
+		"hand":
+			# Beim Ziehen sammelt die Hand weitere Wesen ein (höchstens 80)
+			var got: int = 0
+			for u: Unit in _brush_units(wx, wy):
+				if held.size() >= 80 or u.held or u.air > 0.0:
+					continue
+				u.held = true
+				u.fxm = true
+				u.tgt = null
+				u.st = "idle"
+				held.append(u)
+				held_off.append(Vector2(u.x - wx, u.y - wy).limit_length(float(brush_r()) + 1.0) * 0.6)
+				got += 1
+			if got > 0:
+				sim.spark(wx, wy - 3.0, Color("#fff3c0"), 6, 4.0)
+			for k: int in range(held.size()):
+				var hu: Unit = held[k]
+				if hu.hp <= 0.0:
+					continue
+				hu.x = clampf(wx + held_off[k].x, 0.5, W - 0.5)
+				hu.y = clampf(wy - 3.0 + held_off[k].y, 0.5, H - 0.5)
+				hu.tx = hu.x
+				hu.ty = hu.y
+				hu.moving = true
+			if not held.is_empty() and randf() < 0.5:
+				sim.parts.append({"x": wx + (randf() - 0.5) * 4.0, "y": wy - 2.0, "vx": 0.0, "vy": -2.0, "l": 0.4, "ml": 0.4, "c": Color("#fff3c0"), "s": 0.6, "g": 0.0})
+		"fert":
+			_brush_tiles(tx, ty, func(i: int, x: int, y: int) -> void:
+				if randf() > 0.5:
+					return
+				var tt: int = w.tile[i]
+				if tt == GuData.SOIL or tt == GuData.ASH:
+					var lf: int = sim.land_for(i)
+					sim.set_tile(i, GuData.GRASS if lf == GuData.DES else lf)
+				elif tt == GuData.DES and randf() < 0.15:
+					sim.set_tile(i, GuData.GRASS)
+				tt = w.tile[i]
+				if (tt == GuData.GRASS or tt == GuData.STEP) and w.feat[i] == 0 and w.bmap[i] < 0:
+					var q: float = randf()
+					if q < 0.05:
+						w.feat[i] = sim.plant_for(i)
+					elif q < 0.09:
+						w.feat[i] = GuData.F_SHRUB
+					elif q < 0.15:
+						w.feat[i] = GuData.F_TUFT
+					elif q < 0.18:
+						w.feat[i] = GuData.F_FLOWER
+					if q < 0.18:
+						w.mark_area(x, y))
+			for k2: int in range(3):
+				sim.parts.append({"x": wx + (randf() - 0.5) * (brush_r() * 2.0 + 1.0), "y": wy - 8.0, "vx": 0.0, "vy": 14.0, "l": 0.5, "ml": 0.5, "c": Color("#7ae07a"), "s": 0.6, "g": 0.0})
+			var v3: Village = sim.nearest_village(wx, wy, brush_r() + 10.0)
+			if v3 != null and not stroke.has("f%d" % v3.id):
+				stroke["f%d" % v3.id] = true
+				v3.food += 6.0
+		"sunray":
+			if randf() < 0.5:
+				sim.pillar(wx, wy, Color("#ffb43a"), 0.3)
+			sim.spark(wx, wy, Color("#ffe27a"), 3, 5.0)
+			_brush_tiles(tx, ty, func(i: int, _x: int, _y: int) -> void: _sun_tile(i))
+			for u: Unit in _brush_units(wx, wy):
+				u.dreason = "Sonnenstrahl"
+				sim.hurt(u, 25.0 + u.mhp * 0.03, null)
+				if u.hp > 0.0:
+					u.dreason = ""
+		"frost":
+			_brush_tiles(tx, ty, func(i: int, x: int, y: int) -> void:
+				if randf() > 0.6:
+					return
+				var tt: int = w.tile[i]
+				sim.fire.erase(i)
+				if tt == GuData.LAVA:
+					sim.cool_lava(i)
+				elif (GuData.is_water(tt) or tt == GuData.GRASS or tt == GuData.STEP or tt == GuData.SOIL or tt == GuData.DES or tt == GuData.ASH) and w.bmap[i] < 0:
+					w.temp_snow[i] = tt + 1
+					w.tile[i] = GuData.SNOW
+					w.mark_dirty(x, y))
+			for u: Unit in _brush_units(wx, wy):
+				if u.beh == GuData.B_IGU:
+					continue
+				u.frz = sim.sim_time + (0.4 if u.rank >= 6 else 1.2 + randf())
+				u.fxm = true
+				sim.hurt(u, 2.0, null)
+			for k3: int in range(4):
+				sim.parts.append({"x": wx + (randf() - 0.5) * (brush_r() * 2.0 + 1.0), "y": wy + (randf() - 0.5) * (brush_r() * 2.0 + 1.0), "vx": (randf() - 0.5) * 3.0, "vy": -1.0, "l": 0.6, "ml": 0.6, "c": Color("#e8f8ff") if k3 % 2 else Color("#81d4fa"), "s": 0.8, "g": 0.0})
+		"undead":
+			for u: Unit in _brush_units(wx, wy):
+				if u.k == "p" and not u.undead and u.rank < 6 and u.zin < 0.0:
+					u.zin = sim.sim_time + 0.5 + randf() * 1.5
+					u.fxm = true
+					sim.spark(u.x, u.y - 2.0, Color("#86e04a"), 3, 3.0)
+		"lava":
+			_brush_tiles(tx, ty, func(i: int, _x: int, _y: int) -> void:
+				if randf() < 0.5 and w.tile[i] != GuData.WALL:
+					sim.set_lava(i, 1.1))
+		"mine":
+			_brush_tiles(tx, ty, func(i: int, _x: int, _y: int) -> void:
+				if randf() < 0.05:
+					sim.add_mine(i))
+			if brush_r() <= 1 and not stroke.has("m%d" % (ty * W + tx)):
+				stroke["m%d" % (ty * W + tx)] = true
+				sim.add_mine(ty * W + tx)
+		_:
+			return false
+	return true
+
+
+## Sonnenstrahl auf einer Kachel: Wasser verdampft, Eis schmilzt, Fels wird zu Lava, Land brennt.
+func _sun_tile(i: int) -> void:
+	if randf() > 0.4:
+		return
+	var tt: int = sim.world.tile[i]
+	if tt == GuData.SHAL:
+		if randf() < 0.3:
+			sim.set_tile(i, GuData.SAND)
+	elif tt == GuData.DEEP:
+		if randf() < 0.15:
+			sim.set_tile(i, GuData.SHAL)
+	elif tt == GuData.SNOW:
+		sim.thaw(i)
+	elif tt == GuData.MOUNT or tt == GuData.HILL:
+		if randf() < 0.05:
+			sim.set_lava(i, 0.8)
+	elif tt == GuData.LAVA:
+		sim.lava[i] = float(sim.lava.get(i, 0.0)) + 0.2
+	elif randf() < 0.45:
+		sim.ignite(i, 1.0)
+
+
+## Tipp-Werkzeuge der Parität. "-" = nicht behandelt, sonst Hinweistext ("" = keiner).
+func tap_parity(t: Dictionary, wx: float, wy: float) -> String:
+	var i: int = clampi(int(wy), 0, H - 1) * W + clampi(int(wx), 0, W - 1)
+	match str(t["id"]):
+		"volcano":
+			if sim.world.tile[i] == GuData.WALL:
+				return "Hier kann kein Vulkan entstehen."
+			sim.volcano(wx, wy)
+		"tornado":
+			sim.tornado(wx, wy)
+		"acid":
+			sim.acid_rain(wx, wy)
+		"tnt":
+			sim.ladder_move(wx, wy, 0)
+		"napalm":
+			sim.napalm(wx, wy)
+		"km6":
+			sim.ladder_move(wx, wy, 1)
+		"km8":
+			sim.ladder_move(wx, wy, 2)
+		"km9":
+			sim.ladder_move(wx, wy, 3)
+		"void":
+			sim.void_move(wx, wy)
+		"goo":
+			if not sim._solid(i):
+				return "Der Gu-Schwarm braucht festen Boden."
+			sim.goo_swarm(wx, wy)
+		"possess", "ctrlbeast":
+			return possess_tap(wx, wy, t["id"] == "ctrlbeast")
+		_:
+			return "-"
+	return ""
+
+
+## Göttliche Hand lässt los: Wesen fallen herab (bei wx < 0 an Ort und Stelle).
+func drop_held(wx: float, wy: float) -> void:
+	for k: int in range(held.size()):
+		var u: Unit = held[k]
+		u.held = false
+		if u.hp <= 0.0:
+			continue
+		if wx >= 0.0:
+			u.x = clampf(wx + held_off[k].x, 0.5, W - 0.5)
+			u.y = clampf(wy + held_off[k].y, 0.5, H - 0.5)
+		else:
+			u.y = minf(H - 0.5, u.y + 3.0)
+		u.tx = u.x
+		u.ty = u.y
+		u.tgt = null
+		u.st = "idle"
+		sim.hurt(u, 1.0 + u.mhp * 0.08, null)
+		sim.puff(u.x, u.y, Color("#c8b89a"), 2)
+	held.clear()
+	held_off.clear()
+
+
+## Seelenbesitz und gelenkte Ödbestie.
+func possess_tap(wx: float, wy: float, giant: bool) -> String:
+	var P: Unit = sim.possessed
+	if P != null and P.hp <= 0.0:
+		sim.set_possessed(null)
+		P = null
+	if giant and (P == null or P.sp != "remote"):
+		var tt: int = sim.world.tile[clampi(int(wy), 0, H - 1) * W + clampi(int(wx), 0, W - 1)]
+		if not GuData.is_land(tt) or tt == GuData.WALL:
+			return "Die Ödbestie braucht festen Boden."
+		var g: Unit = sim.spawn_beast(wx, wy, "remote")
+		g.hx = -1.0
+		sim.set_possessed(g)
+		sim.shake = 0.8
+		sim.log_event("Eine Urzeitliche Ödbestie erwacht – unter dem Willen des Himmels.", "war", true)
+		return "Tippe auf die Karte, um die Ödbestie zu lenken."
+	var near: Unit = null
+	var bd: float = 3.0
+	for u: Unit in sim.near_units(wx, wy + 1.5, 4.0):
+		var d: float = Vector2(u.x - wx, u.y - 1.5 - wy).length()
+		if d < bd and u.beh != GuData.B_IGU and not u.held:
+			bd = d
+			near = u
+	if P != null and near == P:
+		sim.set_possessed(null)
+		sim.float_txt(P, "Freigegeben", Color("#c070ff"))
+		return "Die Seele ist wieder frei."
+	if P == null:
+		if near == null:
+			return "Tippe auf ein Wesen, um seine Seele zu besetzen."
+		sim.set_possessed(near)
+		sim.float_txt(near, "Besessen", Color("#c070ff"))
+		return near.pname() + " ist besessen. Tippe auf die Karte, um es zu lenken, oder auf einen Gegner, um anzugreifen."
+	if near != null:
+		P.tgt = near
+		sim.ring(near.x, near.y, 2.5, Color("#ff5a4a"), 0.5)
+	else:
+		P.tgt = null
+		P.st = "idle"
+		sim.go_to(P, wx, wy)
+		sim.ring(wx, wy, 2.0, Color("#c070ff"), 0.5)
+	return ""
+
+
+## Sofort-Aktion Schicksals-Münze.
+func coin() -> String:
+	var n: int = sim.fate_coin()
+	return "%d Wesen sind dem Schicksal erlegen." % n
+
+
+static func _bar(frac: float, col: Color, width: int = 12) -> String:
+	var n: int = clampi(roundi(frac * width), 0, width)
+	return "[color=#%s]%s[/color][color=#2a352c]%s[/color]" % [col.to_html(false), "█".repeat(n), "█".repeat(width - n)]
+
+
+## Zusatzzeilen für den Dorf-Inspektor: Hauptstadt, Clan-Oberhaupt, Loyalität, Kriegsmüdigkeit, Pläne.
+func village_lines(v: Village) -> String:
+	var c: Clan = sim.clans[v.clan]
+	var mt: String = "[color=#9db09e]"
+	var s: String = ""
+	var capv: Village = sim.villages[c.cap] if c.cap >= 0 and c.cap < sim.villages.size() else null
+	s += mt + "Hauptstadt[/color]  " + ("[color=#ffd24a]dieses Dorf[/color]" if c.cap == v.id else (capv.name if capv != null else "–")) + "\n"
+	var L: Unit = c.lead
+	if L != null and L.hp > 0.0:
+		s += mt + "Clan-Oberhaupt[/color]  [color=#%s]■[/color] %s, %s\n" % [GuData.ESS_COL[L.rank].to_html(false), L.pname(), GuData.rank_title(L.rank)]
+	if c.cap != v.id:
+		var lc: Color = Color("#5fbf8a") if v.loy >= 50.0 else (Color("#e8c70a") if v.loy >= 25.0 else Color("#ff6a5a"))
+		s += mt + "Loyalität[/color]  " + _bar(v.loy / 100.0, lc) + " %d" % int(v.loy) + ("  [color=#ff8a7a]Aufstand droht![/color]" if v.loy < 25.0 else "") + "\n"
+	if c.exh >= 5.0:
+		s += mt + "Kriegsmüdigkeit[/color]  " + _bar(c.exh / 100.0, Color("#c9a46a")) + " %d\n" % int(c.exh)
+	for p: Dictionary in c.plans:
+		var o: Clan = sim.clans[int(p["o"])]
+		s += mt + "Plan[/color]  " + ("[color=#ffa894]Krieg gegen " if str(p["k"]) == "war" else "[color=#9fe0b0]Bündnis mit ") + o.name + "[/color] in %d Monaten\n" % maxi(0, ceili(float(p["t"]) - sim.sim_time))
+	return s
+
+
+## Zusatzzeilen für den Wesen-Inspektor (Segen, Fluch, Himmelsschutz, Seuche, Besessenheit, Boot).
+func unit_lines(u: Unit) -> String:
+	var s: String = ""
+	if u.undead:
+		s += "\n[color=#86e04a]Wandelnde Leiche – zerfällt in wenigen Jahren[/color]"
+	elif u.zin > 0.0:
+		s += "\n[color=#86e04a]Von der Leichen-Seuche angesteckt[/color]"
+	if u.bless > 0:
+		s += "\n[color=#ffe27a]Gesegnet[/color]"
+	elif u.bless < 0:
+		s += "\n[color=#b070d0]Verflucht[/color]"
+	if u.prot > sim.sim_time:
+		s += "\n[color=#bfe8ff]Himmelsschutz (noch %d Jahre)[/color]" % ceili((u.prot - sim.sim_time) / 12.0)
+	if u.poss:
+		s += "\n[color=#c070ff]Besessen – Tippen mit „Seelenbesitz“ lenkt es[/color]"
+	if u.boat:
+		s += "\n[color=#9fd6ff]Siedler im Boot[/color]"
+	return s
+
+
+## Inhalt des Fensters „Pläne und Kriege“.
+func plans_text() -> String:
+	var s: String = ""
+	var sw: Callable = func(c: Clan) -> String: return "[color=#%s]■[/color] " % c.col.to_html(false)
+	s += "[color=#e8c70a][b]LAUFENDE FEHDEN[/b][/color]\n"
+	var nw: int = 0
+	for a: Clan in sim.clans:
+		if not a.alive:
+			continue
+		for e: int in a.war.keys():
+			if e <= a.id:
+				continue
+			var b: Clan = sim.clans[e]
+			var st: Variant = a.war[e]
+			var since: String = (" · seit Jahr %d" % (int(float(st) / 12.0) + 1)) if st is float else ""
+			s += sw.call(a) + "[b]" + a.name + "[/b]  [color=#ff7a5a]⚔[/color]  " + sw.call(b) + "[b]" + b.name + "[/b]\n    [color=#9db09e]Kriegsmüdigkeit %d / %d%s[/color]\n" % [int(a.exh), int(b.exh), since]
+			nw += 1
+	if nw == 0:
+		s += "[color=#9db09e]Die Welt ist (noch) friedlich.[/color]\n"
+	s += "\n[color=#e8c70a][b]PLÄNE DER CLANS[/b][/color]\n"
+	var np: int = 0
+	for c: Clan in sim.clans:
+		if not c.alive:
+			continue
+		for p: Dictionary in c.plans:
+			var o: Clan = sim.clans[int(p["o"])]
+			var war: bool = str(p["k"]) == "war"
+			s += sw.call(c) + c.name + (" [color=#ffa894]plant Krieg gegen[/color] " if war else " [color=#9fe0b0]bereitet ein Bündnis vor mit[/color] ") + sw.call(o) + o.name + "\n    [color=#9db09e]in %d Monaten[/color]\n" % maxi(0, ceili(float(p["t"]) - sim.sim_time))
+			np += 1
+	if np == 0:
+		s += "[color=#9db09e]Keine Pläne.[/color]\n"
+	s += "\n[color=#e8c70a][b]BÜNDNISSE[/b][/color]\n"
+	var na: int = 0
+	for a2: Clan in sim.clans:
+		if not a2.alive:
+			continue
+		for e2: int in a2.ally.keys():
+			if e2 <= a2.id or not sim.clans[e2].alive:
+				continue
+			s += sw.call(a2) + a2.name + "  [color=#62d8a4]⚭[/color]  " + sw.call(sim.clans[e2]) + sim.clans[e2].name + "\n"
+			na += 1
+	if na == 0:
+		s += "[color=#9db09e]Keine Bündnisse.[/color]\n"
+	s += "\n[color=#e8c70a][b]UNRUHIGE DÖRFER[/b][/color]\n"
+	var nu: int = 0
+	for v: Village in sim.villages:
+		if v.alive and v.loy < 45.0 and sim.clans[v.clan].cap != v.id:
+			s += "[url=v%d]%s[/url] [color=#9db09e](%s)[/color]  Loyalität %d%s\n" % [v.id, v.name, sim.clans[v.clan].name, int(v.loy), "  [color=#ff8a7a]Aufstand droht![/color]" if v.loy < 25.0 else ""]
+			nu += 1
+	if nu == 0:
+		s += "[color=#9db09e]Alle Dörfer stehen treu zu ihren Clans.[/color]\n"
+	return s

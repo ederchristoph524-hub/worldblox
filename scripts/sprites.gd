@@ -14,6 +14,7 @@ static var spring_img: Image
 static var shrub_img: Image
 static var tuft_img: Image
 static var flower_img: Image
+static var road_img: Image
 static var _clan_cache: Dictionary = {}
 static var _ready: bool = false
 
@@ -103,6 +104,7 @@ static func init() -> void:
 	shrub_img = Px.grid([".gg.g", "gGgGg", ".ggd."], {"G": "#a8964a", "g": "#8a7a3a", "d": "#5e5228"})
 	tuft_img = Px.grid(["g.g", "gg."], {"g": Color(0.12, 0.27, 0.08, 0.55)})
 	flower_img = Px.grid(["p", "g"], {"p": "#e87ac8", "g": "#3a7a2a"})
+	road_img = Px.grid(["r"], {"r": "#b08e60"})
 
 
 static func tree_variant(x: int, y: int, reg: int) -> int:
@@ -145,6 +147,8 @@ static func feat_image(f: int, x: int, y: int, reg: int) -> Image:
 			return tuft_img
 		GuData.F_FLOWER:
 			return flower_img
+		GuData.F_ROAD:
+			return road_img
 	return null
 
 
