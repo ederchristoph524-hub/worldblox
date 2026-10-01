@@ -70,6 +70,11 @@ var ow: bool = false          # Fremdweltdämon
 var hx: float = -1.0          # Revier (Ödbestien) bzw. Bindung (Himmelsfragment)
 var hy: float = -1.0
 var notrib: bool = false      # Himmelsfragment einverleibt: keine Drangsale mehr
+# Gottkräfte (v3)
+var bless: int = 0            # 1 = gesegnet, -1 = verflucht
+var prot: float = -1.0        # Himmelsschutz bis (Simulationszeit): keine Drangsal, kein Himmelswille
+var undead: bool = false      # wandelnde Leiche (Leichen-Gu-Seuche)
+var boat: bool = false        # Siedler im Boot: darf tiefes Wasser befahren
 # abgeleitet, nicht gespeichert
 var beh: int = -1             # Tierverhalten GuData.B_*
 var aqua: bool = false
@@ -88,6 +93,14 @@ var ig_sp: float = 1.0
 var ig_cult: float = 1.0
 var ig_rng: float = 1.0
 var igf: int = 0
+var held: bool = false        # von der Göttlichen Hand gehalten
+var poss: bool = false        # vom Spieler besessen (Seelenbesitz)
+var air: float = 0.0          # fliegt durch die Luft (Wirbel, Druckwelle)
+var kvx: float = 0.0
+var kvy: float = 0.0
+var frz: float = -1.0         # eingefroren bis (Frostodem)
+var zin: float = -1.0         # mit der Leichen-Seuche angesteckt: erhebt sich ab dieser Zeit als Leiche
+var fxm: bool = false         # einer der seltenen Zustände oben ist (vielleicht) aktiv – nur dann prüft Sim._special
 
 
 func pname() -> String:
@@ -110,7 +123,8 @@ func to_dict() -> Dictionary:
 		"kills": kills, "job": job, "hp": hp, "mhp": mhp, "atk": atk, "rng": rng, "aoe": aoe, "awk": awk, "luck": luck, "rogue": rogue,
 		"next_trib": next_trib, "title": title, "militia": militia, "col_clan": col_clan, "swim": swim, "fly": fly, "speed": speed,
 		"phys_x": phys_x, "hungry": hungry, "tide": tide, "tide_v": tide_v,
-		"gname": gname, "igu": Array(igu), "fig": fig, "ow": ow, "hx": hx, "hy": hy, "notrib": notrib}
+		"gname": gname, "igu": Array(igu), "fig": fig, "ow": ow, "hx": hx, "hy": hy, "notrib": notrib,
+		"bless": bless, "prot": prot, "undead": undead, "boat": boat}
 
 
 static func from_dict(d: Dictionary) -> Unit:
@@ -118,12 +132,13 @@ static func from_dict(d: Dictionary) -> Unit:
 	for key: String in d.keys():
 		if key == "gus" or key == "igu":
 			u.set(key, PackedStringArray(d[key]))
-		elif key in ["id", "race", "vil", "clan", "rank", "stage", "path", "align", "kills", "col_clan", "tide_v"]:
+		elif key in ["id", "race", "vil", "clan", "rank", "stage", "path", "align", "kills", "col_clan", "tide_v", "bless"]:
 			u.set(key, int(d[key]))
 		else:
 			u.set(key, d[key])
 	u.tx = u.x
 	u.ty = u.y
+	u.fxm = u.bless != 0 or u.boat or u.prot > 0.0
 	u.anim = randf() * 10.0
 	u.think = randf()
 	return u

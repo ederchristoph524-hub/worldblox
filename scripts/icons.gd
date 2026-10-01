@@ -56,6 +56,9 @@ static func _make(id: String) -> Px:
 	var gen: Px = _make_generated(id)
 	if gen != null:
 		return gen
+	var par: Px = _make_parity(id)
+	if par != null:
+		return par
 	match id:
 		"t_deep":
 			return _tile(GuData.DEEP)
@@ -890,3 +893,318 @@ static func _make_generated(id: String) -> Px:
 		_:
 			return null
 	return q6.outline()
+
+
+# ---------------- Gottkräfte-Parität (WorldBox) ----------------
+
+## Explosions-Stern mit Rang-Abzeichen (Mordzug-Leiter).
+static func _blast(outer: Color, inner: Color, core: Color, rays: int, rmax: float, badge: int = -1) -> Px:
+	var q: Px = Px.new(24, 24)
+	for k: int in range(rays):
+		var a: float = k * TAU / rays + 0.2
+		var len: float = rmax if k % 2 == 0 else rmax * 0.7
+		for dd: int in range(3, int(len)):
+			q.p(12 + roundi(cos(a) * dd) - 1, 12 + roundi(sin(a) * dd) - 1, 2, 2, outer if dd > len * 0.55 else inner)
+	q.d(12, 12, int(rmax * 0.45), inner)
+	q.d(12, 12, int(rmax * 0.25), core)
+	if badge >= 0:
+		_badge(q, badge, GuData.ESS_COL[badge])
+	return q
+
+
+## Saatbeutel mit Zeichen des Bioms.
+static func _seed_bag(mark: Color, mark2: Color) -> Px:
+	var q: Px = Px.new(24, 24)
+	q.p(6, 9, 12, 12, "#b08a52")
+	q.p(5, 11, 14, 9, "#b08a52")
+	q.p(6, 9, 3, 12, "#c8a468")
+	q.p(15, 10, 3, 10, "#8a6a3a")
+	q.p(8, 6, 8, 3, "#9a7846")
+	q.p(7, 8, 10, 1, "#6a4a2a")
+	q.p(9, 13, 6, 5, mark)
+	q.p(10, 14, 2, 2, mark2)
+	q.p(13, 16, 1, 1, mark2)
+	for pt: Vector2i in [Vector2i(4, 4), Vector2i(19, 6), Vector2i(17, 2)]:
+		q.p(pt.x, pt.y, 2, 2, "#e8d8a0")
+	return q
+
+
+static func _make_parity(id: String) -> Px:
+	var q: Px = Px.new(24, 24)
+	match id:
+		"layer":
+			q.p(2, 3, 20, 18, "#2f6ab8")
+			q.p(3, 4, 9, 8, "#e8e0a0")
+			q.p(12, 4, 9, 8, "#c070e8")
+			q.p(3, 12, 6, 8, "#e8a040")
+			q.p(9, 12, 12, 8, "#5ac85a")
+			for k: int in range(0, 20, 2):
+				q.p(2 + k, 11, 1, 2, "#ffffff")
+				q.p(11, 3 + k * 9 / 10, 2, 1, "#ffffff")
+			q.p(14, 14, 3, 3, "#c23a2e")
+			q.p(5, 6, 2, 2, "#2f6fd6")
+		"plans":
+			q.p(4, 3, 16, 18, "#efe2b8")
+			q.p(3, 3, 18, 2, "#c8b080")
+			q.p(3, 19, 18, 2, "#c8b080")
+			for y: int in range(7, 18, 3):
+				q.p(6, y, 5, 1, "#9a8a60")
+			for k: int in range(8):
+				q.p(11 + k, 8 + k, 2, 1, "#b8bcc8")
+				q.p(18 - k, 8 + k, 2, 1, "#b8bcc8")
+			q.p(10, 16, 3, 2, "#6a4a2a")
+			q.p(18, 16, 3, 2, "#6a4a2a")
+			q.p(14, 11, 2, 2, "#c02a2a")
+		"brushshape":
+			q.d(8, 9, 6, "#f4f0e0")
+			q.d(8, 9, 4, "#d8eef8")
+			q.p(11, 11, 10, 10, "#f4f0e0")
+			q.p(12, 12, 8, 8, "#ffd23a")
+			q.p(3, 21, 6, 1, "#f4f0e0")
+		"t_dig":
+			q.p(2, 15, 20, 7, "#8a6a42")
+			q.p(2, 15, 20, 2, "#6aa046")
+			q.p(7, 17, 10, 5, "#3a8ac8")
+			q.p(8, 17, 8, 1, "#9ad8f8")
+			for k: int in range(9):
+				q.p(15 - k, 2 + k, 2, 2, "#8a5a30")
+			q.p(4, 10, 6, 5, "#b8bcc8")
+			q.p(5, 11, 4, 4, "#d8dce4")
+			q.p(13, 1, 5, 2, "#6a4a2a")
+		"t_sponge":
+			q.p(5, 7, 14, 10, "#f0d050")
+			q.p(5, 7, 14, 2, "#ffe880")
+			q.p(5, 15, 14, 2, "#c8a830")
+			for pt: Vector2i in [Vector2i(7, 10), Vector2i(12, 9), Vector2i(15, 12), Vector2i(9, 13)]:
+				q.p(pt.x, pt.y, 2, 2, "#b89020")
+			for pt2: Vector2i in [Vector2i(4, 19), Vector2i(10, 20), Vector2i(17, 19)]:
+				q.p(pt2.x, pt2.y, 2, 3, "#5ab8f0")
+			q.p(10, 2, 2, 3, "#5ab8f0")
+			q.p(14, 3, 2, 3, "#5ab8f0")
+		"t_axe":
+			for k: int in range(14):
+				q.p(6 + k, 5 + k, 2, 2, "#8a5a30")
+			q.p(2, 3, 8, 7, "#b8bcc8")
+			q.p(2, 3, 3, 7, "#e4e8ee")
+			q.p(9, 5, 2, 3, "#6a6e78")
+			q.p(16, 3, 6, 6, "#4e8a32")
+			q.p(17, 2, 4, 1, "#6aaa44")
+		"t_erase":
+			for k: int in range(9):
+				q.p(4 + k, 13 - k, 8, 6, "#f0a0b8" if k > 3 else "#e8e8f0")
+			q.p(4, 18, 16, 2, "#c8c0b0")
+			q.p(14, 16, 2, 2, "#ffffff")
+			q.p(16, 20, 5, 1, "#9db09e")
+		"seed_grass":
+			var g1: Px = _seed_bag(Color("#5ab84a"), Color("#c8f0a0"))
+			g1.p(11, 3, 2, 5, Color("#4e8a32"))
+			g1.p(8, 3, 3, 2, Color("#6aaa44"))
+			g1.p(13, 2, 3, 2, Color("#6aaa44"))
+			return g1.outline()
+		"seed_des":
+			return _seed_bag(Color("#e8c070"), Color("#fff0b0")).outline()
+		"seed_snow":
+			var g3: Px = _seed_bag(Color("#e8f4ff"), Color("#81d4fa"))
+			g3.p(11, 2, 1, 5, Color("#ffffff"))
+			g3.p(9, 4, 5, 1, Color("#ffffff"))
+			return g3.outline()
+		"inspire":
+			q.p(5, 3, 2, 19, "#6a4a2a")
+			q.p(7, 4, 12, 9, "#ffd23a")
+			q.p(7, 4, 12, 2, "#fff0a0")
+			q.p(16, 11, 3, 2, "#e0a020")
+			q.p(11, 7, 3, 3, "#c23a2e")
+			q.p(3, 20, 6, 2, "#8a7a5a")
+			for pt: Vector2i in [Vector2i(20, 3), Vector2i(21, 9), Vector2i(1, 2)]:
+				q.p(pt.x, pt.y, 2, 2, "#fff4c0")
+		"bless":
+			var b: Px = _person_fit(0, 0, Color("#e8c040"))
+			for k2: int in range(10):
+				b.p(7 + k2, 1, 1, 1, Color("#ffe27a"))
+			b.p(7, 0, 10, 1, Color("#fff4c0"))
+			b.p(2, 6, 2, 2, Color("#fff4c0"))
+			b.p(20, 9, 2, 2, Color("#fff4c0"))
+			b.p(19, 3, 1, 3, Color("#ffe27a"))
+			b.p(18, 4, 3, 1, Color("#ffe27a"))
+			return b.outline()
+		"curse":
+			var c: Px = _person_fit(0, 0, Color("#5a2a6a"))
+			c.p(5, 0, 14, 4, Color("#3a1a4a"))
+			c.p(7, 3, 10, 2, Color("#5a2a6a"))
+			c.p(8, 5, 1, 3, Color("#8a4aa8"))
+			c.p(15, 5, 1, 4, Color("#8a4aa8"))
+			c.p(11, 5, 1, 2, Color("#8a4aa8"))
+			return c.outline()
+		"shield":
+			for y: int in range(3, 21):
+				var hw: int = 8 if y < 13 else maxi(1, 8 - (y - 13))
+				q.p(12 - hw, y, hw * 2, 1, "#4a8ad8")
+				q.p(12 - hw + 1, y, 2, 1, "#8ac0f8")
+			q.p(11, 5, 2, 13, "#e8f4ff")
+			q.p(7, 9, 10, 2, "#e8f4ff")
+			q.p(18, 1, 2, 3, "#fff27a")
+			q.p(20, 3, 2, 2, "#fff27a")
+		"hand":
+			q.d(12, 12, 10, Color(1, 0.89, 0.48, 0.25))
+			q.p(7, 11, 10, 9, "#f0c090")
+			q.p(8, 19, 8, 2, "#d8a070")
+			for fx: int in range(4):
+				q.p(7 + fx * 2 + (1 if fx > 1 else 0), 4 + absi(fx - 1) * 1, 2, 8, "#f0c090")
+			q.p(4, 11, 3, 2, "#f0c090")
+			q.p(5, 13, 3, 3, "#f0c090")
+			q.p(7, 11, 1, 9, "#d8a070")
+			q.p(10, 16, 4, 1, "#d8a070")
+		"possess":
+			var ps: Px = _person_fit(0, 0, Color("#8e8676"))
+			ps.p(13, 1, 8, 9, Color(0.75, 0.44, 1.0, 0.9))
+			ps.p(14, 9, 2, 3, Color(0.75, 0.44, 1.0, 0.9))
+			ps.p(17, 10, 2, 2, Color(0.75, 0.44, 1.0, 0.9))
+			ps.p(15, 4, 1, 2, Color("#ffffff"))
+			ps.p(18, 4, 1, 2, Color("#ffffff"))
+			return ps.outline()
+		"ctrlbeast":
+			var gi: Px = _animal_fit("remote")
+			gi.p(0, 0, 6, 5, Color("#c070ff"))
+			gi.p(1, 1, 1, 2, Color("#ffffff"))
+			gi.p(4, 1, 1, 2, Color("#ffffff"))
+			return gi.outline()
+		"fert":
+			_cloud(q, "#9ad89a", "#5aa85a")
+			for pt: Vector2i in [Vector2i(6, 16), Vector2i(10, 18), Vector2i(15, 16), Vector2i(18, 19)]:
+				q.p(pt.x, pt.y, 1, 2, "#7ae07a")
+			q.p(9, 21, 6, 2, "#6aa046")
+			q.p(11, 18, 2, 3, "#4e8a32")
+			q.p(9, 17, 2, 2, "#ff8ac0")
+		"sunray":
+			q.d(12, 5, 4, "#ffd23a")
+			q.d(12, 5, 2, "#fff6c0")
+			for k3: int in range(8):
+				var a3: float = k3 * TAU / 8.0
+				q.p(12 + roundi(cos(a3) * 6.0), 5 + roundi(sin(a3) * 6.0), 1, 1, "#ffb43a")
+			q.p(10, 9, 4, 11, "#ff9a2a")
+			q.p(11, 9, 2, 11, "#fff4c0")
+			q.p(5, 20, 14, 3, "#5a4a40")
+			q.p(8, 18, 8, 2, "#ff6a2a")
+		"frost":
+			for k4: int in range(3):
+				var a4: float = k4 * PI / 3.0
+				for dd2: int in range(-9, 10):
+					q.p(12 + roundi(cos(a4) * dd2), 12 + roundi(sin(a4) * dd2), 1, 1, "#e8f8ff")
+			for k5: int in range(6):
+				var a5: float = k5 * PI / 3.0
+				var ex: int = 12 + roundi(cos(a5) * 6.0)
+				var ey: int = 12 + roundi(sin(a5) * 6.0)
+				q.p(ex - 1, ey - 1, 3, 3, "#81d4fa")
+			q.d(12, 12, 2, "#ffffff")
+		"volcano":
+			for y2: int in range(7, 22):
+				var w2: int = roundi((y2 - 6) * 0.75) + 2
+				q.p(12 - w2, y2, w2 * 2, 1, "#5a4a44" if y2 > 9 else "#3a3030")
+				q.p(12 - w2, y2, 2, 1, "#7a6a60")
+			q.p(10, 6, 4, 2, "#ff7a2e")
+			q.p(11, 8, 2, 6, "#ff6a2a")
+			q.p(10, 13, 2, 5, "#ff9a2a")
+			q.p(13, 11, 2, 4, "#e4402a")
+			q.p(8, 1, 4, 3, "#8a8480")
+			q.p(12, 2, 5, 3, "#6a6460")
+			q.p(16, 4, 2, 2, "#ffb43a")
+			q.p(5, 3, 2, 2, "#ffb43a")
+		"tornado":
+			for y3: int in range(2, 22):
+				var w3: int = maxi(1, roundi((22 - y3) * 0.45))
+				var off: int = roundi(sin(y3 * 0.6) * 2.0)
+				q.p(12 - w3 + off, y3, w3 * 2, 1, "#c8ccd0" if y3 % 3 else "#8a9098")
+			q.p(4, 21, 16, 2, "#a08a6a")
+			q.p(3, 9, 2, 2, "#5a8a32")
+			q.p(19, 14, 2, 2, "#5a8a32")
+		"acid":
+			_cloud(q, "#6a7a4a", "#4a5a32")
+			for pt3: Vector2i in [Vector2i(5, 16), Vector2i(9, 18), Vector2i(13, 16), Vector2i(17, 18), Vector2i(7, 21), Vector2i(15, 21)]:
+				q.p(pt3.x, pt3.y, 2, 2, "#8cf040")
+			q.p(9, 8, 2, 2, "#c8ff60")
+			q.p(13, 8, 2, 2, "#c8ff60")
+			q.p(10, 11, 4, 1, "#c8ff60")
+		"undead":
+			q.p(7, 3, 10, 9, "#8ab86a")
+			q.p(8, 2, 8, 1, "#8ab86a")
+			q.p(8, 5, 3, 3, "#1a2a10")
+			q.p(13, 5, 3, 3, "#1a2a10")
+			q.p(9, 6, 1, 1, "#e0ff60")
+			q.p(14, 6, 1, 1, "#e0ff60")
+			q.p(9, 10, 6, 1, "#3a4a2a")
+			q.p(10, 9, 1, 1, "#f0f0d8")
+			q.p(13, 9, 1, 1, "#f0f0d8")
+			q.p(8, 12, 8, 8, "#4a3a3a")
+			q.p(2, 13, 6, 2, "#8ab86a")
+			q.p(16, 13, 6, 2, "#8ab86a")
+			q.p(9, 20, 2, 3, "#3a2c26")
+			q.p(13, 20, 2, 3, "#3a2c26")
+			q.p(16, 2, 3, 3, "#86e04a")
+		"lava":
+			return _tile(GuData.LAVA, func(o: Px) -> void:
+				o.p(6, 8, 3, 2, "#fff0a0")
+				o.p(13, 12, 4, 2, "#fff0a0")
+				o.p(9, 15, 2, 2, "#ffe27a")
+				o.p(4, 4, 16, 1, "#7a2818"))
+		"tnt":
+			q.d(11, 14, 7, "#2a2a34")
+			q.d(9, 12, 2, "#5a5a6a")
+			q.p(13, 5, 2, 4, "#8a6a42")
+			for pt4: Vector2i in [Vector2i(16, 1), Vector2i(15, 3), Vector2i(17, 3), Vector2i(18, 5)]:
+				q.p(pt4.x, pt4.y, 2, 2, "#fff27a")
+			q.p(9, 13, 5, 1, "#fff27a")
+			q.p(11, 11, 1, 5, "#fff27a")
+		"mine":
+			q.p(1, 15, 22, 7, "#8a6a42")
+			q.p(1, 15, 22, 2, "#6aa046")
+			q.p(6, 12, 12, 5, "#5a5a62")
+			q.p(7, 11, 10, 1, "#7a7a84")
+			q.p(10, 9, 4, 3, "#3a3a42")
+			q.p(11, 8, 2, 2, "#ff3a2a")
+			q.p(4, 6, 1, 1, "#ff8a7a")
+			q.p(19, 6, 1, 1, "#ff8a7a")
+		"napalm":
+			for k6: int in range(4):
+				var bx: int = 2 + k6 * 5
+				var by: int = 3 + k6 * 4
+				q.p(bx, by, 4, 4, "#ff7a2e")
+				q.p(bx + 1, by + 1, 2, 2, "#ffe27a")
+				q.p(bx - 2, by - 2, 2, 2, "#ffb43a")
+			q.p(2, 20, 20, 3, "#e4402a")
+			q.p(4, 18, 4, 2, "#ff9a2a")
+			q.p(14, 18, 5, 2, "#ff9a2a")
+		"km6":
+			return _blast(GuData.ESS_COL[6].darkened(0.2), GuData.ESS_COL[6], Color("#f4ffe0"), 8, 10.0, 6).outline()
+		"km8":
+			return _blast(Color("#ff9a3a"), GuData.ESS_COL[8], Color("#ffffff"), 12, 11.0, 8).outline()
+		"km9":
+			var k9: Px = _blast(Color("#ff6a2a"), GuData.ESS_COL[9], Color("#ffffff"), 16, 12.0, 9)
+			k9.p(2, 21, 20, 2, Color("#5a4a40"))
+			return k9.outline()
+		"void":
+			q.d(12, 12, 10, Color("#7c4dff"))
+			q.d(12, 12, 8, Color("#2a1050"))
+			q.d(12, 12, 5, Color("#0a0414"))
+			for a6: int in range(20):
+				var an6: float = a6 / 20.0 * TAU
+				q.p(12 + roundi(cos(an6) * 9.0), 12 + roundi(sin(an6) * 4.0), 1, 1, Color("#e8e0ff"))
+			q.p(14, 7, 2, 2, Color("#b39dff"))
+		"goo":
+			for k7: int in range(26):
+				var gx: int = 3 + int(GuData.hash2(k7, 1, 9) * 17.0)
+				var gy: int = 4 + int(GuData.hash2(k7, 2, 9) * 15.0)
+				q.p(gx, gy, 2, 2, "#3a1a4a" if k7 % 3 else "#8a5aa8")
+				if k7 % 4 == 0:
+					q.p(gx + 1, gy - 1, 1, 1, "#c8a0e8")
+			q.p(2, 20, 20, 3, "#5a4a44")
+		"coin":
+			q.d(12, 12, 10, "#c89020")
+			q.d(12, 12, 9, "#ffd24a")
+			q.d(12, 12, 7, "#f0b030")
+			q.p(9, 9, 6, 6, "#1a1408")
+			q.p(10, 10, 4, 4, "#3a2a10")
+			q.p(6, 5, 3, 2, "#fff6c0")
+			q.p(16, 16, 3, 2, "#a87010")
+		_:
+			return null
+	return q.outline()

@@ -19,6 +19,7 @@ const SNOW: int = 8
 const WALL: int = 9
 const ASH: int = 10
 const DES: int = 11
+const LAVA: int = 12   # Erdfeuer-Lava (fließt, kühlt zu Fels ab); hinten angehängt wegen alter Spielstände
 
 # Objekte auf einer Kachel
 const F_NONE: int = 0
@@ -32,13 +33,14 @@ const F_SPRING: int = 7
 const F_SHRUB: int = 8
 const F_TUFT: int = 9
 const F_FLOWER: int = 10
+const F_ROAD: int = 11   # Straße zwischen Dörfern eines Clans
 
 const REGN: PackedStringArray = ["Nordebenen", "Südgrenze", "Westwüste", "Ostmeer", "Zentralkontinent"]
 const REGN_IN: PackedStringArray = ["die Nordebenen", "die Südgrenze", "die Westwüste", "das Ostmeer", "den Zentralkontinent"]
 const REGN_DAT: PackedStringArray = ["den Nordebenen", "der Südgrenze", "der Westwüste", "dem Ostmeer", "dem Zentralkontinent"]
-const TNAME: PackedStringArray = ["Tiefes Meer", "Seichtes Wasser", "Strand", "Grasland", "Steppe", "Erde", "Hügel", "Gebirge", "Schnee", "Regionswand", "Asche", "Wüste"]
-const FNAME: PackedStringArray = ["", "Baum", "Bambus", "Palme", "Kiefer", "Fels", "Urstein-Ader", "Geisterquelle", "Strauch", "Grasbüschel", "Blume"]
-const DEFH: PackedFloat32Array = [0.2, 0.34, 0.38, 0.5, 0.5, 0.5, 0.67, 0.84, 0.5, 0.5, 0.5, 0.5]
+const TNAME: PackedStringArray = ["Tiefes Meer", "Seichtes Wasser", "Strand", "Grasland", "Steppe", "Erde", "Hügel", "Gebirge", "Schnee", "Regionswand", "Asche", "Wüste", "Lava"]
+const FNAME: PackedStringArray = ["", "Baum", "Bambus", "Palme", "Kiefer", "Fels", "Urstein-Ader", "Geisterquelle", "Strauch", "Grasbüschel", "Blume", "Straße"]
+const DEFH: PackedFloat32Array = [0.2, 0.34, 0.38, 0.5, 0.5, 0.5, 0.67, 0.84, 0.5, 0.5, 0.5, 0.5, 0.6]
 
 const ESS_NAME: PackedStringArray = ["", "Grüne Kupfer-Uressenz", "Rote Stahl-Uressenz", "Weiße Silber-Uressenz", "Gelbe Gold-Uressenz", "Purpurne Kristall-Uressenz", "Grüne-Traube-Unsterblichenessenz", "Rote-Dattel-Unsterblichenessenz", "Weiße-Litschi-Unsterblichenessenz", "Unsterblichenessenz (Rang 9)"]
 const ESS_COL: Array[Color] = [Color.WHITE, Color("#43b38f"), Color("#d24a35"), Color("#e6eaf0"), Color("#f0c040"), Color("#a768e2"), Color("#92de5c"), Color("#c0284a"), Color("#fff1d8"), Color("#ffd24a")]
@@ -209,6 +211,7 @@ const PAL: Dictionary = {
 	ASH: [Color8(64, 58, 56), Color8(56, 50, 48), Color8(74, 68, 64)],
 	HILL: [Color8(62, 70, 64), Color8(58, 66, 60), Color8(66, 74, 68)],
 	MOUNT: [Color8(46, 48, 50), Color8(42, 44, 46), Color8(52, 54, 56)],
+	LAVA: [Color8(255, 132, 28), Color8(255, 186, 56), Color8(236, 84, 20)],
 }
 
 const KCOL: Dictionary = {"info": Color("#e8c70a"), "war": Color("#ff7a5a"), "gold": Color("#ffd23a"), "jade": Color("#62d8a4"), "red": Color("#ff6a6a"), "violet": Color("#c8a0ff")}

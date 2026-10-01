@@ -28,7 +28,14 @@ var last_month: int = 0
 var seed_val: int = 1
 var next_id: int = 1
 var log_entries: Array[Dictionary] = []
-var laws: Dictionary = {"war": true, "tide": true, "will": true, "trib": true, "immortal": true, "walls": true, "growth": true, "fire": true}
+var laws: Dictionary = {"war": true, "tide": true, "will": true, "trib": true, "immortal": true, "walls": true, "growth": true, "fire": true,
+	"hunger": true, "age": true, "rebel": true, "diplo": true, "expand": true, "animals": true, "grass": true, "trees": true, "disaster": true}
+## Weitere Weltgesetze (WorldBox-Parität) für das Gesetze-Fenster: [Schlüssel, Name, Beschreibung].
+const LAWS_EXTRA: Array = [["hunger", "Hunger", "Dörfer ohne Nahrung verlieren Bewohner."], ["age", "Alter", "Sterbliche und Tiere sterben an Altersschwäche."],
+	["rebel", "Aufstände", "Dörfer mit geringer Loyalität sagen sich von ihrem Clan los."], ["diplo", "Diplomatie", "Clans planen und schließen Bündnisse."],
+	["expand", "Ausbreitung", "Volle Dörfer schicken Siedler aus – auch per Boot zu Inseln."], ["animals", "Tier-Spawn", "Wildtiere, Bestien und Bestienkönige entstehen von selbst."],
+	["grass", "Grasausbreitung", "Erde und Asche ergrünen wieder."], ["trees", "Baumwachstum", "Wälder breiten sich aus."],
+	["disaster", "Katastrophen", "Von Zeit zu Zeit Erdbeben, Erdfeuer-Vulkane, Wirbel, Giftregen, Sternenfall, Seuchen und Dünenwanderung."]]
 var weather: Dictionary = {}           # {type, t}
 var shake: float = 0.0
 var terr_dirty: bool = true
@@ -37,6 +44,17 @@ var sp_count: Dictionary = {}
 var places: Array[Place] = []
 var next_pid: int = 1
 var wild_igu: int = 0   # Zahl der wilden Unsterblichen Gu (monatlich gezählt)
+# Gottkräfte-Parität: laufende Naturgewalten
+var lava: Dictionary = {}              # Kachel-Index -> Hitze (fließt, kühlt bei 0 zu Fels ab)
+var volcs: Array[Dictionary] = []      # aktive Erdfeuer-Vulkane {x, y, t}
+var storms: Array[Dictionary] = []     # Windpfad-Wirbel {x, y, vx, vy, t}
+var acids: Array[Dictionary] = []      # Giftregen-Wolken {x, y, vx, vy, t}
+var goo: Array[Dictionary] = []        # Verzehrender Gu-Schwarm: aktive Zellen {i, e} (e = Restenergie)
+var goo_left: int = 0                  # Kacheln, die der Schwarm noch fressen darf
+var mines: PackedInt32Array = PackedInt32Array()   # Erdminen-Gu (Kachel-Indizes)
+var seeds: Array[Dictionary] = []      # Biom-Samen {x, y, tt, r, n}
+var possessed: Unit = null             # Seelenbesitz
+var _nat_acc: float = 0.0
 
 # Wirkungen Unsterblicher Gu (Unit.igf)
 const F_REVIVE: int = 1
@@ -260,13 +278,14 @@ func mk_person(x: float, y: float, race: int, p_age: float = 0.0, sur: String = 
 func set_stats(u: Unit, full: bool) -> void:
 	var m: float = GuData.RACE_HP[u.race] * u.ig_hp
 	var f: float = 1.0 + 0.15 * u.stage
+	var bl: float = 1.3 if u.bless > 0 else (0.65 if u.bless < 0 else 1.0)
 	var ratio: float = u.hp / u.mhp if u.mhp > 1.0 else 1.0
-	u.mhp = GuData.HP[u.rank] * m * f
-	u.atk = GuData.ATK[u.rank] * f * GuData.RACE_ATK[u.race] * u.ig_atk * (1.4 if u.ow else 1.0)
+	u.mhp = GuData.HP[u.rank] * m * f * bl
+	u.atk = GuData.ATK[u.rank] * f * GuData.RACE_ATK[u.race] * u.ig_atk * (1.4 if u.ow else 1.0) * bl * (1.3 if u.undead else 1.0)
 	u.rng = GuData.RNG[u.rank] * u.ig_rng
 	u.aoe = GuData.AOE[u.rank]
 	u.hp = u.mhp if full else u.mhp * ratio
-	u.speed = GuData.RACE_SP[u.race] * (1.6 if u.rank >= 6 else 1.0 + u.rank * 0.04) * u.ig_sp
+	u.speed = GuData.RACE_SP[u.race] * (1.6 if u.rank >= 6 else 1.0 + u.rank * 0.04) * u.ig_sp * (1.1 if u.bless > 0 else (0.85 if u.bless < 0 else 1.0)) * (0.75 if u.undead else 1.0)
 	if u.rank >= 6 or GuData.RACE_FLY[u.race]:
 		u.fly = true
 
@@ -434,13 +453,15 @@ func passable(u: Unit, tx: int, ty: int) -> bool:
 	if u.fly:
 		return true
 	if t == GuData.DEEP:
-		return u.swim
+		return u.swim or u.boat
 	return true
 
 
 func sp_mul(u: Unit, t: int) -> float:
 	if u.fly:
 		return 1.0
+	if u.boat and t <= GuData.SHAL:
+		return 1.3
 	if t == GuData.SHAL:
 		return 1.0 if (u.swim or u.race == 9) else 0.55
 	if t == GuData.MOUNT:
@@ -456,6 +477,8 @@ func hostile(a: Unit, b: Unit) -> bool:
 	if a == b or b.hp <= 0.0:
 		return false
 	if a.k == "p" and b.k == "p":
+		if a.undead or b.undead:
+			return a.undead != b.undead
 		if a.rogue or b.rogue or a.ow or b.ow:
 			return true
 		if a.duel_t > sim_time and b.duel_t > sim_time:
@@ -603,6 +626,8 @@ func can_place(x: int, y: int, w: int, h: int, m: int) -> bool:
 			if xx >= x and xx < x + w and yy >= y and yy < y + h:
 				if not GuData.buildable(world.tile[i]):
 					return false
+				if world.temp_snow[i] == 1 or world.temp_snow[i] == 2:
+					return false   # zugefrorenes Meer (Frostodem) taut wieder auf
 				var f: int = world.feat[i]
 				if f == GuData.F_ROCK or f == GuData.F_ORE or f == GuData.F_SPRING:
 					return false
@@ -787,6 +812,9 @@ func found_village(u: Unit, clan_id: int) -> bool:
 	u.clan = c.id
 	u.col_clan = -1
 	u.col_to = Vector2(-1, -1)
+	u.boat = false
+	if c.cap < 0 or c.cap >= villages.size() or not villages[c.cap].alive or villages[c.cap].clan != c.id:
+		c.cap = v.id
 	if is_new:
 		log_event(("Die " if c.kind == "Sekte" else "") + c.name + " wird in " + v.name + " gegründet (" + GuData.REGN[v.reg] + ").", "jade", true)
 	elif randf() < 0.5:
@@ -801,6 +829,7 @@ func join_village(u: Unit, v: Village) -> void:
 	u.col_clan = -1
 	u.col_to = Vector2(-1, -1)
 	u.job = ""
+	u.boat = false
 
 
 func nearest_village(x: float, y: float, r: float, pred: Callable = Callable()) -> Village:
@@ -901,6 +930,8 @@ func cultivate(u: Unit) -> void:
 	if u.luck > 0.0:
 		rate *= 2.2
 	rate *= u.ig_cult
+	if u.bless != 0:
+		rate *= 1.4 if u.bless > 0 else 0.5
 	if u.pb_t > sim_time:
 		rate *= u.pb
 	if u.ow:
@@ -985,6 +1016,11 @@ func tribulation(u: Unit) -> void:
 	u.next_trib = uage(u) + 12.0 + randf() * 16.0
 	if u.notrib:
 		return
+	if u.prot > sim_time:
+		float_txt(u, "Himmelsschutz", Color("#bfe8ff"))
+		ring(u.x, u.y - 2.0, 4.0, Color("#bfe8ff"), 0.8)
+		u.prog = minf(0.99, u.prog + 0.1)
+		return
 	for k: int in range(6):
 		later(k * 0.25, func() -> void:
 			if u.hp > 0.0:
@@ -1023,8 +1059,8 @@ func declare_war(a: Clan, b: Clan, quiet: bool = false) -> void:
 		return
 	a.ally.erase(b.id)
 	b.ally.erase(a.id)
-	a.war[b.id] = true
-	b.war[a.id] = true
+	a.war[b.id] = sim_time   # Wert = Kriegsbeginn (nach dem Laden true)
+	b.war[a.id] = sim_time
 	a.war_start = sim_time
 	b.war_start = sim_time
 	for u: Unit in units:
@@ -1076,6 +1112,10 @@ func kill_clan(c: Clan, why: String) -> void:
 func capture(v: Village, nc: Clan) -> void:
 	var oc: Clan = clans[v.clan]
 	v.clan = nc.id
+	v.capt = sim_time
+	v.loy = 35.0
+	if oc.cap == v.id:
+		oc.cap = -1
 	for u: Unit in units:
 		if u.k == "p" and u.vil == v.id:
 			u.clan = nc.id
@@ -1090,7 +1130,7 @@ func ignite(i: int, v: float) -> void:
 	if presim:
 		return  # In der Vorgeschichte brennt nichts ab (sonst verascht der Zentralkontinent durch Drangsal-Blitze).
 	var t: int = world.tile[i]
-	if t == GuData.DEEP or t == GuData.SHAL or t == GuData.WALL or t == GuData.SNOW:
+	if t == GuData.DEEP or t == GuData.SHAL or t == GuData.WALL or t == GuData.SNOW or t == GuData.LAVA:
 		return
 	if fire.size() > 6000:
 		return
@@ -1334,7 +1374,7 @@ func monthly() -> void:
 		v.food += v.farms * 0.55 * float(ad["grow"]) + 0.25 - v.pop * 0.07
 		if v.food < 0.0:
 			v.food = 0.0
-			if randf() < 0.05:
+			if laws["hunger"] and randf() < 0.05:
 				for u: Unit in units:
 					if u.k == "p" and u.vil == v.id and u.rank == 0 and u.hp > 0.0:
 						u.dreason = "Hunger"
@@ -1362,7 +1402,7 @@ func monthly() -> void:
 		elif not c.war.is_empty() and v.towers < 2 and v.wood >= 12.0 and v.pop > 10:
 			if try_build(v, "tower"):
 				v.wood -= 12.0
-		if v.pop >= mini(v.cap, 40) - 1 and v.houses >= 6 and randf() < 0.035:
+		if laws["expand"] and v.pop >= mini(v.cap, 40) - 1 and v.houses >= (4 if v.reg == 3 else 6) and randf() < (0.05 if v.reg == 3 else 0.035):
 			colonize(v)
 	for u: Unit in units:
 		if u.hp <= 0.0:
@@ -1388,19 +1428,30 @@ func monthly() -> void:
 				kill_clan(c, "ist untergegangen.")
 			continue
 		c.wt = -1
+		# Hauptstadt: bleibt, solange sie dem Clan gehört; sonst das größte Dorf
+		if c.cap < 0 or c.cap >= villages.size() or not villages[c.cap].alive or villages[c.cap].clan != c.id:
+			var big: Village = vs[0]
+			for v: Village in vs:
+				if v.pop > big.pop:
+					big = v
+			if c.cap >= 0 and vs.size() > 1:
+				log_event(c.name + " erhebt " + big.name + " zur neuen Hauptstadt.", "info")
+			c.cap = big.id
+		var capv: Village = villages[c.cap]
+		c.exh = minf(100.0, c.exh + 1.2 + 0.4 * c.war.size()) if not c.war.is_empty() else maxf(0.0, c.exh - 2.5)
 		if not c.war.is_empty():
 			var bd: float = 1e9
 			for v: Village in villages:
 				if not v.alive or not c.war.has(v.clan):
 					continue
-				var d: float = Vector2(v.cx - vs[0].cx, v.cy - vs[0].cy).length()
+				var d: float = Vector2(v.cx - capv.cx, v.cy - capv.cy).length()
 				if d < bd:
 					bd = d
 					c.wt = v.id
 		if laws["war"] and randf() < 0.006 * float(ad["war"]) and not (c.calm > sim_time):
 			var cands: Array[Clan] = []
 			for o: Clan in clans:
-				if not o.alive or o == c or o.calm > sim_time or c.war.has(o.id) or c.ally.has(o.id):
+				if not o.alive or o == c or o.calm > sim_time or c.war.has(o.id) or c.ally.has(o.id) or has_plan(c, "war", o.id):
 					continue
 				var close: bool = false
 				for v: Village in villages:
@@ -1411,21 +1462,25 @@ func monthly() -> void:
 				if close:
 					cands.append(o)
 			if not cands.is_empty():
-				declare_war(c, cands.pick_random())
+				add_plan(c, "war", cands.pick_random(), 3.0 + randf() * 6.0)
 		for e: int in c.war.keys():
 			var o2: Clan = clans[e]
 			if not o2.alive:
 				c.war.erase(e)
 				continue
-			if (sim_time - c.war_start > 36.0 and randf() < 0.012) or (not laws["war"] and randf() < 0.2):
+			if (sim_time - c.war_start > 36.0 and randf() < 0.012) or (not laws["war"] and randf() < 0.2) or randf() < 0.0005 * (c.exh + o2.exh):
+				if c.exh > 60.0 and randf() < 0.5:
+					log_event(c.name + " ist kriegsmüde und bittet " + o2.name + " um Frieden.", "jade")
 				make_peace(c, o2)
-		if randf() < 0.0015:
+		if laws["diplo"] and randf() < 0.0015:
 			var cands2: Array[Clan] = []
 			for o: Clan in clans:
-				if o.alive and o != c and not c.war.has(o.id) and not c.ally.has(o.id):
+				if o.alive and o != c and not c.war.has(o.id) and not c.ally.has(o.id) and not has_plan(c, "ally", o.id):
 					cands2.append(o)
 			if not cands2.is_empty():
-				make_ally(c, cands2.pick_random())
+				add_plan(c, "ally", cands2.pick_random(), 2.0 + randf() * 4.0)
+		run_plans(c)
+	loyalty_month()
 	for v: Village in villages:
 		if not v.alive:
 			continue
@@ -1462,7 +1517,12 @@ func monthly() -> void:
 
 
 func colonize(v: Village) -> void:
-	var s: Vector2 = find_site(v.cx, v.cy, 32.0, 64.0, v.reg)
+	# Im Ostmeer (oder wenn das eigene Land voll ist) segeln Siedler zu einer anderen Insel derselben Region.
+	var sea: bool = v.reg == 3 and randf() < 0.6
+	var s: Vector2 = Vector2(-1, -1) if sea else find_site(v.cx, v.cy, 32.0, 64.0, v.reg)
+	if s.x < 0.0:
+		s = find_site(v.cx, v.cy, 40.0, 110.0, v.reg)
+		sea = true
 	if s.x < 0.0:
 		return
 	var n: int = 0
@@ -1476,12 +1536,21 @@ func colonize(v: Village) -> void:
 			u.st = "idle"
 			u.tgt = null
 			u.job = ""
+			u.boat = true   # Boote: über tiefes Wasser, aber nie durch Regionswände
+			u.fxm = true
 			n += 1
+	if sea and n > 0 and randf() < 0.5:
+		log_event("Siedler von " + v.name + " stechen in See.", "jade")
 
 
 func person_month(u: Unit) -> void:
 	var a: float = uage(u)
-	if a > u.life:
+	if u.undead:
+		if a > u.life:
+			u.dreason = "zerfallen"
+			u.hp = 0.0
+		return
+	if a > u.life and (laws["age"] or u.rank == 0 and a > u.life * 3.0):
 		u.dreason = "Alter"
 		u.hp = 0.0
 		return
@@ -1528,11 +1597,11 @@ func assign_job(u: Unit) -> void:
 
 func animal_month(u: Unit) -> void:
 	var s: String = u.sp
-	if u.beh != GuData.B_GU and u.beh != GuData.B_IGU and u.rank < 6 and uage(u) > u.life:
+	if laws["age"] and u.beh != GuData.B_GU and u.beh != GuData.B_IGU and u.rank < 6 and uage(u) > u.life:
 		u.hp = 0.0
 		return
 	u.hp = minf(u.mhp, u.hp + u.mhp * 0.15)
-	if laws["growth"] and u.rank == 0 and u.beh != GuData.B_GU and u.beh != GuData.B_IGU and u.ldr == null and randf() < 0.006 and sp_count.get(s, 0) < int(GuData.SPEC[s]["cap"]) / 2:
+	if laws["growth"] and laws["animals"] and u.rank == 0 and u.beh != GuData.B_GU and u.beh != GuData.B_IGU and u.ldr == null and randf() < 0.006 and sp_count.get(s, 0) < int(GuData.SPEC[s]["cap"]) / 2:
 		mk_animal(u.x + (randf() - 0.5) * 2.0, u.y + (randf() - 0.5) * 2.0, s)
 
 
@@ -1556,7 +1625,7 @@ func nature_spawns() -> void:
 		["white_boar", [GuData.GRASS, GuData.HILL], [1]], ["black_boar", [GuData.GRASS, GuData.HILL], [1]], ["lightning_wolf", [GuData.GRASS], [1]], ["thousand_li_earthwolf_spider", [GuData.GRASS, GuData.SOIL], [1]]]
 	for e: Array in tries:
 		var s: String = e[0]
-		if sp_count.get(s, 0) < int(GuData.SPEC[s]["cap"]) * 0.12 and randf() < 0.25:
+		if laws["animals"] and sp_count.get(s, 0) < int(GuData.SPEC[s]["cap"]) * 0.12 and randf() < 0.25:
 			var ts: Array = e[1]
 			var rs: Array = e[2]
 			var p: Vector2 = random_tile(func(i: int) -> bool: return world.tile[i] in ts and world.region[i] in rs)
@@ -1612,8 +1681,10 @@ func yearly() -> void:
 		var top: Array[Unit] = strongest(1)
 		if not top.is_empty() and top[0].rank >= 7:
 			heavens_will(top[0])
-	if laws["growth"] and randf() < 0.05:
+	if laws["growth"] and laws["animals"] and randf() < 0.05:
 		wild_beast_king()
+	if laws["disaster"] and not presim and randf() < 0.14:
+		random_disaster()
 
 
 ## Seltene natürliche Bestienkönige und Ödbestien in ihrer Heimatregion.
@@ -1674,6 +1745,12 @@ func beast_tide(v: Village, at: Vector2) -> void:
 
 func heavens_will(u: Unit) -> void:
 	var nm: String = u.pname()
+	if u.prot > sim_time:
+		bolt(u.x + 3.0, u.y - 2.0, 0.0, false)
+		ring(u.x, u.y - 2.0, 6.0, Color("#bfe8ff"), 1.0)
+		float_txt(u, "Himmelsschutz", Color("#bfe8ff"))
+		log_event("Der Himmelswille prallt am Himmelsschutz von " + nm + " ab.", "violet", true)
+		return
 	log_event("Der Himmelswille richtet sich gegen " + nm + ".", "violet", true)
 	for k: int in range(9):
 		later(k * 0.18, func() -> void:
@@ -1701,8 +1778,20 @@ func heavens_will(u: Unit) -> void:
 func update_leaders() -> void:
 	for v: Village in villages:
 		v.lead = null
+	var old: Dictionary = {}
+	for c: Clan in clans:
+		if c.lead != null:
+			old[c.id] = c.lead
+		c.lead = null
 	for u: Unit in units:
-		if u.k != "p" or u.hp <= 0.0 or u.vil < 0:
+		if u.k != "p" or u.hp <= 0.0 or u.undead:
+			continue
+		if u.clan >= 0 and not u.rogue:
+			var c2: Clan = clans[u.clan]
+			var CL: Unit = c2.lead
+			if CL == null or u.rank * 4 + u.stage > CL.rank * 4 + CL.stage or (u.rank == CL.rank and u.stage == CL.stage and uage(u) > uage(CL)):
+				c2.lead = u
+		if u.vil < 0:
 			continue
 		var v: Village = villages[u.vil]
 		if not v.alive:
@@ -1710,6 +1799,13 @@ func update_leaders() -> void:
 		var L: Unit = v.lead
 		if L == null or u.rank * 4 + u.stage > L.rank * 4 + L.stage or (u.rank == L.rank and u.stage == L.stage and uage(u) > uage(L)):
 			v.lead = u
+	if presim:
+		return
+	for c3: Clan in clans:
+		var prev: Unit = old.get(c3.id, null)
+		var nl: Unit = c3.lead
+		if c3.alive and nl != null and prev != null and prev != nl and prev.hp <= 0.0 and nl.rank >= 3:
+			log_event(nl.pname() + " (" + rank_title(nl.rank) + ") wird neues Clan-Oberhaupt von " + c3.name + ".", "jade", nl.rank >= 6)
 
 
 # ---------------- Denken ----------------
@@ -1815,6 +1911,9 @@ func finish_work(u: Unit) -> void:
 
 
 func think_p(u: Unit) -> void:
+	if u.undead:
+		undead_think(u)
+		return
 	var v: Village = villages[u.vil] if u.vil >= 0 else null
 	var a: float = uage(u)
 	var c: Clan = clans[u.clan] if u.clan >= 0 else null
@@ -2087,6 +2186,8 @@ func move_unit(u: Unit, dt: float) -> void:
 		return
 	var ti: int = int(u.y) * W + int(u.x)
 	var mul: float = sp_mul(u, world.tile[ti])
+	if world.feat[ti] == GuData.F_ROAD and not u.fly:
+		mul *= 1.3
 	if _sand and not u.fly:
 		mul *= 0.6
 	var spd: float = minf(u.speed * mul * dt, d)
@@ -2132,6 +2233,9 @@ func attack(u: Unit, e: Unit) -> void:
 		return
 	if (u.igf & F_BOLT) != 0 and randf() < 0.3:
 		bolt(e.x, e.y, u.atk * 0.6, false)
+	if u.undead and e.k == "p" and not e.undead and e.rank < 6 and e.zin < 0.0 and randf() < 0.45:
+		e.zin = sim_time + 1.0 + randf() * 2.0
+		e.fxm = true
 	if u.rng > 3.0:
 		var c: Color = GuData.PATH_COL[u.path] if (u.k == "p" and u.path >= 0) else Color(str(GuData.SPEC[u.sp].get("pc", "#ff6a3a")) if u.k == "a" else "#ff6a3a")
 		projs.append({"x": u.x, "y": u.y - 1.5, "t": e, "sp": 30.0 if u.rank >= 6 else 22.0, "dmg": u.atk * (0.85 + randf() * 0.3), "src": u, "c": c, "aoe": u.aoe, "path": u.path if u.k == "p" else -1, "big": u.rank >= 6, "l": 3.0, "a": 0.0, "ign": (u.igf & F_FIRE) != 0})
@@ -2152,11 +2256,17 @@ func step_unit(u: Unit, dt: float) -> void:
 		u.cd -= dt
 	var ti: int = clampi(int(u.y), 0, H - 1) * W + clampi(int(u.x), 0, W - 1)
 	var t: int = world.tile[ti]
-	if t == GuData.DEEP and not u.swim and not u.fly:
+	if u.fxm and _special(u, dt, t):
+		return
+	if t == GuData.DEEP and not u.swim and not u.fly and not u.boat:
 		hurt(u, 4.0 * dt, null)
 	if not u.fly and fire.has(ti):
 		hurt(u, 3.0 * dt, null)
-	if u.sick > 0.0:
+	if t == GuData.LAVA and not u.fly:
+		hurt(u, (20.0 + u.mhp * 0.2) * dt, null)
+		if randf() < dt * 4.0:
+			spark(u.x, u.y - 1.0, Color("#ff8a2a"), 2, 3.0)
+	if u.sick > 0.0 and not u.undead:
 		u.sick -= dt
 		hurt(u, (0.15 if u.rank >= 3 else 1.1) * dt, null)
 		if randf() < dt * 0.6:
@@ -2179,7 +2289,9 @@ func step_unit(u: Unit, dt: float) -> void:
 	u.think -= dt
 	if u.think <= 0.0:
 		u.think = 0.35 + randf() * 0.45
-		if u.k == "p":
+		if u.poss:
+			poss_think(u)
+		elif u.k == "p":
 			think_p(u)
 		else:
 			think_a(u)
@@ -2217,6 +2329,8 @@ func step_unit(u: Unit, dt: float) -> void:
 func step(dt: float) -> void:
 	sim_time += dt
 	_sand = weather.get("type", "") == "sand"
+	if parts.size() > 4000:
+		parts = parts.slice(parts.size() - 2000)
 	var m: int = int(sim_time)
 	if m != last_month:
 		last_month = m
@@ -2272,6 +2386,13 @@ func step(dt: float) -> void:
 	if _fire_acc >= 0.25:
 		_fire_acc = 0.0
 		fire_step()
+	if not (lava.is_empty() and volcs.is_empty() and goo.is_empty() and seeds.is_empty()):
+		_nat_acc += dt
+		if _nat_acc >= 0.15:
+			_nat_acc = 0.0
+			nature_tick()
+	if not (storms.is_empty() and acids.is_empty() and mines.is_empty()):
+		forces_step(dt)
 	env_step(dt)
 	var dead: bool = false
 	for u: Unit in units:
@@ -2285,7 +2406,11 @@ func step(dt: float) -> void:
 				alive.append(u)
 			elif try_revive(u):
 				alive.append(u)
+			elif rise_dead(u):
+				alive.append(u)
 			else:
+				if u == possessed:
+					possessed = null
 				on_death(u)
 		units = alive
 
@@ -2339,7 +2464,7 @@ func env_step(dt: float) -> void:
 		var t: int = world.tile[i]
 		var x: int = i % W
 		var y: int = i / W
-		if laws["growth"] and not dry and (t == GuData.GRASS or t == GuData.STEP) and world.feat[i] == 0 and world.bmap[i] < 0:
+		if laws["growth"] and laws["trees"] and not dry and (t == GuData.GRASS or t == GuData.STEP) and world.feat[i] == 0 and world.bmap[i] < 0:
 			var near: int = 0
 			for dd: int in [2, 5]:
 				if x >= dd and GuData.is_tree(world.feat[i - dd]):
@@ -2353,10 +2478,10 @@ func env_step(dt: float) -> void:
 			if (near > 0 and randf() < 0.012 * grow) or randf() < 0.0004 * grow:
 				world.feat[i] = plant_for(i)
 				world.mark_area(x, y)
-		elif t == GuData.SOIL and not dry and world.bmap[i] < 0 and randf() < 0.08:
+		elif t == GuData.SOIL and laws["grass"] and not dry and world.bmap[i] < 0 and randf() < 0.08:
 			world.tile[i] = land_for(i)
 			world.mark_dirty(x, y)
-		elif t == GuData.ASH and randf() < 0.05:
+		elif t == GuData.ASH and laws["grass"] and randf() < 0.05:
 			world.tile[i] = GuData.SOIL
 			world.mark_dirty(x, y)
 		elif t == GuData.SNOW and world.temp_snow[i] > 0 and not snow and randf() < 0.3:
@@ -2398,6 +2523,15 @@ func reset_state() -> void:
 	log_entries.clear()
 	fire.clear()
 	places.clear()
+	lava.clear()
+	volcs.clear()
+	storms.clear()
+	acids.clear()
+	goo.clear()
+	goo_left = 0
+	mines = PackedInt32Array()
+	seeds.clear()
+	possessed = null
 	next_pid = 1
 	sim_time = 0.0
 	last_month = 0
@@ -2550,7 +2684,10 @@ func serialize() -> Dictionary:
 	for p: Place in places:
 		if p.alive:
 			ps.append(p.to_dict())
-	return {"v": 2, "seed": seed_val, "sim_time": sim_time, "next_id": next_id, "map_mode": world.map_mode, "places": ps, "next_pid": next_pid,
+	var lv: Array = []
+	for i: int in lava.keys():
+		lv.append([i, snappedf(float(lava[i]), 0.01)])
+	return {"v": 3, "lava": lv, "mines": Array(mines), "layer": world.layer, "seed": seed_val, "sim_time": sim_time, "next_id": next_id, "map_mode": world.map_mode, "places": ps, "next_pid": next_pid,
 		"tile": Marshalls.raw_to_base64(world.tile), "feat": Marshalls.raw_to_base64(world.feat), "region": Marshalls.raw_to_base64(world.region),
 		"hgt": Marshalls.raw_to_base64(hb), "ts": Marshalls.raw_to_base64(world.temp_snow),
 		"units": us, "villages": vs, "clans": cs, "buildings": bs, "laws": laws, "log": log_entries.slice(0, 120), "fire": fr}
@@ -2558,7 +2695,7 @@ func serialize() -> Dictionary:
 
 func deserialize(d: Dictionary) -> bool:
 	var ver: int = int(d.get("v", 0))
-	if ver != 1 and ver != 2:
+	if ver < 1 or ver > 3:
 		return false
 	reset_state()
 	world.alloc()
@@ -2596,6 +2733,14 @@ func deserialize(d: Dictionary) -> bool:
 		log_entries.append(e)
 	for e: Array in d["fire"]:
 		fire[int(e[0])] = float(e[1])
+	for e: Array in d.get("lava", []):
+		lava[int(e[0])] = float(e[1])
+	for e: Variant in d.get("mines", []):
+		mines.append(int(e))
+	world.layer = int(d.get("layer", 0))
+	for i: int in range(N):
+		if world.tile[i] == GuData.LAVA and not lava.has(i):
+			lava[i] = 0.3
 	for b: Building in buildings:
 		if b == null:
 			continue
@@ -2982,7 +3127,7 @@ func earthly_calamity(u: Unit) -> void:
 	later(1.3, func() -> void:
 		if u.hp <= 0.0:
 			return
-		var dies: bool = not u.notrib and randf() < 0.04 + 0.03 * (u.rank - 6)
+		var dies: bool = not u.notrib and u.prot <= sim_time and randf() < 0.04 + 0.03 * (u.rank - 6)
 		if dies and use_fortune(u):
 			dies = false
 		if dies:
@@ -3276,3 +3421,1093 @@ func _place_tick(p: Place) -> void:
 			for u: Unit in near_units(p.x, p.y, r):
 				if u.k == "p" and u.rank >= 7:
 					u.duel_t = sim_time + 1.5
+
+
+# =====================================================================
+# Gottkräfte-Parität (WorldBox): Lava und Erdfeuer-Vulkane, Wirbel, Giftregen, Gu-Schwarm, Minen,
+# Biom-Samen, Mordzug-Leiter, Schicksals-Münze, Leichen-Seuche, Besessenheit, Loyalität und Aufstände,
+# Pläne, Straßen, zufällige Katastrophen
+# =====================================================================
+
+const _N4X: PackedInt32Array = [1, -1, 0, 0]
+const _N4Y: PackedInt32Array = [0, 0, 1, -1]
+
+
+## Seltene Zustände eines Wesens (Unit.fxm gesetzt): gehalten, fliegend, eingefroren, angesteckt, Merker.
+## true = dieser Schritt ist für das Wesen beendet.
+func _special(u: Unit, dt: float, t: int) -> bool:
+	if u.held:
+		return true
+	if u.air > 0.0:
+		_air_step(u, dt)
+		return true
+	var on: bool = false
+	if u.bless != 0 or u.boat or u.poss or u.zin > 0.0 or u.prot > sim_time:
+		_marks(u, dt, t)
+		on = true
+	if u.zin > 0.0 and sim_time >= u.zin and u.k == "p":
+		raise_undead(u)
+	if u.frz > sim_time:
+		u.moving = false
+		if randf() < dt * 3.0:
+			parts.append({"x": u.x + (randf() - 0.5) * 2.0, "y": u.y - randf() * 3.0, "vx": 0.0, "vy": -0.5, "l": 0.5, "ml": 0.5, "c": Color("#d8f4ff"), "s": 0.6, "g": 0.0})
+		return true
+	if not on:
+		u.fxm = false
+	return false
+
+
+## Sichtbare Merker über Wesen (Segen, Fluch, Himmelsschutz, Besessenheit, Ansteckung) und Boote.
+func _marks(u: Unit, dt: float, t: int) -> void:
+	if u.boat:
+		if t <= GuData.SHAL:
+			var bc: Color = Color("#7a4a26")
+			for bx: float in [-1.6, -0.5, 0.6]:
+				parts.append({"x": u.x + bx, "y": u.y - 0.7, "vx": 0.0, "vy": 0.0, "l": 0.09, "ml": 0.09, "c": bc, "s": 1.1, "g": 0.0})
+			parts.append({"x": u.x - 0.6, "y": u.y - 0.1, "vx": 0.0, "vy": 0.0, "l": 0.09, "ml": 0.09, "c": bc.darkened(0.3), "s": 1.1, "g": 0.0})
+		elif not u.has_col_target() and t != GuData.WALL:
+			u.boat = false
+	if randf() > dt * 3.0:
+		return
+	var c: Color
+	if u.poss:
+		c = Color("#c070ff")
+	elif u.zin > 0.0:
+		c = Color("#86e04a")
+	elif u.bless > 0:
+		c = Color("#ffe27a")
+	elif u.bless < 0:
+		c = Color("#5a2a6a")
+	elif u.prot > sim_time:
+		c = Color("#bfe8ff")
+	else:
+		return
+	var down: bool = u.bless < 0 and not u.poss and u.zin <= 0.0
+	parts.append({"x": u.x + (randf() - 0.5) * 2.0, "y": u.y - (5.0 if down else 6.5) - randf(), "vx": 0.0, "vy": 1.6 if down else -1.8, "l": 0.6, "ml": 0.6, "c": c, "s": 0.6, "g": 0.0})
+
+
+## Durch die Luft geschleudert (Wirbel, Druckwelle): fliegt, landet mit Schaden.
+func _air_step(u: Unit, dt: float) -> void:
+	u.air -= dt
+	var nx: float = clampf(u.x + u.kvx * dt, 0.5, W - 0.5)
+	var ny: float = clampf(u.y + u.kvy * dt, 0.5, H - 0.5)
+	if world.tile[int(ny) * W + int(nx)] == GuData.WALL and u.rank < 6:
+		u.air = 0.0
+	else:
+		u.x = nx
+		u.y = ny
+	u.tx = u.x
+	u.ty = u.y
+	u.moving = true
+	if randf() < 0.4:
+		parts.append({"x": u.x, "y": u.y - 1.0, "vx": 0.0, "vy": 0.0, "l": 0.3, "ml": 0.3, "c": Color(0.85, 0.8, 0.7, 0.6), "s": 0.8, "g": 0.0})
+	if u.air <= 0.0:
+		u.air = 0.0
+		hurt(u, 4.0 + u.mhp * 0.12, null)
+		puff(u.x, u.y, Color("#c8b89a"), 3)
+
+
+## Schleudert ein Wesen von (cx, cy) weg. Unsterbliche und Ödbestien stemmen sich dagegen.
+func fling(u: Unit, cx: float, cy: float, pw: float, swirl: float = 0.0) -> void:
+	if u.held or u.hp <= 0.0 or (u.k == "a" and u.rank >= 6):
+		return
+	var d: Vector2 = Vector2(u.x - cx, u.y - cy)
+	if d.length() < 0.05:
+		d = Vector2.from_angle(randf() * TAU)
+	d = d.normalized()
+	d = d.rotated(swirl)
+	if u.rank >= 6:
+		pw *= 0.25
+	u.kvx = d.x * pw
+	u.kvy = d.y * pw
+	u.air = 0.12 + randf() * 0.12
+	u.fxm = true
+	u.tgt = null
+	u.st = "idle"
+
+
+## Ein Ort ohne Wasser, Wand und Lava? (für Katastrophen-Ziele)
+func _solid(i: int) -> bool:
+	var t: int = world.tile[i]
+	return GuData.is_land(t) and t != GuData.WALL and t != GuData.LAVA
+
+
+## Ändert das Gelände ohne Wasser-Neuberechnung (für viele kleine Änderungen wie erstarrende Lava im Meer).
+func _raw_tile(i: int, t: int) -> void:
+	world.tile[i] = t
+	world.hgt[i] = maxf(world.hgt[i], GuData.DEFH[t])
+	world.temp_snow[i] = 0
+	world.feat[i] = 0
+	world.mark_area(i % W, i / W)
+	_after_set_tile(i)
+
+
+## Taut zugefrorenes Wasser oder Schnee auf (Frostodem, Sonnenstrahl).
+func thaw(i: int) -> void:
+	if world.tile[i] == GuData.SNOW and world.temp_snow[i] > 0:
+		world.tile[i] = world.temp_snow[i] - 1
+		world.temp_snow[i] = 0
+		world.mark_dirty(i % W, i / W)
+		_after_set_tile(i)
+	elif world.tile[i] == GuData.SNOW:
+		set_tile(i, land_for(i))
+
+
+# ---------------- Lava und Erdfeuer-Vulkan ----------------
+
+func set_lava(j: int, h: float) -> void:
+	var t: int = world.tile[j]
+	if t == GuData.WALL:
+		return
+	if GuData.is_water(t) or (t == GuData.SNOW and world.temp_snow[j] in [1, 2]):
+		_raw_tile(j, GuData.HILL)
+		return
+	if t != GuData.LAVA:
+		if GuData.is_tree(world.feat[j]):
+			ignite(j, 1.0)
+		world.tile[j] = GuData.LAVA
+		world.temp_snow[j] = 0
+		world.feat[j] = 0
+		fire.erase(j)
+		world.mark_area(j % W, j / W)
+		_after_set_tile(j)
+	lava[j] = maxf(float(lava.get(j, 0.0)), h)
+
+
+## Lava erkaltet zu dunklem Fels (Hügel, manchmal mit Felsbrocken).
+func cool_lava(i: int) -> void:
+	lava.erase(i)
+	if world.tile[i] != GuData.LAVA:
+		return
+	set_tile(i, GuData.HILL)
+	if randf() < 0.12:
+		world.feat[i] = GuData.F_ROCK
+	if randf() < 0.1:
+		puff(i % W + 0.5, i / W, Color(0.5, 0.5, 0.5, 0.6), 1)
+
+
+func lava_tick() -> void:
+	var add: Dictionary = {}
+	var cool: Array[int] = []
+	var big: bool = lava.size() > 2400
+	for i: int in lava.keys():
+		var h: float = float(lava[i]) - 0.022
+		var x: int = i % W
+		var y: int = i / W
+		if h > 0.3 and not big and randf() < 0.55:
+			var k: int = randi() % 4
+			var xx: int = x + _N4X[k]
+			var yy: int = y + _N4Y[k]
+			if world.in_map(xx, yy):
+				var j: int = yy * W + xx
+				var tj: int = world.tile[j]
+				if tj != GuData.WALL and tj != GuData.LAVA and not add.has(j) and world.hgt[j] <= world.hgt[i] + 0.015:
+					if GuData.is_water(tj):
+						_raw_tile(j, GuData.HILL)
+						for q: int in range(2):
+							parts.append({"x": xx + randf(), "y": yy - randf(), "vx": (randf() - 0.5) * 2.0, "vy": -4.0, "l": 0.9, "ml": 0.9, "c": Color(0.92, 0.95, 1.0, 0.7), "s": 1.2, "g": 0.0})
+						h -= 0.25
+					else:
+						add[j] = h * 0.85
+						h -= 0.06
+		if randf() < 0.06:
+			var k2: int = randi() % 4
+			var x2: int = x + _N4X[k2]
+			var y2: int = y + _N4Y[k2]
+			if world.in_map(x2, y2):
+				ignite(y2 * W + x2, 1.0)
+		if randf() < 0.012:
+			parts.append({"x": x + randf(), "y": y, "vx": 0.0, "vy": -2.5, "l": 0.7, "ml": 0.7, "c": Color("#ffd27a"), "s": 0.6, "g": 0.0})
+		if h <= 0.0:
+			cool.append(i)
+		else:
+			lava[i] = h
+	for i2: int in cool:
+		cool_lava(i2)
+	for j2: int in add.keys():
+		set_lava(j2, add[j2])
+
+
+## Erdfeuer-Vulkan: türmt einen Kegel auf und speit einige Monate lang Lava, Lavabomben, Asche und Rauch.
+func volcano(x: float, y: float) -> void:
+	var cx: int = clampi(int(x), 7, W - 8)
+	var cy: int = clampi(int(y), 7, H - 8)
+	for dy: int in range(-6, 7):
+		for dx: int in range(-6, 7):
+			var d: float = sqrt(float(dx * dx + dy * dy))
+			if d > 6.4:
+				continue
+			var i: int = (cy + dy) * W + cx + dx
+			var t: int = world.tile[i]
+			if t == GuData.WALL:
+				continue
+			if d <= 1.5:
+				if GuData.is_water(t):
+					set_tile(i, GuData.HILL)
+				set_lava(i, 2.5)
+			elif d <= 3.6:
+				set_tile(i, GuData.MOUNT)
+				world.feat[i] = 0
+			elif t != GuData.MOUNT:
+				set_tile(i, GuData.HILL)
+				if world.feat[i] != 0 and world.feat[i] != GuData.F_ORE:
+					world.feat[i] = 0
+			world.hgt[i] = 0.99 - d * 0.045
+	volcs.append({"x": cx + 0.5, "y": cy + 0.5, "t": 6.0 + randf() * 3.0})
+	shake = minf(1.2, shake + 0.8)
+	ring(cx + 0.5, cy + 0.5, 10.0, Color("#ff7a2e"), 1.0)
+	log_event("Ein Erdfeuer-Vulkan bricht in " + GuData.REGN_DAT[region_at(x, y)] + " aus!", "war", true)
+
+
+func _volc_tick(vo: Dictionary) -> void:
+	vo["t"] = float(vo["t"]) - 0.15
+	var x: float = vo["x"]
+	var y: float = vo["y"]
+	var cx: int = int(x)
+	var cy: int = int(y)
+	for dy: int in range(-1, 2):
+		for dx: int in range(-1, 2):
+			var i: int = (cy + dy) * W + cx + dx
+			if world.tile[i] != GuData.WALL:
+				set_lava(i, 2.2)
+	# Lavabomben fliegen im Bogen und schlagen ein
+	if randf() < 0.5:
+		var a: float = randf() * TAU
+		var d: float = 4.0 + randf() * 11.0
+		var tx: float = x + cos(a) * d
+		var ty: float = y + sin(a) * d * 0.8
+		var T: float = 0.7
+		parts.append({"x": x, "y": y - 3.0, "vx": (tx - x) / T, "vy": (ty - y + 3.0) / T - 15.0 * T, "l": T, "ml": T, "c": Color("#ff9a2a"), "s": 1.3, "g": 30.0})
+		later(T, func() -> void:
+			var ix: int = int(tx)
+			var iy: int = int(ty)
+			if world.in_map(ix, iy):
+				boom(tx, ty, 1.8, 35.0, {"burn": 0.5, "c": Color("#ff7a2e")})
+				set_lava(iy * W + ix, 0.9))
+	for k: int in range(3):
+		parts.append({"x": x + (randf() - 0.5) * 2.0, "y": y - 3.0, "vx": (randf() - 0.3) * 2.0, "vy": -5.0 - randf() * 4.0, "l": 2.2, "ml": 1.2, "c": Color(0.3, 0.27, 0.26, 0.7), "s": 2.0 + randf() * 1.5, "g": 0.0})
+	spark(x, y - 2.0, Color("#ffb43a"), 2, 6.0)
+	# Asche regnet auf das Umland
+	var ai: int = clampi(int(y + (randf() - 0.5) * 24.0), 0, H - 1) * W + clampi(int(x + (randf() - 0.5) * 24.0), 0, W - 1)
+	var at: int = world.tile[ai]
+	if (at == GuData.GRASS or at == GuData.STEP or at == GuData.SOIL) and world.bmap[ai] < 0 and randf() < 0.5:
+		world.tile[ai] = GuData.ASH
+		if world.feat[ai] == GuData.F_TUFT or world.feat[ai] == GuData.F_FLOWER:
+			world.feat[ai] = 0
+		world.mark_area(ai % W, ai / W)
+	if randf() < 0.1:
+		shake = minf(0.5, shake + 0.2)
+
+
+# ---------------- Wirbel, Giftregen, Minen ----------------
+
+func tornado(x: float, y: float, quiet: bool = false) -> void:
+	if storms.size() >= 5:
+		storms.pop_front()
+	storms.append({"x": x, "y": y, "a": randf() * TAU, "t": 4.0 + randf() * 2.0})
+	if not quiet:
+		log_event("Ein Windpfad-Wirbel fegt über " + GuData.REGN_IN[region_at(x, y)] + ".", "war", true)
+
+
+func acid_rain(x: float, y: float, quiet: bool = false) -> void:
+	if acids.size() >= 5:
+		acids.pop_front()
+	acids.append({"x": x, "y": y, "a": randf() * TAU, "t": 4.0})
+	if not quiet:
+		log_event("Giftregen des Gift-Pfades zieht über " + GuData.REGN_IN[region_at(x, y)] + ".", "war", true)
+
+
+func add_mine(i: int) -> void:
+	if mines.size() < 150 and not mines.has(i) and _solid(i):
+		mines.append(i)
+
+
+var _mine_acc: int = 0
+
+
+func forces_step(dt: float) -> void:
+	var k: int = storms.size() - 1
+	while k >= 0:
+		var s: Dictionary = storms[k]
+		s["t"] = float(s["t"]) - dt
+		s["a"] = float(s["a"]) + (randf() - 0.5) * dt * 8.0
+		var x: float = float(s["x"]) + cos(float(s["a"])) * 7.0 * dt
+		var y: float = float(s["y"]) + sin(float(s["a"])) * 7.0 * dt
+		if float(s["t"]) <= 0.0 or x < 1 or y < 1 or x >= W - 1 or y >= H - 1:
+			storms.remove_at(k)
+			k -= 1
+			continue
+		s["x"] = x
+		s["y"] = y
+		_storm(x, y, dt)
+		k -= 1
+	k = acids.size() - 1
+	while k >= 0:
+		var c: Dictionary = acids[k]
+		c["t"] = float(c["t"]) - dt
+		c["a"] = float(c["a"]) + (randf() - 0.5) * dt * 2.0
+		var ax: float = clampf(float(c["x"]) + cos(float(c["a"])) * 2.5 * dt, 2.0, W - 2.0)
+		var ay: float = clampf(float(c["y"]) + sin(float(c["a"])) * 2.5 * dt, 2.0, H - 2.0)
+		if float(c["t"]) <= 0.0:
+			acids.remove_at(k)
+			k -= 1
+			continue
+		c["x"] = ax
+		c["y"] = ay
+		_acid(ax, ay, dt)
+		k -= 1
+	if mines.is_empty():
+		return
+	_mine_acc += 1
+	if _mine_acc % 2 != 0:
+		return
+	var mi: int = mines.size() - 1
+	while mi >= 0:
+		var i: int = mines[mi]
+		var mx: float = i % W + 0.5
+		var my: float = i / W + 0.5
+		if randf() < 0.03:
+			parts.append({"x": mx - 0.3, "y": my - 0.6, "vx": 0.0, "vy": 0.0, "l": 0.25, "ml": 0.25, "c": Color("#ff3a2a"), "s": 0.7, "g": 0.0})
+		var hit: bool = not _solid(i)
+		if not hit:
+			for u: Unit in near_units(mx, my, 1.2):
+				if not u.fly and not u.held and u.air <= 0.0:
+					hit = true
+					break
+		if hit:
+			mines.remove_at(mi)
+			if _solid(i):
+				boom(mx, my, 4.0, 160.0, {"burn": 0.3, "c": Color("#ffd27a")})
+		mi -= 1
+
+
+func _storm(x: float, y: float, dt: float) -> void:
+	var tn: float = sim_time * 40.0
+	var wet: bool = GuData.is_water(world.tile[int(y) * W + int(x)])
+	# Trichter: je Höhenstufe ein kreisendes Teilchen, unten Staub (über Wasser Gischt)
+	var h: float = 0.0
+	while h < 19.0:
+		var rad: float = 0.4 + h * h * 0.018 + h * 0.08
+		var an: float = tn * (1.0 + h * 0.03) + h * 0.9 + randf() * 0.6
+		var lite: bool = int(h * 2.0) % 3 != 0
+		var col: Color = (Color(0.86, 0.94, 1.0, 0.95) if lite else Color(0.55, 0.7, 0.85, 0.95)) if wet else (Color(0.88, 0.89, 0.9, 0.95) if lite else Color(0.55, 0.57, 0.6, 0.95))
+		if h < 3.0 and not wet:
+			col = Color(0.62, 0.52, 0.38, 0.95)
+		for side: float in [0.0, PI]:
+			parts.append({"x": x + cos(an + side) * rad - 0.5, "y": y - h + sin(an + side) * rad * 0.2, "vx": -sin(an + side) * minf(rad, 3.0), "vy": 0.0, "l": 0.25, "ml": 0.12, "c": col, "s": 1.0 + h * 0.06, "g": 0.0})
+		h += 1.2
+	if randf() < 0.6:
+		var a2: float = randf() * TAU
+		parts.append({"x": x + cos(a2) * 2.5, "y": y + sin(a2) * 0.8, "vx": cos(a2) * 4.0, "vy": -1.0, "l": 0.5, "ml": 0.5, "c": Color(0.62, 0.52, 0.38, 0.8) if not wet else Color(0.86, 0.94, 1.0, 0.8), "s": 1.0, "g": 0.0})
+	for u: Unit in near_units(x, y, 3.2):
+		if u.air <= 0.0 and not u.held:
+			fling(u, x, y, 45.0 + randf() * 35.0, 1.2)
+			hurt(u, 3.0, null)
+	for q2: int in range(3):
+		var tx: int = int(x + (randf() - 0.5) * 6.0)
+		var ty: int = int(y + (randf() - 0.5) * 6.0)
+		if not world.in_map(tx, ty):
+			continue
+		var i: int = ty * W + tx
+		var f: int = world.feat[i]
+		if (GuData.is_tree(f) or f == GuData.F_SHRUB or f == GuData.F_TUFT or f == GuData.F_FLOWER) and randf() < 0.5:
+			world.feat[i] = 0
+			world.mark_area(tx, ty)
+			for q3: int in range(3):
+				parts.append({"x": tx + 0.5, "y": ty - 3.0, "vx": (randf() - 0.5) * 14.0, "vy": -6.0 - randf() * 6.0, "l": 0.8, "ml": 0.8, "c": Color("#5a8a32"), "s": 0.7, "g": 8.0})
+		var bi: int = world.bmap[i]
+		if bi >= 0 and buildings[bi] != null:
+			buildings[bi].hp -= 260.0 * dt
+			if buildings[bi].hp <= 0.0:
+				remove_building(buildings[bi])
+		if fire.has(i):
+			ignite(clampi(i + (randi() % 3 - 1) * (1 + W * (randi() % 2)), 0, N - 1), 1.0)
+
+
+func _acid(x: float, y: float, dt: float) -> void:
+	# Wolke aus dicken Ballen, darunter grüner Regen
+	for q: int in range(5):
+		var cx: float = x + (randf() - 0.5) * 14.0
+		var top: float = absf(cx - x) / 7.0
+		parts.append({"x": cx, "y": y - 14.0 + top * 2.0 + (randf() - 0.5) * 2.5, "vx": 0.6, "vy": 0.0, "l": 0.7, "ml": 0.3, "c": Color(0.36, 0.42, 0.2, 0.95) if randf() < 0.6 else Color(0.62, 0.72, 0.3, 0.95), "s": 2.6 + randf() * 1.6, "g": 0.0})
+	for q2: int in range(5):
+		parts.append({"x": x + (randf() - 0.5) * 12.0, "y": y - 11.0, "vx": -1.0, "vy": 22.0, "l": 0.5, "ml": 0.25, "c": Color(0.7, 1.0, 0.3, 1.0), "s": 0.6, "g": 0.0})
+	for q3: int in range(3):
+		var tx: int = int(x + (randf() - 0.5) * 14.0)
+		var ty: int = int(y + (randf() - 0.5) * 12.0)
+		if not world.in_map(tx, ty):
+			continue
+		var i: int = ty * W + tx
+		var t: int = world.tile[i]
+		fire.erase(i)
+		if (t == GuData.GRASS or t == GuData.STEP) and world.bmap[i] < 0 and randf() < 0.6:
+			world.tile[i] = GuData.SOIL
+			world.mark_dirty(tx, ty)
+		var f: int = world.feat[i]
+		if f != 0 and f != GuData.F_ORE and f != GuData.F_ROCK and f != GuData.F_SPRING and f != GuData.F_ROAD and randf() < 0.25:
+			world.feat[i] = GuData.F_SHRUB if GuData.is_tree(f) and randf() < 0.4 else 0
+			world.mark_area(tx, ty)
+		var bi: int = world.bmap[i]
+		if bi >= 0 and buildings[bi] != null:
+			buildings[bi].hp -= 40.0 * dt
+			if buildings[bi].hp <= 0.0:
+				remove_building(buildings[bi])
+	for u: Unit in near_units(x, y, 7.0):
+		if u.beh == GuData.B_IGU:
+			continue
+		hurt(u, (2.5 + u.mhp * 0.06) * dt * (0.15 if u.rank >= 3 else 1.0), null)
+		if u.hp <= 0.0 and u.k == "p" and u.dreason == "":
+			u.dreason = "Giftregen"
+
+
+# ---------------- Verzehrender Gu-Schwarm, Biom-Samen ----------------
+
+func goo_swarm(x: float, y: float) -> void:
+	goo_left = mini(goo_left + 1400, 4000)
+	var i0: int = clampi(int(y), 0, H - 1) * W + clampi(int(x), 0, W - 1)
+	for k: int in range(5):
+		goo.append({"i": clampi(i0 + randi_range(-2, 2) + randi_range(-2, 2) * W, 0, N - 1), "e": 4})
+	log_event("Ein Verzehrender Gu-Schwarm schlüpft in " + GuData.REGN_DAT[region_at(x, y)] + " und frisst das Land.", "war", true)
+
+
+func _goo_tick() -> void:
+	var nxt: Array[Dictionary] = []
+	var seen: Dictionary = {}
+	for c: Dictionary in goo:
+		var i: int = c["i"]
+		if not _solid(i) or goo_left <= 0:
+			continue
+		var x: int = i % W
+		var y: int = i / W
+		var t: int = world.tile[i]
+		if t != GuData.ASH:
+			set_tile(i, GuData.HILL if t == GuData.MOUNT else GuData.ASH)
+			goo_left -= 1
+		if world.feat[i] != 0:
+			world.feat[i] = 0
+			world.mark_area(x, y)
+		var bi: int = world.bmap[i]
+		if bi >= 0 and buildings[bi] != null:
+			remove_building(buildings[bi])
+		fire.erase(i)
+		if randf() < 0.35:
+			for u: Unit in near_units(x + 0.5, y + 0.5, 1.6):
+				if u.beh != GuData.B_IGU:
+					u.dreason = "vom Gu-Schwarm verzehrt"
+					hurt(u, 30.0 + u.mhp * 0.08, null)
+		for q: int in range(2):
+			parts.append({"x": x + randf(), "y": y + randf() - 0.5, "vx": (randf() - 0.5) * 3.0, "vy": (randf() - 0.5) * 3.0, "l": 0.35, "ml": 0.35, "c": Color("#3a1a4a") if q == 0 else Color("#8a5aa8"), "s": 0.6, "g": 0.0})
+		var e: int = c["e"]
+		if e <= 0:
+			continue
+		var kids: int = 1 + (1 if randf() < 0.45 else 0)
+		for k: int in range(kids):
+			var dx: int = randi_range(-1, 1)
+			var dy: int = randi_range(-1, 1)
+			if not world.in_map(x + dx, y + dy):
+				continue
+			var j: int = (y + dy) * W + x + dx
+			if seen.has(j) or not _solid(j) or world.tile[j] == GuData.ASH:
+				continue
+			seen[j] = true
+			nxt.append({"i": j, "e": e if randf() < 0.85 else e - 1})
+	if nxt.size() > 260:
+		nxt.shuffle()
+		nxt.resize(260)
+	goo = nxt
+	if goo_left <= 0:
+		goo.clear()
+
+
+func plant_seed(x: float, y: float, tt: int) -> void:
+	if seeds.size() >= 8:
+		seeds.pop_front()
+	seeds.append({"x": x, "y": y, "tt": tt, "r": 2.0, "n": 40})
+
+
+func _seed_tick(sd: Dictionary) -> void:
+	sd["n"] = int(sd["n"]) - 1
+	var r: float = minf(15.0, float(sd["r"]) + 0.4)
+	sd["r"] = r
+	var tt: int = sd["tt"]
+	var x: float = sd["x"]
+	var y: float = sd["y"]
+	for k: int in range(10):
+		var a: float = randf() * TAU
+		var d: float = sqrt(randf()) * r
+		var tx: int = int(x + cos(a) * d)
+		var ty: int = int(y + sin(a) * d)
+		if not world.in_map(tx, ty):
+			continue
+		var i: int = ty * W + tx
+		var t: int = world.tile[i]
+		if not _solid(i) or t == GuData.MOUNT or (t == GuData.SAND and tt == GuData.GRASS):
+			continue
+		var f: int = world.feat[i]
+		if t != tt and t != GuData.HILL:
+			if tt == GuData.SNOW and world.bmap[i] < 0:
+				world.temp_snow[i] = 0
+				set_tile(i, GuData.SNOW)
+			elif tt != GuData.SNOW:
+				set_tile(i, tt)
+		var q: float = randf()
+		if tt == GuData.GRASS:
+			if f == 0 and world.bmap[i] < 0 and q < 0.08:
+				world.feat[i] = plant_for(i) if q < 0.05 else GuData.F_FLOWER
+		elif tt == GuData.DES:
+			if GuData.is_tree(f) and q < 0.5:
+				world.feat[i] = GuData.F_SHRUB
+			elif f == 0 and world.bmap[i] < 0 and q < 0.02:
+				world.feat[i] = GuData.F_PALM if q < 0.01 else GuData.F_ROCK
+		elif tt == GuData.SNOW:
+			if GuData.is_tree(f) and f != GuData.F_PINE and q < 0.4:
+				world.feat[i] = GuData.F_PINE
+			elif f == 0 and world.bmap[i] < 0 and q < 0.04:
+				world.feat[i] = GuData.F_PINE
+		world.mark_area(tx, ty)
+	if randf() < 0.6:
+		var pc: Color = Color("#9affb0") if tt == GuData.GRASS else (Color("#ffe0a0") if tt == GuData.DES else Color("#ffffff"))
+		spark(x + (randf() - 0.5) * r, y + (randf() - 0.5) * r, pc, 2, 2.0)
+
+
+func nature_tick() -> void:
+	if not lava.is_empty():
+		lava_tick()
+	var k: int = volcs.size() - 1
+	while k >= 0:
+		_volc_tick(volcs[k])
+		if float(volcs[k]["t"]) <= 0.0:
+			log_event("Der Erdfeuer-Vulkan kommt zur Ruhe.", "info")
+			volcs.remove_at(k)
+		k -= 1
+	if not goo.is_empty():
+		_goo_tick()
+	k = seeds.size() - 1
+	while k >= 0:
+		_seed_tick(seeds[k])
+		if int(seeds[k]["n"]) <= 0:
+			seeds.remove_at(k)
+		k -= 1
+
+
+# ---------------- Mordzug-Leiter (Bomben), Leere, Feuerregen, Schicksals-Münze ----------------
+
+## Druckwelle: Wesen zwischen r0 und r1 werden fortgeschleudert, Bäume knicken, Gebäude bröckeln.
+func shockwave(x: float, y: float, r0: float, r1: float, pw: float) -> void:
+	for u: Unit in near_units(x, y, r1):
+		var d: float = Vector2(u.x - x, u.y - y).length()
+		if d < r0:
+			continue
+		var f: float = 1.0 - (d - r0) / maxf(1.0, r1 - r0)
+		fling(u, x, y, pw * (0.4 + f))
+		hurt(u, 8.0 + 30.0 * f, null)
+	for ty: int in range(floori(y - r1), ceili(y + r1) + 1):
+		for tx: int in range(floori(x - r1), ceili(x + r1) + 1):
+			if not world.in_map(tx, ty):
+				continue
+			var d2: float = Vector2(tx + 0.5 - x, ty + 0.5 - y).length()
+			if d2 < r0 or d2 > r1:
+				continue
+			var i: int = ty * W + tx
+			var f2: float = 1.0 - (d2 - r0) / maxf(1.0, r1 - r0)
+			if GuData.is_tree(world.feat[i]) and randf() < 0.55 * f2:
+				world.feat[i] = 0
+				world.mark_area(tx, ty)
+			var bi: int = world.bmap[i]
+			if bi >= 0 and buildings[bi] != null:
+				buildings[bi].hp -= 120.0 * f2
+				if buildings[bi].hp <= 0.0:
+					remove_building(buildings[bi])
+	ring(x, y, r1, Color(1, 1, 1, 0.9), 1.0)
+	ring(x, y, (r0 + r1) * 0.5, Color("#ffe8b0"), 0.8)
+
+
+## Pilzwolke aus Partikeln (Rang-8- und Ehrwürdigen-Mordzug).
+func mushroom(x: float, y: float, sc: float) -> void:
+	# Stamm: aufsteigende Glut, die zu Rauch wird
+	for k: int in range(int(50 * sc)):
+		var T: float = 1.6 + randf() * 1.2
+		parts.append({"x": x + (randf() - 0.5) * 3.0 * sc, "y": y - randf() * 3.0, "vx": (randf() - 0.5) * 1.2, "vy": -(14.0 + randf() * 6.0) * sc / T, "l": T, "ml": T * 0.4, "c": Color("#ffb43a").lerp(Color("#5a4a44"), randf() * 0.8), "s": 1.5 + randf() * sc, "g": 0.0})
+	# Hut: eine breite, wogende Wolke
+	for k2: int in range(int(70 * sc)):
+		var a: float = randf() * TAU
+		var r: float = sqrt(randf())
+		var T2: float = 2.2 + randf() * 1.4
+		parts.append({"x": x + cos(a) * r * 11.0 * sc, "y": y - 20.0 * sc + sin(a) * r * 5.0 * sc, "vx": cos(a) * 2.0, "vy": -1.5, "l": T2, "ml": T2 * 0.4, "c": Color("#ffd27a").lerp(Color("#9a8a80"), r * 0.9 + randf() * 0.1), "s": 2.0 + randf() * 2.0 * sc, "g": 0.0})
+
+
+## Mordzug-Leiter wie die WorldBox-Bomben: 0 Donnerkugel-Gu, 1 Rang-6-, 2 Rang-8-, 3 Ehrwürdigen-Mordzug.
+func ladder_move(x: float, y: float, tier: int) -> void:
+	match tier:
+		0:
+			boom(x, y, 3.5, 90.0, {"burn": 0.25, "c": Color("#fff27a")})
+		1:
+			fx.append({"k": "txt", "x": x, "y": y - 6.0, "t": "Rang-6-Mordzug", "c": GuData.ESS_COL[6], "l": 1.6, "ml": 1.6})
+			pillar(x, y, GuData.ESS_COL[6], 0.6)
+			later(0.35, func() -> void:
+				boom(x, y, 8.0, 700.0, {"ash": true, "burn": 0.35, "c": GuData.ESS_COL[6]})
+				shockwave(x, y, 8.0, 15.0, 35.0))
+		2:
+			fx.append({"k": "txt", "x": x, "y": y - 8.0, "t": "Rang-8-Mordzug", "c": GuData.ESS_COL[8], "l": 2.0, "ml": 2.0})
+			pillar(x, y, GuData.ESS_COL[8], 1.2)
+			ring(x, y, 18.0, GuData.ESS_COL[8], 0.6)
+			later(0.6, func() -> void:
+				boom(x, y, 17.0, 6000.0, {"ash": true, "lake": true, "burn": 0.5, "c": Color("#fff1d8")})
+				shockwave(x, y, 17.0, 32.0, 55.0)
+				flash(0.5)
+				mushroom(x, y, 1.0)
+				shake = 1.2
+				log_event("Ein Rang-8-Mordzug verwüstet " + GuData.REGN_IN[region_at(x, y)] + ".", "red", true))
+		3:
+			fx.append({"k": "txt", "x": x, "y": y - 10.0, "t": "Ehrwürdigen-Mordzug", "c": GuData.ESS_COL[9], "l": 2.4, "ml": 2.4})
+			pillar(x, y, GuData.ESS_COL[9], 2.0)
+			for k: int in range(3):
+				ring(x, y, 34.0 - k * 9.0, GuData.ESS_COL[9], 0.9)
+			later(0.9, func() -> void:
+				boom(x, y, 32.0, 99999.0, {"ash": true, "lake": true, "burn": 0.6, "c": Color("#ffd24a")})
+				shockwave(x, y, 32.0, 62.0, 80.0)
+				flash(1.0)
+				mushroom(x, y, 2.0)
+				shake = 1.2
+				log_event("Ein Ehrwürdigen-Mordzug löscht einen Teil " + ["der Nordebenen", "der Südgrenze", "der Westwüste", "des Ostmeers", "des Zentralkontinents"][region_at(x, y)] + " aus.", "red", true))
+
+
+## Raum-Pfad: Leere-Mordzug (Antimaterie) – alles im Umkreis wird vom Raum verschlungen, zurück bleibt Meer.
+func void_move(x: float, y: float) -> void:
+	var r: float = 13.0
+	for k: int in range(70):
+		var a: float = randf() * TAU
+		var d: float = r * (1.2 + randf() * 0.5)
+		parts.append({"x": x + cos(a) * d, "y": y + sin(a) * d, "vx": -cos(a) * d / 0.6, "vy": -sin(a) * d / 0.6, "l": 0.6, "ml": 0.6, "c": Color("#7c4dff") if k % 3 else Color("#e8e0ff"), "s": 1.0, "g": 0.0})
+	ring(x, y, r * 1.5, Color("#7c4dff"), 0.6)
+	later(0.6, func() -> void:
+		for u: Unit in near_units(x, y, r):
+			u.dreason = "vom Raum verschlungen"
+			u.hp = 0.0
+		for ty: int in range(floori(y - r), ceili(y + r) + 1):
+			for tx: int in range(floori(x - r), ceili(x + r) + 1):
+				if not world.in_map(tx, ty):
+					continue
+				var d2: float = Vector2(tx + 0.5 - x, ty + 0.5 - y).length()
+				if d2 > r:
+					continue
+				var i: int = ty * W + tx
+				if world.tile[i] == GuData.WALL:
+					continue
+				lava.erase(i)
+				fire.erase(i)
+				world.feat[i] = 0
+				var bi: int = world.bmap[i]
+				if bi >= 0 and buildings[bi] != null:
+					remove_building(buildings[bi], true)
+				set_tile(i, GuData.DEEP if d2 < r * 0.75 else GuData.SHAL)
+		ring(x, y, r, Color("#2a1050"), 0.9)
+		ring(x, y, r * 0.5, Color("#e8e0ff"), 0.6)
+		spark(x, y, Color("#b39dff"), 40, 14.0)
+		flash(0.35)
+		shake = 1.0
+		log_event("Ein Leere-Mordzug des Raum-Pfades reißt ein Loch in " + GuData.REGN_IN[region_at(x, y)] + ".", "red", true))
+
+
+## Feuerregen-Mordzug (Napalm): eine Reihe von Feuereinschlägen, die alles in Brand setzt.
+func napalm(x: float, y: float) -> void:
+	var a: float = randf() * TAU
+	for k: int in range(9):
+		var px: float = x + cos(a) * (k - 4) * 3.2
+		var py: float = y + sin(a) * (k - 4) * 3.2
+		parts.append({"x": px - 20.0, "y": py - 30.0, "vx": 20.0 / (0.1 + k * 0.08), "vy": 30.0 / (0.1 + k * 0.08), "l": 0.1 + k * 0.08, "ml": 0.1 + k * 0.08, "c": Color("#ff7a2e"), "s": 1.4, "g": 0.0})
+		later(0.1 + k * 0.08, func() -> void:
+			if not world.in_map(int(px), int(py)):
+				return
+			boom(px, py, 2.8, 60.0, {"burn": 1.0, "c": Color("#ff7a2e")})
+			for dy: int in range(-3, 4):
+				for dx: int in range(-3, 4):
+					if dx * dx + dy * dy <= 9 and world.in_map(int(px) + dx, int(py) + dy):
+						ignite((int(py) + dy) * W + int(px) + dx, 1.5))
+
+
+## Schicksals-Münze: Das Schicksals-Gu entscheidet – die Hälfte aller Lebewesen stirbt. Gibt die Zahl der Toten zurück.
+func fate_coin() -> int:
+	var live: Array[Unit] = []
+	for u: Unit in units:
+		if u.hp > 0.0 and u.beh != GuData.B_IGU:
+			live.append(u)
+	live.shuffle()
+	var n: int = live.size() / 2
+	for k: int in range(n):
+		var u2: Unit = live[k]
+		u2.dreason = "Schicksals-Münze"
+		u2.hp = 0.0
+		if k < 150:
+			spark(u2.x, u2.y - 2.0, Color("#ffd24a"), 3, 3.0)
+	flash(0.6)
+	shake = 0.6
+	log_event("Die Schicksals-Münze fällt: Das Schicksals-Gu entscheidet über jedes Leben – %d von %d Wesen sterben." % [n, live.size()], "red", true)
+	return n
+
+
+## Erdkatastrophe (Erdbeben): Risse im Boden, Gebäude stürzen ein.
+func quake(x: float, y: float) -> void:
+	shake = 1.3
+	ring(x, y, 18.0, Color("#c9a46a"), 1.1)
+	ring(x, y, 10.0, Color("#c9a46a"), 0.8)
+	for k: int in range(6):
+		var cx: float = x
+		var cy: float = y
+		var a: float = randf() * TAU
+		for s: int in range(26):
+			cx += cos(a)
+			cy += sin(a)
+			a += (randf() - 0.5) * 0.6
+			var tx: int = int(cx)
+			var ty: int = int(cy)
+			if not world.in_map(tx, ty):
+				break
+			var i: int = ty * W + tx
+			var t: int = world.tile[i]
+			if GuData.is_land(t) and t != GuData.WALL and t != GuData.LAVA:
+				if t == GuData.HILL and randf() < 0.5:
+					set_tile(i, GuData.MOUNT)
+				elif t != GuData.MOUNT:
+					set_tile(i, GuData.SOIL)
+				if world.feat[i] != 0 and randf() < 0.6:
+					world.feat[i] = 0
+					world.mark_area(tx, ty)
+	for b: Building in buildings:
+		if b != null and Vector2(b.x + b.w / 2.0 - x, b.y + b.h / 2.0 - y).length() < 18.0:
+			b.hp -= 120.0 if b.type == "hall" else 70.0
+			if b.hp <= 0.0:
+				remove_building(b)
+	for u: Unit in near_units(x, y, 18.0):
+		if not u.fly:
+			hurt(u, 8.0, null)
+
+
+# ---------------- Leichen-Seuche ----------------
+
+func _make_undead(u: Unit) -> void:
+	u.undead = true
+	u.rogue = true
+	u.vil = -1
+	u.clan = -1
+	u.job = ""
+	u.st = "idle"
+	u.militia = false
+	u.col_to = Vector2(-1, -1)
+	u.col_clan = -1
+	u.boat = false
+	u.zin = -1.0
+	u.luck = 0.0
+	u.bless = 0
+	u.sick = 9999.0
+	u.tgt = null
+	u.life = uage(u) + 4.0 + randf() * 4.0
+	set_stats(u, true)
+	float_txt(u, "Wandelnde Leiche", Color("#86e04a"))
+	puff(u.x, u.y - 1.0, Color("#86e04a"), 4)
+
+
+## Angesteckter Lebender verwandelt sich.
+func raise_undead(u: Unit) -> void:
+	if u.undead or u.rank >= 6:
+		u.zin = -1.0
+		return
+	_make_undead(u)
+
+
+## Ein Angesteckter stirbt und erhebt sich als Leiche. true = lebt (untot) weiter.
+func rise_dead(u: Unit) -> bool:
+	if u.k != "p" or u.undead or u.zin <= 0.0 or u.rank >= 6 or u.dreason in ["göttliche Auslöschung", "Schicksals-Münze", "vom Raum verschlungen"]:
+		return false
+	u.dreason = ""
+	_make_undead(u)
+	return true
+
+
+func undead_think(u: Unit) -> void:
+	if u.tgt != null and u.tgt.hp > 0.0:
+		return
+	var e: Unit = nearest(u, 14.0, func(o: Unit) -> bool: return o.k == "p" and not o.undead)
+	if e != null:
+		u.tgt = e
+		return
+	if randf() < 0.35:
+		var v: Village = nearest_village(u.x, u.y, 70.0)
+		if v != null:
+			go_to(u, v.cx + randf() * 8.0 - 4.0, v.cy + randf() * 6.0 - 3.0)
+			return
+	wander(u, 10.0)
+
+
+# ---------------- Seelenbesitz ----------------
+
+func set_possessed(u: Unit) -> void:
+	if possessed != null:
+		possessed.poss = false
+	possessed = u
+	if u != null:
+		u.poss = true
+		u.fxm = true
+		u.st = "idle"
+		u.tgt = null
+		u.tx = u.x
+		u.ty = u.y
+		pillar(u.x, u.y, Color("#c070ff"), 0.5)
+
+
+## Besessene Wesen denken nicht selbst; nur wer am Ziel steht, wehrt sich gegen Feinde in Reichweite.
+func poss_think(u: Unit) -> void:
+	if u.tgt != null or u.moving:
+		return
+	var e: Unit = nearest(u, maxf(u.rng, 3.0) + 2.0, func(o: Unit) -> bool: return hostile(u, o))
+	if e != null:
+		u.tgt = e
+
+
+# ---------------- Pläne, Loyalität, Aufstände, Straßen ----------------
+
+func has_plan(c: Clan, k: String, o: int) -> bool:
+	for p: Dictionary in c.plans:
+		if str(p["k"]) == k and int(p["o"]) == o:
+			return true
+	return false
+
+
+## Ein Clan plant Krieg oder Bündnis und handelt erst nach einigen Monaten.
+func add_plan(c: Clan, k: String, o: Clan, months: float) -> void:
+	if c.plans.size() >= 4 or o == null or o == c:
+		return
+	c.plans.append({"k": k, "o": o.id, "t": sim_time + months, "s": sim_time})
+	if not presim:
+		if k == "war":
+			log_event(c.name + " schmiedet Kriegspläne gegen " + o.name + ".", "war")
+		else:
+			log_event(c.name + " sendet Gesandte zu " + o.name + " – ein Bündnis wird vorbereitet.", "jade")
+
+
+func run_plans(c: Clan) -> void:
+	var i: int = c.plans.size() - 1
+	while i >= 0:
+		var p: Dictionary = c.plans[i]
+		var oi: int = int(p["o"])
+		var o: Clan = clans[oi] if oi >= 0 and oi < clans.size() else null
+		var war: bool = str(p["k"]) == "war"
+		var ok: bool = o != null and o.alive and o != c
+		if ok:
+			ok = (laws["war"] and not c.ally.has(oi) and not c.war.has(oi)) if war else (laws["diplo"] and not c.war.has(oi) and not c.ally.has(oi))
+		if not ok:
+			c.plans.remove_at(i)
+		elif sim_time >= float(p["t"]):
+			c.plans.remove_at(i)
+			if war:
+				declare_war(c, o)
+			else:
+				make_ally(c, o)
+		i -= 1
+
+
+const REBEL_MSG: PackedStringArray = [
+	"Die Ältesten von %s klagen, die Ursteine flössen nur noch in die Hauptstadt: Das Dorf sagt sich von %s los und wird zu %s.",
+	"Verrat in %s! Die Gu-Meister schwören %s ab und gründen %s – das Clan-Oberhaupt schwört Rache.",
+	"Fern vom Clan-Oberhaupt und müde vom Krieg fällt %s von %s ab. Fortan herrscht dort %s.",
+]
+
+
+## Ein Dorf sagt sich von seinem Clan los und gründet einen eigenen (mit Fehde gegen den alten Clan).
+func rebel(v: Village) -> Clan:
+	var c: Clan = clans[v.clan]
+	var L: Unit = v.lead
+	var sur: String = L.sur if (L != null and L.sur != "") else rand_sur(v.reg)
+	var nc: Clan = new_clan(v.reg, sur, v.race)
+	nc.align = L.align if (L != null and L.rank > 0) else c.align
+	v.clan = nc.id
+	nc.cap = v.id
+	v.loy = 90.0
+	v.capt = -999.0
+	for u: Unit in units:
+		if u.k == "p" and u.vil == v.id:
+			u.clan = nc.id
+			u.militia = false
+	var msg: String
+	if nc.align == 1 and c.align == 0:
+		msg = "In %s flüstert man vom dämonischen Pfad: Das Dorf verlässt %s und nennt sich %s." % [v.name, c.name, nc.name]
+	else:
+		msg = REBEL_MSG[randi() % REBEL_MSG.size()] % [v.name, c.name, nc.name]
+	log_event(msg, "war", true)
+	declare_war(nc, c, true)
+	terr_dirty = true
+	return nc
+
+
+## Monatlich: Loyalität jedes Dorfes (Entfernung zur Hauptstadt, Kriegsmüdigkeit, Stärke des Clan-Oberhaupts …) und Aufstände.
+func loyalty_month() -> void:
+	var nv: Dictionary = {}
+	for v: Village in villages:
+		if v.alive:
+			nv[v.clan] = int(nv.get(v.clan, 0)) + 1
+	var rebels: Array[Village] = []
+	for v: Village in villages:
+		if not v.alive:
+			continue
+		var c: Clan = clans[v.clan]
+		if c.cap == v.id or c.cap < 0 or c.cap >= villages.size():
+			v.loy = 100.0
+			continue
+		var cv: Village = villages[c.cap]
+		var target: float = 82.0
+		target -= minf(36.0, Vector2(v.cx - cv.cx, v.cy - cv.cy).length() * 0.3)
+		target -= c.exh * 0.35
+		target -= (int(nv.get(c.id, 1)) - 1) * 2.0
+		var L: Unit = c.lead
+		if L != null and L.hp > 0.0:
+			target += L.rank * 3.5
+		var vl: Unit = v.lead
+		if vl != null and vl != L and vl.rank >= 3 and (L == null or vl.rank >= L.rank):
+			target -= 15.0
+		if sim_time - v.capt < 72.0:
+			target -= 25.0
+		if v.race != cv.race:
+			target -= 8.0
+		if v.reg != cv.reg:
+			target -= 10.0
+		if vl != null and vl.rank >= 2 and vl.align != c.align:
+			target -= 8.0
+		target = clampf(target, 0.0, 100.0)
+		v.loy += (target - v.loy) * 0.15
+		if laws["rebel"] and v.loy < 25.0 and int(nv.get(c.id, 1)) >= 2 and v.pop >= 3 and randf() < 0.025 + (25.0 - v.loy) * 0.002:
+			rebels.append(v)
+	for v2: Village in rebels:
+		if v2.alive and int(nv.get(v2.clan, 1)) >= 2:
+			nv[v2.clan] = int(nv.get(v2.clan, 1)) - 1
+			rebel(v2)
+	if randf() < 0.3:
+		build_road()
+
+
+## Straße von der Hauptstadt zu einem Dorf desselben Clans (Brücken über Wasser bleiben Lücken).
+func build_road() -> void:
+	var cands: Array[Village] = []
+	for v: Village in villages:
+		if v.alive and not v.road:
+			var c: Clan = clans[v.clan]
+			if c.cap >= 0 and c.cap != v.id and c.cap < villages.size() and villages[c.cap].alive and villages[c.cap].reg == v.reg:
+				cands.append(v)
+	if cands.is_empty():
+		return
+	var v2: Village = cands.pick_random()
+	v2.road = true
+	var cv: Village = villages[clans[v2.clan].cap]
+	var a: Vector2 = Vector2(cv.cx, cv.cy + 3.0)
+	var b: Vector2 = Vector2(v2.cx, v2.cy + 3.0)
+	var d: float = a.distance_to(b)
+	if d > 110.0 or d < 8.0:
+		return
+	var nrm: Vector2 = (b - a).orthogonal().normalized() * (randf() - 0.5) * d * 0.25
+	var tiles: PackedInt32Array = PackedInt32Array()
+	var last: int = -1
+	var n: int = int(d * 2.5)
+	for k: int in range(n + 1):
+		var f: float = float(k) / n
+		var p: Vector2 = a.lerp(b, f) + nrm * sin(f * PI)
+		var tx: int = int(p.x)
+		var ty: int = int(p.y)
+		if not world.in_map(tx, ty):
+			return
+		var i: int = ty * W + tx
+		if i == last:
+			continue
+		# 4er-Nachbarschaft: bei diagonalem Schritt eine Ecke einfügen
+		if last >= 0 and last % W != tx and last / W != ty:
+			var ci: int = (last / W) * W + tx
+			if _road_ok(ci):
+				tiles.append(ci)
+		last = i
+		if world.tile[i] == GuData.WALL:
+			return
+		if _road_ok(i):
+			tiles.append(i)
+	for i2: int in tiles:
+		world.feat[i2] = GuData.F_ROAD
+		world.mark_area(i2 % W, i2 / W)
+
+
+func _road_ok(i: int) -> bool:
+	var t: int = world.tile[i]
+	if not GuData.buildable(t) and t != GuData.HILL:
+		return false
+	if world.bmap[i] >= 0 or world.temp_snow[i] in [1, 2]:
+		return false
+	var f: int = world.feat[i]
+	return f == 0 or GuData.is_tree(f) or f == GuData.F_SHRUB or f == GuData.F_TUFT or f == GuData.F_FLOWER or f == GuData.F_ROAD
+
+
+# ---------------- Zufällige Katastrophen (Weltgesetz „Katastrophen“) ----------------
+
+func random_disaster() -> void:
+	var opts: Array[String] = ["quake", "volcano", "tornado", "acid", "meteor", "plague", "dunes"]
+	match opts.pick_random():
+		"quake":
+			var vs: Array[Village] = []
+			for v: Village in villages:
+				if v.alive:
+					vs.append(v)
+			var p: Vector2 = random_tile(_solid)
+			if not vs.is_empty():
+				var vv: Village = vs.pick_random()
+				p = Vector2(clampf(vv.cx + randf_range(-15, 15), 1, W - 2), clampf(vv.cy + randf_range(-15, 15), 1, H - 2))
+			if p.x >= 0.0:
+				quake(p.x, p.y)
+				log_event("Katastrophe: Ein Erdbeben erschüttert " + GuData.REGN_IN[region_at(p.x, p.y)] + ".", "war", true)
+		"volcano":
+			var p2: Vector2 = random_tile(func(i: int) -> bool: return (world.tile[i] == GuData.HILL or world.tile[i] == GuData.MOUNT) and i % W > 8 and i % W < W - 8 and i / W > 8 and i / W < H - 8, 200)
+			if p2.x >= 0.0 and nearest_village(p2.x, p2.y, 16.0) == null:
+				volcano(p2.x, p2.y)
+		"tornado":
+			var p3: Vector2 = random_tile(func(i: int) -> bool: return world.tile[i] == GuData.GRASS or world.tile[i] == GuData.STEP or world.tile[i] == GuData.DES, 200)
+			if p3.x >= 0.0:
+				tornado(p3.x, p3.y)
+		"acid":
+			var p4: Vector2 = random_tile(_solid, 200)
+			if p4.x >= 0.0:
+				acid_rain(p4.x, p4.y)
+		"meteor":
+			var p5: Vector2 = random_tile(_solid, 200)
+			if p5.x >= 0.0:
+				fx.append({"k": "met", "x": p5.x, "y": p5.y, "l": 0.7, "ml": 0.7, "big": false})
+				later(0.7, func() -> void: boom(p5.x, p5.y, 9.0, 400.0, {"ash": true, "burn": 0.4, "c": Color("#ff9a3a")}))
+				log_event("Katastrophe: Ein Sternenfall schlägt in " + GuData.REGN_DAT[region_at(p5.x, p5.y)] + " ein.", "war", true)
+		"plague":
+			var ps: Array[Unit] = []
+			for u: Unit in units:
+				if u.k == "p" and u.hp > 0.0 and u.vil >= 0:
+					ps.append(u)
+			if not ps.is_empty():
+				var pu: Unit = ps.pick_random()
+				for o: Unit in near_units(pu.x, pu.y, 5.0):
+					if o.k == "p":
+						o.sick = 22.0 + randf() * 10.0
+				log_event("Katastrophe: Eine Seuche bricht in " + (villages[pu.vil].name if pu.vil >= 0 else "der Wildnis") + " aus.", "war", true)
+		"dunes":
+			dune_migration()
+
+
+## Dünenwanderung (Westwüste): Sand begräbt eine Oase.
+func dune_migration() -> void:
+	var p: Vector2 = random_tile(func(i: int) -> bool: return world.region[i] == 2 and world.tile[i] == GuData.GRASS, 400)
+	if p.x < 0.0:
+		return
+	for dy: int in range(-10, 11):
+		for dx: int in range(-10, 11):
+			if dx * dx + dy * dy > 100:
+				continue
+			var tx: int = int(p.x) + dx
+			var ty: int = int(p.y) + dy
+			if not world.in_map(tx, ty):
+				continue
+			var i: int = ty * W + tx
+			var t: int = world.tile[i]
+			if (t == GuData.GRASS or t == GuData.SOIL) and world.region[i] == 2 and randf() < 0.8:
+				set_tile(i, GuData.DES)
+				if GuData.is_tree(world.feat[i]) and randf() < 0.6:
+					world.feat[i] = GuData.F_SHRUB
+	log_event("Katastrophe: Die Unpassierbaren Dünen wandern und begraben eine Oase der Westwüste.", "war", true)
