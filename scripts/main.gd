@@ -40,6 +40,8 @@ var follow: bool = false
 var gift_cd: float = 0.0
 var ui_hidden: bool = false
 var show_terr: bool = true
+var reg_view: bool = false  ## Regionen-Pinsel aktiv: Kartenebene „Regionen“ in jeder Zoomstufe zeigen
+var reg_prev_layer: int = 0
 var show_names: bool = true
 var sim_acc: float = 0.0
 var loading: bool = false
@@ -96,6 +98,8 @@ func _ready() -> void:
 			_dev_shots(a.substr(8))
 		if a == "--selftest":
 			_selftest()
+		if a == "--sandboxtest":
+			_dev_sandbox()
 		if a.begins_with("--sheets="):
 			_dev_sheets(a.substr(9))
 
@@ -342,7 +346,8 @@ func _process(delta: float) -> void:
 	sim.world.flush_dirty(4)
 	terr_t -= rdt
 	var tz: float = terr_zoom()
-	if sim.terr_dirty and show_terr and terr_t <= 0.0 and z < tz:
+	_region_view()
+	if sim.terr_dirty and (show_terr or reg_view) and terr_t <= 0.0 and (z < tz or reg_view):
 		terr_t = 1.5
 		sim.terr_dirty = false
 		sim.world.update_territory(sim.villages, sim.clans)
@@ -357,8 +362,8 @@ func _process(delta: float) -> void:
 	var lod: float = clampf((z - 2.0) / 0.9, 0.0, 1.0)
 	near_spr.modulate.a = lod
 	near_spr.visible = lod > 0.0
-	terr_spr.visible = show_terr and z < tz
-	terr_spr.modulate.a = clampf((tz - z) / 0.8, 0.0, 0.75)
+	terr_spr.visible = (show_terr and z < tz) or reg_view
+	terr_spr.modulate.a = maxf(clampf((tz - z) / 0.8, 0.0, 0.75), 0.6 if reg_view else 0.0)
 	ents.queue_redraw()
 	clouds.tick(rdt)
 	clouds.queue_redraw()
@@ -375,7 +380,7 @@ func _process(delta: float) -> void:
 		hud.age_lbl.text = "Vorgeschichte … %d %%" % int(clampf(sim.sim_time / (PRESIM_YEARS * 12.0), 0.0, 0.99) * 100.0)
 	else:
 		var ad: Dictionary = sim.age_data()
-		hud.age_lbl.text = "%s · Jahr %d · nächstes in %d Jahren" % [ad["n"], sim.year(), sim.years_to_next_age()]
+		hud.age_lbl.text = "%s · Jahr %d · %s" % [ad["n"], sim.year(), ("nächstes in %d Jahren" % sim.years_to_next_age()) if sim.laws["ages"] else "angehalten"]
 	hud.tick_layout()
 	auto_t += rdt
 	if auto_t > 60.0 and not presim_on:
@@ -671,6 +676,17 @@ func _run_action(t: Dictionary) -> void:
 			hud.show_hint("Pinselform", powers.cycle_shape())
 		"coin":
 			hud.show_hint(t["n"], powers.coin())
+		# Sandkasten (Logik in Powers.world_act / Sim)
+		"w_flood", "w_raise":
+			_end_presim()
+			hud.show_hint(t["n"], powers.world_act(t["id"]))
+		"w_wipe", "w_flat":
+			hud.open_modal(_h(t["n"]) + str(t["d"]) + "\n\n[color=#9db09e]Das lässt sich nicht rückgängig machen.[/color]", [
+				[t["n"], func() -> void:
+					hud.close_modal()
+					_end_presim()
+					hud.show_hint(t["n"], powers.world_act(t["id"])), "red"],
+				["Abbrechen", func() -> void: hud.close_modal(), ""]])
 		"ev_war", "ev_dream", "ev_inherit":
 			var r: Dictionary = powers.event_act(t["id"])
 			if str(r["msg"]) != "":
@@ -1178,8 +1194,15 @@ func _on_meta(m: String) -> void:
 			_open_village()
 	elif m.begins_with("law:"):
 		var k: String = m.substr(4)
-		sim.laws[k] = not sim.laws[k]
+		if k == "__off" or k == "__on":
+			for lk: String in sim.laws.keys():
+				sim.laws[lk] = k == "__on"
+		else:
+			sim.laws[k] = not sim.laws[k]
 		_open_laws()
+	elif m.begins_with("age:"):
+		sim.set_age(int(m.substr(4)))
+		_open_ages()
 	elif m == "disp:terr":
 		show_terr = not show_terr
 		sim.terr_dirty = true
@@ -1197,10 +1220,25 @@ func _switch(on: bool) -> String:
 
 
 func _open_laws() -> void:
-	var s: String = _h("Weltgesetze") + "Tippe auf ein Gesetz, um es umzuschalten.\n\n"
+	var s: String = _h("Weltgesetze") + "Tippe auf ein Gesetz, um es umzuschalten.\n\n[url=law:__off][color=#c74634][b]○ Alle Automatik aus[/b][/color][/url]      [url=law:__on][color=#5fbf8a][b]● Alles an[/b][/color][/url]\n\n"
 	for l: Array in LAWS + Sim.LAWS_EXTRA:
 		s += "[url=law:%s]%s  [b]%s[/b][/url]\n    [color=#9db09e]%s[/color]\n" % [l[0], _switch(sim.laws[l[0]]), l[1], l[2]]
 	hud.open_modal(s)
+
+
+## Regionen-Pinsel: solange er gewählt ist, zeigt die Karte die Ebene „Regionen“ (danach wieder die vorige).
+func _region_view() -> void:
+	var rv: bool = tool_id.begins_with("rg_") or tool_id == "t_unwall"
+	if rv == reg_view:
+		return
+	reg_view = rv
+	if rv:
+		reg_prev_layer = sim.world.layer
+		sim.world.layer = 2
+	else:
+		sim.world.layer = reg_prev_layer
+	sim.terr_dirty = true
+	terr_t = 0.0
 
 
 func _open_plans() -> void:
@@ -1221,8 +1259,9 @@ func _open_ages() -> void:
 	for i: int in range(GuData.AGES.size()):
 		var a: Dictionary = GuData.AGES[i]
 		var mark: String = "[color=#e8c70a]▶[/color] " if i == cur else "   "
-		s += "%s[b]%s[/b]\n    [color=#9db09e]Wachstum ×%.1f · Kriegslust ×%.1f · Kultivierung ×%.1f[/color]\n" % [mark, a["n"], a["grow"], a["war"], a["cult"]]
-	s += "\nJetzt: [b]%s[/b], nächstes Zeitalter in %d Jahren." % [sim.age_data()["n"], sim.years_to_next_age()]
+		s += "%s[url=age:%d][b]%s[/b][/url]\n    [color=#9db09e]Wachstum ×%.1f · Kriegslust ×%.1f · Kultivierung ×%.1f[/color]\n" % [mark, i, a["n"], a["grow"], a["war"], a["cult"]]
+	s += "\nJetzt: [b]%s[/b], " % sim.age_data()["n"] + ("nächstes Zeitalter in %d Jahren." % sim.years_to_next_age() if sim.laws["ages"] else "das Zeitalter ist angehalten (Weltgesetz „Zeitalter“).")
+	s += "\n[color=#9db09e]Tippe auf ein Zeitalter, um es sofort beginnen zu lassen.[/color]"
 	hud.open_modal(s)
 
 
@@ -2262,6 +2301,83 @@ func _shot(path: String) -> void:
 	get_viewport().get_texture().get_image().save_png(path)
 
 
+## Entwickler-Test „Sandkasten“ (-- --fresh --sandboxtest): Leben auslöschen, neu besiedeln, Regionen malen, Speichern/Laden im Speicher, Welt-Aktionen.
+func _dev_sandbox() -> void:
+	while loading or presim_on:
+		await get_tree().process_frame
+	var n: int = sim.wipe_life()
+	print("wipe ", n, " units=", sim.units.size(), " villages=", sim.villages.size(), " clans=", sim.clans.size())
+	for k: int in range(200):
+		sim.step(Sim.DT)
+	var placed: int = 0
+	var guard: int = 0
+	while placed < 24 and guard < 4000:
+		guard += 1
+		var p: Vector2 = Vector2(randf() * W, randf() * H)
+		var i: int = int(p.y) * W + int(p.x)
+		if sim.world.tile[i] == GuData.GRASS:
+			for j: int in range(6):
+				powers.spawn_at(Powers.tool_by_id("s_0"), p.x + randf() * 3.0, p.y + randf() * 3.0)
+			placed += 1
+	print("spawned ", sim.units.size())
+	for k: int in range(1200):
+		sim.step(Sim.DT)
+	var vl: int = 0
+	for v: Village in sim.villages:
+		if v.alive:
+			vl += 1
+	print("after 1200 steps: units=", sim.units.size(), " villages=", vl, " clans=", sim.clans.size(), " year=", sim.year())
+	# Regionen malen: ein Quadrat in die Region Ostmeer
+	tool_id = "rg_3"
+	_region_view()
+	powers.shape = 1
+	powers.brush_idx = 4
+	powers.begin_stroke()
+	var st: Dictionary = {}
+	for k: int in range(5):
+		powers.apply_paint(Powers.tool_by_id("rg_3"), 60.0 + k * 8.0, 60.0, st)
+	var cnt: int = 0
+	for i2: int in range(GuData.N):
+		if sim.world.region[i2] == 3:
+			cnt += 1
+	print("region3 tiles ", cnt, " layer ", sim.world.layer, " reg_view ", reg_view)
+	powers.apply_paint(Powers.tool_by_id("t_unwall"), 128.0, 128.0, st)
+	tool_id = ""
+	_region_view()
+	print("layer restored ", sim.world.layer)
+	sim.laws["ages"] = false
+	var a0: int = sim.age_index()
+	for k: int in range(45):
+		sim.sim_time += 12.0
+		sim.yearly()
+	print("ages frozen ", a0 == sim.age_index(), " year ", sim.year())
+	sim.laws["ages"] = true
+	sim.set_age(5)
+	print("age set ", sim.age_index())
+	var js: String = JSON.stringify(sim.serialize())
+	var d: Variant = JSON.parse_string(js)
+	sim.deserialize(d)
+	var cnt2: int = 0
+	for i3: int in range(GuData.N):
+		if sim.world.region[i3] == 3:
+			cnt2 += 1
+	print("region after load ", cnt2, " / ", cnt, " age ", sim.age_index(), " v ", int(d["v"]))
+	for id: String in ["w_flood", "w_flood", "w_raise", "w_flat", "w_flood", "w_raise", "w_wipe"]:
+		print(id, ": ", powers.world_act(id))
+		for k: int in range(60):
+			sim.step(Sim.DT)
+	for j2: int in range(10):
+		var p2: Vector2 = sim.random_tile(func(i4: int) -> bool: return sim.world.tile[i4] == GuData.GRASS or sim.world.tile[i4] == GuData.STEP)
+		if p2.x >= 0.0:
+			for j3: int in range(6):
+				powers.spawn_at(Powers.tool_by_id("s_0"), p2.x, p2.y)
+	for k: int in range(600):
+		sim.step(Sim.DT)
+	print("final units=", sim.units.size(), " villages=", sim.villages.size())
+	print("SANDBOX DONE")
+	get_tree().quit()
+
+
 func _selftest() -> void:
 	while loading or presim_on:
 		await get_tree().process_frame
@@ -2292,6 +2408,8 @@ func _selftest() -> void:
 			"act":
 				_run_action(t)
 				hud.close_modal()
+				if id == "w_wipe" or id == "w_flat":
+					powers.world_act(id)
 		for k: int in range(40):
 			sim.step(Sim.DT)
 		print("ok ", id, " units=", sim.units.size())
@@ -2333,6 +2451,12 @@ func _selftest() -> void:
 	_open_ages()
 	_open_laws()
 	_on_meta("law:war")
+	_on_meta("law:__off")
+	for k: int in range(30):
+		sim.step(Sim.DT)
+	_on_meta("law:__on")
+	_open_ages()
+	_on_meta("age:3")
 	_open_display()
 	_gift()
 	var t1: int = Time.get_ticks_msec()

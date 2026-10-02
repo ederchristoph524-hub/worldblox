@@ -594,8 +594,27 @@ func update_territory(villages: Array, clans: Array) -> void:
 
 ## Ebene „Regionen“: die fünf Regionen in eigenen Farben mit Rand.
 func _region_layer() -> void:
-	for y: int in range(H):
-		for x: int in range(W):
+	_region_px(0, 0, W, H)
+
+
+## Regionen-Ebene nur in einem Rechteck neu zeichnen (Regionen-Pinsel); wirkt nur, wenn die Ebene „Regionen“ aktiv ist.
+func region_layer_rect(x0: int, y0: int, x1: int, y1: int) -> void:
+	if layer != 2:
+		return
+	x0 = clampi(x0, 0, W)
+	y0 = clampi(y0, 0, H)
+	x1 = clampi(x1, 0, W)
+	y1 = clampi(y1, 0, H)
+	if x1 <= x0 or y1 <= y0:
+		return
+	terr_img.fill_rect(Rect2i(x0, y0, x1 - x0, y1 - y0), Color(0, 0, 0, 0))
+	_region_px(x0, y0, x1, y1)
+	terr_tex.update(terr_img)
+
+
+func _region_px(x0: int, y0: int, x1: int, y1: int) -> void:
+	for y: int in range(y0, y1):
+		for x: int in range(x0, x1):
 			var i: int = y * W + x
 			if tile[i] == GuData.WALL:
 				continue
