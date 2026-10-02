@@ -52,6 +52,17 @@ var show_terr: bool = true
 var reg_view: bool = false  ## Regionen-Pinsel aktiv: Kartenebene „Regionen“ in jeder Zoomstufe zeigen
 var reg_prev_layer: int = 0
 var show_names: bool = true
+var label_density: int = 1  ## Beschriftung: 0 wenig, 1 normal, 2 viel (Einstellungen; verschiebt die Zoom-Schwellen)
+var ui_scale: int = 1  ## Oberflächengröße: 0 klein, 1 normal, 2 groß (Einstellungen)
+var volume: float = 0.8  ## Lautstärke 0..1 (Einstellungen, user://settings.cfg „audio/volume“)
+var music_on: bool = true  ## Musik an/aus („audio/music“)
+const UI_SCALES: PackedFloat32Array = [0.87, 1.0, 1.16]
+const SETTINGS_PATH: String = "user://settings.cfg"
+## Beschriftung nach Zoom (Bildschirmpixel je Kachel, × lab_k()): Ortsnamen ab LZ_LM, alle Dorf-Schilder und
+## Clan- statt Mächtenamen ab LZ_MID, Namensschilder der Figuren ab LZ_CLOSE.
+const LZ_LM: float = 1.2
+const LZ_MID: float = 1.5
+const LZ_CLOSE: float = 3.0
 var sim_acc: float = 0.0
 var loading: bool = false
 var load_live: bool = true
@@ -72,6 +83,7 @@ var last_spawn: int = 0
 var zoom_goal: float = -1.0  ## weiches Zoomen: Ziel (< 0 = aus)
 var zoom_pt: Vector2 = Vector2.ZERO
 var fling: Vector2 = Vector2.ZERO  ## Schwung nach dem Wischen (Bildschirm-Pixel/s)
+var cam_goal: Vector2 = Vector2(-1, -1)  ## einmaliges weiches Schwenken (z. B. Figur unter dem Inspektor hervorholen)
 var pan_vel: Vector2 = Vector2.ZERO
 var pan_us: int = 0
 var last_tap_ms: int = -10000
@@ -100,12 +112,15 @@ func _ready() -> void:
 			follow = false
 			if insp_kind == "u":
 				_close_insp())
+	fresh = "--fresh" in OS.get_cmdline_user_args()
+	if not fresh:
+		_load_settings()
 	_build_scene()
 	hud.toggled = powers.cheat.is_on
 	get_viewport().size_changed.connect(_on_resize)
 	_on_resize()
 	_apply_tab(-1)
-	fresh = "--fresh" in OS.get_cmdline_user_args()
+	_apply_audio()
 	if fresh or not _load_game():
 		_start_new_world(true)
 	else:
@@ -145,6 +160,8 @@ func _ready() -> void:
 			_dev_terrshots(a.substr(12))
 		if a.begins_with("--gfxshots="):
 			_dev_gfx(a.substr(11))
+		if a.begins_with("--uishots="):
+			_dev_uishots(a.substr(10))
 		if a.begins_with("--hdsheet="):
 			Sprites.hd_sheet(a.substr(10), Sprites.hd_sheet_extra())
 			get_tree().quit()
@@ -246,7 +263,8 @@ func _on_resize() -> void:
 	# Desktop-Fenster im Querformat: etwas größere Oberfläche (Basis 760 statt 880 Pixel hoch)
 	var win: Window = get_window()
 	if win != null and win.content_scale_mode == Window.CONTENT_SCALE_MODE_CANVAS_ITEMS:
-		var want: Vector2i = Vector2i(400, 760) if win.size.x > win.size.y * 1.1 else Vector2i(400, 880)
+		var base: Vector2 = Vector2(400, 760) if win.size.x > win.size.y * 1.1 else Vector2(400, 880)
+		var want: Vector2i = Vector2i((base / UI_SCALES[clampi(ui_scale, 0, 2)]).round())
 		if win.content_scale_size != want:
 			win.content_scale_size = want
 	var vs: Vector2 = get_viewport_rect().size
@@ -315,6 +333,52 @@ func zoom_smooth(p: Vector2, factor: float) -> void:
 	zoom_pt = p
 	fling = Vector2.ZERO
 	follow = false
+
+
+## Startansicht: im Querformat die ganze Welt; im Hochformat etwas näher, damit die quadratische Karte mehr
+## von der freien Fläche über der Leiste füllt (Mitte = Zentralkontinent). Ganz herausgezoomt bleibt die ganze Welt sichtbar.
+func _home_view() -> void:
+	zoom_goal = -1.0
+	fling = Vector2.ZERO
+	var vs: Vector2 = get_viewport_rect().size
+	z = min_z
+	if vs.y > vs.x * 1.3:
+		z = clampf(view_h() * 0.76 / H, min_z, min_z * 1.5)
+	cam = Vector2(W / 2.0, H / 2.0)
+	_clamp_cam()
+
+
+## Beschriftungsdichte als Faktor auf die Zoom-Schwellen (wenig = später, viel = früher).
+func lab_k() -> float:
+	return [1.3, 1.0, 0.75][clampi(label_density, 0, 2)]
+
+
+## Liegt der Punkt (Welt) unter dem Inspektor, weich so schwenken, dass er in der freien Fläche darunter steht.
+func _reveal(w: Vector2) -> void:
+	await get_tree().process_frame
+	if not hud.insp.visible:
+		return
+	var p: Vector2 = w * z + world_origin()
+	if hud.insp.get_global_rect().grow(12.0).has_point(p):
+		var sh: Vector2 = insp_shift()
+		if sh != Vector2.ZERO:
+			cam_goal = w - sh / z
+
+
+## Bildschirm-Versatz, damit eine verfolgte Figur in der freien Fläche unter dem Inspektor steht statt dahinter.
+func insp_shift() -> Vector2:
+	if not hud.insp.visible:
+		return Vector2.ZERO
+	var r: Rect2 = hud.insp.get_global_rect()
+	var vw: float = get_viewport_rect().size.x
+	if r.end.x < vw * 0.5:
+		# Inspektor links (Querformat): Figur in die Mitte der freien Fläche rechts davon
+		return Vector2((r.end.x + 8.0 + vw) / 2.0 - vw / 2.0, 0.0)
+	var free_top: float = r.end.y + 8.0
+	var vh: float = view_h()
+	if vh - free_top < 70.0:
+		return Vector2.ZERO
+	return Vector2(0.0, (free_top + vh) / 2.0 - vh / 2.0)
 
 
 func view_center() -> Vector2:
@@ -416,11 +480,7 @@ func _finish_start() -> void:
 	hud.set_loading(false)
 	_on_resize()
 	clouds.reset()
-	z = min_z
-	zoom_goal = -1.0
-	fling = Vector2.ZERO
-	cam = Vector2(W / 2.0, H / 2.0)
-	_clamp_cam()
+	_home_view()
 	sim.update_leaders()
 	sim.terr_dirty = true
 	terr_t = 0.0
@@ -486,8 +546,15 @@ func _process(delta: float) -> void:
 		if fling.length() < 12.0 or c0 != cam:
 			fling = Vector2.ZERO
 	if follow and sel_unit != null and sel_unit.hp > 0.0:
-		cam += (Vector2(sel_unit.x, sel_unit.y) - cam) * minf(1.0, rdt * 6.0)
+		cam_goal = Vector2(-1, -1)
+		cam += (Vector2(sel_unit.x, sel_unit.y) - insp_shift() / z - cam) * minf(1.0, rdt * 6.0)
 		_clamp_cam()
+	elif cam_goal.x >= 0.0:
+		var c0: Vector2 = cam
+		cam += (cam_goal - cam) * minf(1.0, rdt * 7.0)
+		_clamp_cam()
+		if (cam_goal - cam).length() * z < 0.6 or (cam - c0).length() * z < 0.05:
+			cam_goal = Vector2(-1, -1)
 	if sim.world.water_dirty:
 		sim.world.refresh_water()
 	sim.world.flush_dirty(4)
@@ -730,6 +797,7 @@ func _unhandled_input(e: InputEvent) -> void:
 				_clamp_cam()
 				follow = false
 				zoom_goal = -1.0
+				cam_goal = Vector2(-1, -1)
 			var now_us: int = Time.get_ticks_usec()
 			var dt_s: float = maxf(0.004, (now_us - pan_us) / 1000000.0)
 			pan_vel = pan_vel.lerp(d2 / dt_s, 0.45) if now_us - pan_us < 100000 else d2 / dt_s
@@ -1003,6 +1071,7 @@ func _inspect_at(wx: float, wy: float) -> void:
 		sel_unit = best
 		sel_vil = null
 		_open_unit()
+		_reveal(Vector2(best.x, best.y))
 		return
 	var pl: Place = sim.place_at(wx, wy)
 	if pl != null:
@@ -1075,11 +1144,22 @@ func _open_unit() -> void:
 		["Following" if follow else "Follow", func() -> void:
 			follow = not follow
 			_open_unit(), "jade" if follow else ""]]
+	btns.append(["Heal", func() -> void:
+		sim.cheats.heal(u)
+		sim.spark(u.x, u.y - 2.0, Color("#9fe0b0"), 10, 5.0)
+		_refresh_insp(), ""])
 	if u.k == "p":
-		btns.append(["Grant fortune", func() -> void:
+		if u.rank < 9:
+			btns.append(["Rank +1", func() -> void:
+				_end_presim()
+				hud.show_hint("", sim.cheats.rank_step(u, 1))
+				sim.spark(u.x, u.y - 2.0, GuData.ESS_COL[clampi(u.rank, 0, 9)], 14, 6.0)
+				_open_unit(), ""])
+		btns.append(["Fortune", func() -> void:
 			u.luck = 1.0
-			sim.spark(u.x, u.y - 2.0, Color("#ffe27a"), 10, 5.0), ""])
-	btns.append(["Annihilate", func() -> void:
+			sim.spark(u.x, u.y - 2.0, Color("#ffe27a"), 10, 5.0)
+			_refresh_insp(), ""])
+	btns.append(["Kill", func() -> void:
 		u.dreason = "divine annihilation"
 		sim.hurt(u, 1e9, null)
 		_close_insp(), "red"])
@@ -1112,7 +1192,7 @@ func _unit_body(u: Unit) -> String:
 			var jobs: Dictionary = {"wood": "Woodcutter", "mine": "Primeval stone miner", "farm": "Farmer", "gather": "Gatherer", "hunt": "Hunter"}
 			s += mt + "Aperture[/color]  " + ("not awakened" if u.awk else "not yet tested") + "\n"
 			s += mt + "Job[/color]  " + str(jobs.get(u.job, "Child" if a < 14.0 else "–")) + "\n"
-		s += mt + "Leben[/color]  " + _bar_txt(u.hp / u.mhp, Color("#d24a35")) + "\n"
+		s += mt + "Health[/color]  " + _bar_txt(u.hp / u.mhp, Color("#d24a35")) + "\n"
 		s += mt + "Victories[/color]  %d" % u.kills
 		if not u.igu.is_empty():
 			var ig: PackedStringArray = PackedStringArray()
@@ -1144,11 +1224,11 @@ func _unit_body(u: Unit) -> String:
 				var e2: Dictionary = Lore.igu(u.gname)
 				s += mt + "Effect[/color]  " + str(Lore.FX_TEXT.get(str(e2.get("fx", "gen")), "")) + "\n"
 				s += "[color=#9db09e]" + str(e2.get("d", "")) + "[/color]\n"
-			s += mt + "Leben[/color]  " + _bar_txt(u.hp / u.mhp, Color("#d24a35"))
+			s += mt + "Health[/color]  " + _bar_txt(u.hp / u.mhp, Color("#d24a35"))
 			return s
 		if u.rank > 0:
 			s += mt + "Tier[/color]  " + _swatch(GuData.ESS_COL[u.rank]) + str(GuData.TIER_NAME.get(u.rank, "")) + " (like rank %d)\n" % u.rank
-		s += mt + "Leben[/color]  " + _bar_txt(u.hp / u.mhp, Color("#d24a35")) + "\n"
+		s += mt + "Health[/color]  " + _bar_txt(u.hp / u.mhp, Color("#d24a35")) + "\n"
 		s += mt + "Strength[/color]  %d\n" % int(u.atk)
 		s += mt + "Prey[/color]  %d" % u.kills
 		if S.has("d"):
@@ -1171,7 +1251,7 @@ func _open_village() -> void:
 	insp_kind = "v"
 	var v: Village = sel_vil
 	var c: Clan = sim.clans[v.clan]
-	var btns: Array = [["+20 primeval stones", func() -> void:
+	var btns: Array = [["+20 stones", func() -> void:
 		v.stones += 20.0
 		_refresh_insp(), ""]]
 	if not c.war.is_empty():
@@ -1179,7 +1259,7 @@ func _open_village() -> void:
 			for e: int in c.war.keys():
 				sim.make_peace(c, sim.clans[e])
 			_open_village(), "jade"])
-	btns.append(["Summon wolf tide", func() -> void:
+	btns.append(["Wolf tide", func() -> void:
 		sim.beast_tide(v, Vector2(-1, -1))
 		_close_insp(), "red"])
 	hud.open_insp(null, c.glyph, c.col, v.name, c.name + " · " + GuData.REGN[v.reg], _village_body(v), btns)
@@ -1462,13 +1542,29 @@ func _on_meta(m: String) -> void:
 	elif m == "disp:terr":
 		show_terr = not show_terr
 		sim.terr_dirty = true
-		_open_display()
+		_settings_changed()
 	elif m == "disp:layer":
 		_cycle_layer()
-		_open_display()
+		_open_settings()
 	elif m == "disp:names":
 		show_names = not show_names
-		_open_display()
+		_settings_changed()
+	elif m.begins_with("set:"):
+		var kv: PackedStringArray = m.substr(4).split(":")
+		var val: int = int(kv[1]) if kv.size() > 1 else 0
+		match kv[0]:
+			"ui":
+				ui_scale = clampi(val, 0, 2)
+				_on_resize()
+			"lab":
+				label_density = clampi(val, 0, 2)
+			"vol":
+				volume = clampf(val / 100.0, 0.0, 1.0)
+				_apply_audio()
+			"music":
+				music_on = not music_on
+				_apply_audio()
+		_settings_changed()
 
 
 const LAWS: Array = [["war", "Feuds", "Clans declare war on each other."], ["tide", "Beast tides", "Wolf tides raid villages."], ["immortal", "Immortality", "Rank 5 Gu Masters can ascend to Gu Immortals."], ["trib", "Tribulations", "Immortals must regularly survive heavenly tribulations."], ["will", "Heaven's Will", "Heaven strikes down the most outstanding."], ["walls", "Region walls", "Mortals cannot cross the walls."], ["growth", "Growth", "Births, animal offspring and plant growth."], ["fire", "Fire spread", "Fire jumps to neighboring tiles."]]
@@ -1521,11 +1617,85 @@ func _open_plans() -> void:
 
 
 func _open_display() -> void:
-	var s: String = _h("Display")
-	s += "[url=disp:terr]%s  [b]Territories and influence[/b][/url]\n    [color=#9db09e]Borders, territory names and the legend of powers at every zoom level.[/color]\n" % _switch(show_terr)
-	s += "[url=disp:layer][color=#9fd0ff][b]»[/b][/color]  [b]Map layer: %s[/b][/url]\n    [color=#9db09e]%s[/color]\n" % [World.LAYER_NAME[sim.world.layer], LAYER_DESC[sim.world.layer]]
-	s += "[url=disp:names]%s  [b]Village names[/b][/url]\n    [color=#9db09e]Banners with clan seal and population.[/color]\n" % _switch(show_names)
+	_open_settings()
+
+
+## Auswahlreihe für das Einstellungsfenster: [url=<pre>:<wert>] je Option, die aktive gelb hinterlegt.
+func _choice(pre: String, names: PackedStringArray, vals: PackedInt32Array, cur: int) -> String:
+	var parts: PackedStringArray = PackedStringArray()
+	for k: int in range(names.size()):
+		if vals[k] == cur:
+			parts.append("[url=%s:%d][bgcolor=#5a4a10][color=#ffd24a][b] %s [/b][/color][/bgcolor][/url]" % [pre, vals[k], names[k]])
+		else:
+			parts.append("[url=%s:%d][color=#c8d4dc] %s [/color][/url]" % [pre, vals[k], names[k]])
+	return "  ".join(parts)
+
+
+## Fenster „Settings“ (Zahnrad im Hauptmenü): Oberflächengröße, Beschriftungsdichte, Gebiete, Kartenebene, Namen, Ton.
+## Alles wird in user://settings.cfg gespeichert (nicht mit --fresh).
+func _open_settings() -> void:
+	var mt: String = "[color=#9db09e]"
+	var s: String = _h("Settings")
+	s += _h3("Interface")
+	s += "[b]Interface size[/b]\n" + _choice("set:ui", ["Small", "Normal", "Large"], [0, 1, 2], ui_scale) + "\n" + mt + "Large is easier to tap on small phones.[/color]\n\n"
+	s += "[b]Label density[/b]\n" + _choice("set:lab", ["Few", "Normal", "Many"], [0, 1, 2], label_density) + "\n" + mt + "How early landmarks, village banners and name tags appear while zooming in.[/color]\n"
+	s += _h3("Map")
+	s += "[url=disp:terr]%s  [b]Territories and influence[/b][/url]\n    %sBorders, territory names and the legend of powers.[/color]\n" % [_switch(show_terr), mt]
+	s += "[url=disp:names]%s  [b]Names and banners[/b][/url]\n    %sVillage banners and place names (power names stay).[/color]\n" % [_switch(show_names), mt]
+	s += "[url=disp:layer][color=#9fd0ff][b]»[/b][/color]  [b]Map layer: %s[/b][/url]\n    %s%s[/color]\n" % [World.LAYER_NAME[sim.world.layer], mt, LAYER_DESC[sim.world.layer]]
+	s += _h3("Sound")
+	s += "[b]Volume[/b]\n" + _choice("set:vol", ["Off", "25%", "50%", "75%", "100%"], [0, 25, 50, 75, 100], int(roundf(volume * 4.0)) * 25) + "\n\n"
+	s += "[url=set:music]%s  [b]Music[/b][/url]\n" % _switch(music_on)
 	hud.open_modal(s)
+
+
+func _settings_changed() -> void:
+	_save_settings()
+	_open_settings()
+
+
+func _load_settings() -> void:
+	var cf: ConfigFile = ConfigFile.new()
+	if cf.load(SETTINGS_PATH) != OK:
+		return
+	ui_scale = clampi(int(cf.get_value("ui", "scale", ui_scale)), 0, 2)
+	label_density = clampi(int(cf.get_value("ui", "labels", label_density)), 0, 2)
+	show_terr = bool(cf.get_value("display", "territories", show_terr))
+	show_names = bool(cf.get_value("display", "names", show_names))
+	volume = clampf(float(cf.get_value("audio", "volume", volume)), 0.0, 1.0)
+	music_on = bool(cf.get_value("audio", "music", music_on))
+
+
+func _save_settings() -> void:
+	if fresh:
+		return
+	var cf: ConfigFile = ConfigFile.new()
+	cf.load(SETTINGS_PATH)  # andere Schlüssel (z. B. vom Ton) bleiben erhalten
+	cf.set_value("ui", "scale", ui_scale)
+	cf.set_value("ui", "labels", label_density)
+	cf.set_value("display", "territories", show_terr)
+	cf.set_value("display", "names", show_names)
+	cf.set_value("audio", "volume", volume)
+	cf.set_value("audio", "music", music_on)
+	cf.save(SETTINGS_PATH)
+
+
+## Lautstärke weitergeben: an scripts/audio.gd (statisch set_volume/set_music), falls vorhanden, sonst an den Master-Bus.
+func _apply_audio() -> void:
+	var done: bool = false
+	if ResourceLoader.exists("res://scripts/audio.gd"):
+		var sc: Script = load("res://scripts/audio.gd")
+		if sc != null:
+			for md: Dictionary in sc.get_script_method_list():
+				var fn: String = str(md.get("name", ""))
+				if fn == "set_volume":
+					sc.call("set_volume", volume)
+					done = true
+				elif fn == "set_music":
+					sc.call("set_music", music_on)
+	if not done and AudioServer.bus_count > 0:
+		AudioServer.set_bus_mute(0, volume <= 0.0)
+		AudioServer.set_bus_volume_db(0, linear_to_db(maxf(volume, 0.0001)))
 
 
 func _open_ages() -> void:
@@ -1590,9 +1760,7 @@ func _load_game() -> bool:
 	loading = false
 	_on_resize()
 	clouds.reset()
-	z = min_z
-	cam = Vector2(W / 2.0, H / 2.0)
-	_clamp_cam()
+	_home_view()
 	return true
 
 
@@ -2273,15 +2441,218 @@ class CloudLayer:
 
 class ScreenLayer:
 	extends Control
+	## Bildschirm-Ebene über der Welt: Zeitalter-Tönung, Weltrand, Wetter und die ganze Beschriftung.
+	## Beschriftung mit Detailstufen und Kollisionsvermeidung: tick() platziert in Rangfolge
+	## (gewählte Figur > Ehrwürdige/Mächte > Hauptstädte > Orte > Dörfer > Figuren), was sich überschneidet, entfällt.
+	## Jede Stufe zeichnet in ein eigenes Kind-Control, dessen Deckkraft mit dem Zoom weich überblendet.
 	var m: GuMain
 	var wparts: Array[Vector3] = []
-	var rects: Array[Rect2] = []  ## belegte Schild-Rechtecke dieses Bildes (Gebietsnamen weichen aus)
+	var rects: Array[Rect2] = []  ## belegte Rechtecke dieses Bildes (HUD-Flächen und platzierte Beschriftungen)
+	var L: Dictionary = {}  ## Stufe -> platzierte Einträge
+	var la: Dictionary = {}  ## Stufe -> aktuelle Deckkraft (weich)
+	var cv: Dictionary = {}  ## Stufe -> Kind-Control
+	const CATS: PackedStringArray = ["unit", "vil", "lm", "cap", "pow", "top"]
 
 	func _ready() -> void:
-			mouse_filter = Control.MOUSE_FILTER_IGNORE
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		for k: String in CATS:
+			var c: Control = Control.new()
+			c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			c.set_anchors_preset(Control.PRESET_FULL_RECT)
+			add_child(c)
+			c.draw.connect(_draw_cat.bind(c, k))
+			cv[k] = c
+			L[k] = []
+			la[k] = 1.0 if k == "pow" or k == "cap" or k == "top" else 0.0
 
-	func tick(_dt: float) -> void:
-		pass
+	## Zielwerte der Deckkraft je Stufe aus Zoom und Einstellungen.
+	func _targets(z: float) -> Dictionary:
+		var lk: float = m.lab_k()
+		var names: bool = m.show_names
+		var power_map: bool = m.show_terr and not m.reg_view and m.sim.world.layer == 3 and z < m.terr_zoom() * 0.85
+		return {
+			"pow": 1.0,
+			"cap": 1.0 if names and not power_map else 0.0,
+			"lm": (_ss(GuMain.LZ_LM * lk, GuMain.LZ_LM * lk * 1.18, z) * (1.0 - _ss(3.0, 3.4, z))) if names else 0.0,
+			"vil": _ss(GuMain.LZ_MID * lk, GuMain.LZ_MID * lk * 1.12, z) if names and not power_map else 0.0,
+			"unit": _ss(GuMain.LZ_CLOSE * lk * 0.88, GuMain.LZ_CLOSE * lk, z),
+			"top": 1.0}
+
+	static func _ss(e0: float, e1: float, x: float) -> float:
+		return smoothstep(e0, e1, x)
+
+	func tick(dt: float) -> void:
+		var z: float = m.z
+		var tg: Dictionary = _targets(z)
+		for k: String in CATS:
+			la[k] = move_toward(float(la[k]), float(tg[k]), dt * 5.0)
+			(cv[k] as Control).modulate.a = float(la[k])
+		_layout(tg)
+		for c: Control in cv.values():
+			c.queue_redraw()
+
+	## HUD-Flächen gelten als belegt: Beschriftung weicht aus statt halb unter Knöpfen zu verschwinden.
+	func _reserve_hud() -> void:
+		var h: Hud = m.hud
+		for c: Control in [h.top_r, h.legend, h.toasts, h.insp, h.age_lbl, h.tool_pill, h.brush_box, h.wbox]:
+			if c != null and c.is_visible_in_tree() and c.size.x > 1.0:
+				rects.append(c.get_global_rect().grow(2.0))
+
+	func _layout(tg: Dictionary) -> void:
+		var sim: Sim = m.sim
+		var z: float = m.z
+		var o: Vector2 = m.world_origin()
+		var vs: Vector2 = size
+		rects.clear()
+		for k: String in CATS:
+			L[k] = []
+		_reserve_hud()
+		# 0: gewählte Figur hat immer Vorrang
+		var su: Unit = m.sel_unit if (m.follow or m.insp_kind == "u") else null
+		if su != null and su.hp > 0.0 and su.k == "p":
+			var it0: Dictionary = _unit_tag(su, o, z, vs)
+			if not it0.is_empty():
+				L["top"].append(it0)
+		# 1: Ehrwürdige, Mächte und Gebietsnamen (Übersicht: je Macht, sonst je Clan)
+		var bloc_mode: bool = z < GuMain.LZ_MID * m.lab_k()
+		L["pow"] = TerrOverlay.layout_labels(m, o, z, vs, rects, bloc_mode)
+		var font: Font = m.hud.font_bold
+		# 2: Hauptstädte (Übersicht: nur Vormächte und Unabhängige, kompakt), stärkste Mächte zuerst
+		var caps: Array[Village] = []
+		var rest: Array[Village] = []
+		if float(tg["cap"]) > 0.0 or float(la["cap"]) > 0.02 or float(tg["vil"]) > 0.0 or float(la["vil"]) > 0.02:
+			for v: Village in sim.villages:
+				if not v.alive:
+					continue
+				var c: Clan = sim.clans[v.clan]
+				if c.cap < 0 or c.cap == v.id:
+					caps.append(v)
+				else:
+					rest.append(v)
+		var compact: bool = bloc_mode
+		var powers_named: bool = m.show_terr and not m.reg_view and sim.world.layer != 2
+		if float(tg["cap"]) > 0.0 or float(la["cap"]) > 0.02:
+			caps.sort_custom(func(a: Village, b: Village) -> bool: return _cap_rank(a) > _cap_rank(b))
+			for v: Village in caps:
+				var c2: Clan = sim.clans[v.clan]
+				if bloc_mode and powers_named and Influence.overlord(sim, c2) != null:
+					rest.append(v)  # Gefolgsleute erst aus der Nähe
+					continue
+				var it1: Dictionary = _banner(v, c2, compact, o, z, vs, font)
+				if not it1.is_empty():
+					L["cap"].append(it1)
+		# 3: Orte der Gu-Weltkarte und gesetzte Orte
+		if float(tg["lm"]) > 0.0 or float(la["lm"]) > 0.02:
+			_layout_landmarks(o, z, vs)
+		# 4: übrige Dörfer
+		if float(tg["vil"]) > 0.0 or float(la["vil"]) > 0.02:
+			rest.sort_custom(func(a: Village, b: Village) -> bool: return a.pop > b.pop)
+			for v2: Village in rest:
+				var it2: Dictionary = _banner(v2, sim.clans[v2.clan], false, o, z, vs, font)
+				if not it2.is_empty():
+					L["vil"].append(it2)
+		# 5: Figuren (nur nah; Unsterbliche, Ehrwürdige, Figuren, ab z 8 auch Rang 4–5)
+		if float(tg["unit"]) > 0.0 or float(la["unit"]) > 0.02:
+			var cand: Array[Unit] = []
+			var r0: Rect2 = Rect2(-o / z, vs / z).grow(4.0)
+			for u: Unit in sim.units:
+				if u.k != "p" or u.hp <= 0.0 or u == su:
+					continue
+				if not (u.rank >= 6 or u.fig != "" or u.ow or (u.rank >= 4 and z >= 8.0)):
+					continue
+				if r0.has_point(Vector2(u.x, u.y)):
+					cand.append(u)
+			cand.sort_custom(func(a: Unit, b: Unit) -> bool: return a.rank * 4 + a.stage > b.rank * 4 + b.stage)
+			for u2: Unit in cand:
+				var it3: Dictionary = _unit_tag(u2, o, z, vs)
+				if not it3.is_empty():
+					L["unit"].append(it3)
+
+	## Rangfolge der Hauptstädte: Macht ihres Bundes, dann Einwohner.
+	func _cap_rank(v: Village) -> float:
+		var cid: int = v.clan
+		var hp: float = 0.0
+		if cid < Influence.head.size() and Influence.head[cid] >= 0:
+			var b: Dictionary = Influence.bloc.get(Influence.head[cid], {})
+			hp = float(b.get("v", 0))
+			if Influence.head[cid] == cid:
+				hp += 0.5
+		return hp * 1000.0 + v.pop
+
+	func _hits(r: Rect2) -> bool:
+		for q: Rect2 in rects:
+			if q.intersects(r):
+				return true
+		return false
+
+	## Dorf-Schild platzieren (über dem Dorfzentrum, sonst darüber/darunter/seitlich); leer = kein Platz.
+	func _banner(v: Village, c: Clan, compact: bool, o: Vector2, z: float, vs: Vector2, font: Font) -> Dictionary:
+		var fs: int = 10 if compact else 11
+		var h: float = 14.0 if compact else 15.0
+		var X: float = v.cx * z + o.x
+		# Oberkante des Dorfzentrums (Lagerfeuer 7, Halle 10/13 Pixel hoch)
+		var th: float = 7.0 if v.lvl == 0 else (13.0 if Sprites.village_tier(v) == 2 else 10.0)
+		var Y: float = (v.y + 2.0 - th) * z + o.y - 2.0
+		if X < -20 or X > vs.x + 20 or Y < -10 or Y > vs.y + 10:
+			return {}
+		var txt: String = "%s %d" % [v.name, v.pop]
+		var tw: float = ceilf(font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x)
+		var bw: float = 12.0 if compact else 13.0
+		var cw: float = 4.0
+		var pw: float = 12.0 if compact else 13.0
+		var w: float = bw + cw + pw + tw + 10.0
+		var rx: float = roundf(clampf(X - w / 2.0, 3.0, maxf(3.0, vs.x - w - 3.0)))
+		var ry: float = roundf(Y - h)
+		for off: Vector2 in [Vector2.ZERO, Vector2(0, -(h + 5.0)), Vector2(0, h + 5.0), Vector2(-w * 0.55, 0), Vector2(w * 0.55, 0)]:
+			var rr: Rect2 = Rect2(rx + off.x - 1.0, ry + off.y - 3.0, w + 2.0, h + 6.0)
+			if rr.position.x < 0.0 or rr.end.x > vs.x or rr.position.y < 0.0 or rr.end.y > vs.y or _hits(rr):
+				continue
+			rects.append(rr)
+			return {"k": "ban", "x": rx + off.x, "y": ry + off.y, "w": w, "h": h, "bw": bw, "cw": cw, "pw": pw, "v": v, "c": c, "txt": txt, "fs": fs}
+		return {}
+
+	## Namensschild einer Figur (Rang in Essenzfarbe); leer = kein Platz.
+	func _unit_tag(u: Unit, o: Vector2, z: float, vs: Vector2) -> Dictionary:
+		var font: Font = m.hud.font_bold
+		var X2: float = u.x * z + o.x
+		var Y2: float = (u.y - (9.0 if u.rank >= 9 else (6.5 if u.rank >= 6 else 4.5))) * z + o.y - 6.0
+		if X2 < 0 or X2 > vs.x or Y2 < 0 or Y2 > vs.y:
+			return {}
+		var t2: String = "%s · R%d" % [u.given if u.sur == "" or u.fig == "" else u.sur + " " + u.given, u.rank]
+		if u.ow:
+			t2 = "Otherworldly Demon · R%d" % u.rank
+		var tw2: float = ceilf(font.get_string_size(t2, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x)
+		var r2: Rect2 = Rect2(roundf(X2 - tw2 / 2.0 - 5.0), roundf(Y2 - 7.0), tw2 + 10.0, 14.0)
+		if u != m.sel_unit and _hits(r2):
+			return {}
+		rects.append(r2)
+		return {"k": "tag", "r": r2, "txt": t2, "rank": u.rank, "sel": u == m.sel_unit}
+
+	## Namen der Orte der Gu-Weltkarte und gesetzter Orte: weiß mit dunkler Kontur, Flüsse hellblau.
+	func _layout_landmarks(o: Vector2, z: float, vs: Vector2) -> void:
+		var fnt: Font = m.hud.font_bold
+		var fs: int = 10 if z < 2.2 else 11
+		var lms: Array = []
+		for l0: Dictionary in m.sim.world.landmarks:
+			var dup: bool = false
+			for p0: Place in m.sim.places:
+				if p0.alive and absf(p0.x - float(l0["x"])) < 14.0 and absf(p0.y - float(l0["y"])) < 14.0:
+					dup = true
+					break
+			if not dup:
+				lms.append(l0)
+		for p: Place in m.sim.places:
+			if p.alive:
+				lms.append({"name": p.name, "x": p.x, "y": p.y + 3.0, "kind": "ort"})
+		for l: Dictionary in lms:
+			var nm: String = l["name"]
+			var tw: float = ceilf(fnt.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x)
+			var pos: Vector2 = Vector2(roundf(float(l["x"]) * z + o.x - tw / 2.0), roundf(float(l["y"]) * z + o.y + (fs + 4.0 if l["kind"] == "siedlung" else 3.0)))
+			var r: Rect2 = Rect2(pos.x - 2.0, pos.y - fs, tw + 4.0, fs + 5.0)
+			if r.position.x < 0.0 or r.end.x > vs.x or r.position.y < 0.0 or r.end.y > vs.y or _hits(r):
+				continue
+			rects.append(r)
+			L["lm"].append({"k": "lm", "p": pos, "txt": nm, "fs": fs, "river": l["kind"] == "fluss"})
 
 	func _draw() -> void:
 		var sim: Sim = m.sim
@@ -2303,11 +2674,30 @@ class ScreenLayer:
 			if e["k"] == "flash":
 				draw_rect(Rect2(Vector2.ZERO, vs), Color(1, 0.98, 0.9, float(e["l"]) / float(e["ml"]) * 0.35))
 		_weather(vs)
-		rects.clear()
-		if m.show_names:
-			_landmarks(o, z, vs)
-			_labels(o, z, vs)
-		TerrOverlay.draw_labels(self, m, o, z, vs, rects)
+
+	func _draw_cat(ci: Control, k: String) -> void:
+		if float(la[k]) <= 0.01:
+			return
+		var sink: Callable = func(rr: Rect2, c: Color) -> void: ci.draw_rect(rr, c)
+		Sprites.outline_col = Sprites.OUTLINE
+		for it: Dictionary in L[k]:
+			match str(it["k"]):
+				"ven", "terr":
+					TerrOverlay.draw_item(ci, m, it)
+				"ban":
+					_kingdom_label(ci, it, sink)
+				"lm":
+					_draw_landmark(ci, it)
+				"tag":
+					_draw_tag(ci, it)
+		if k == "top":
+			_draw_top(ci)
+
+	## Kurztexte der Effekte, Pinsel-Kreis, gewähltes Dorf eines Zwei-Tipp-Werkzeugs.
+	func _draw_top(ci: Control) -> void:
+		var sim: Sim = m.sim
+		var z: float = m.z
+		var o: Vector2 = m.world_origin()
 		var font: Font = m.hud.font_bold
 		for e: Dictionary in sim.fx:
 			if e["k"] == "txt" and z > 2.5:
@@ -2315,15 +2705,34 @@ class ScreenLayer:
 				var p: Vector2 = Vector2(e["x"], e["y"]) * z + o - Vector2(0, t * 18.0)
 				var txt: String = e["t"]
 				var tw: float = font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-				draw_string_outline(font, p - Vector2(tw / 2.0, 0), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 4, Color(0.06, 0.08, 0.06, 1.0 - t))
-				draw_string(font, p - Vector2(tw / 2.0, 0), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(e["c"], 1.0 - t))
+				ci.draw_string_outline(font, (p - Vector2(tw / 2.0, 0)).round(), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 4, Color(0.06, 0.08, 0.06, 1.0 - t))
+				ci.draw_string(font, (p - Vector2(tw / 2.0, 0)).round(), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(e["c"], 1.0 - t))
 		var tl: Dictionary = Powers.tool_by_id(m.tool_id)
 		if m.hover.x >= 0.0 and not tl.is_empty() and (tl["m"] == "paint" or tl["m"] == "spawn"):
 			var rr: float = 7.0 if tl["m"] == "spawn" else maxf(4.0, (m.powers.brush_r() + 0.5) * z)
-			draw_arc(m.hover, rr, 0.0, TAU, 48, Color(1, 1, 1, 0.9), 1.5)
+			ci.draw_arc(m.hover, rr + 1.0, 0.0, TAU, 48, Color(0, 0, 0, 0.35), 1.5)
+			ci.draw_arc(m.hover, rr, 0.0, TAU, 48, Color(1, 1, 1, 0.9), 1.5)
 		var ps: Village = m.powers.pair_sel
 		if ps != null and ps.alive:
-			draw_arc(Vector2(ps.cx, ps.cy) * z + o, maxf(16.0, 14.0 * z), 0.0, TAU, 48, Color("#ff6a4a"), 2.0)
+			ci.draw_arc(Vector2(ps.cx, ps.cy) * z + o, maxf(16.0, 14.0 * z), 0.0, TAU, 48, Color("#ff6a4a"), 2.0)
+
+	func _draw_landmark(ci: Control, it: Dictionary) -> void:
+		var fnt: Font = m.hud.font_bold
+		var pos: Vector2 = it["p"]
+		var fs: int = int(it["fs"])
+		var nm: String = it["txt"]
+		var col: Color = Color(0.8, 0.92, 1.0) if bool(it["river"]) else Color(1.0, 0.97, 0.88)
+		ci.draw_string_outline(fnt, pos + Vector2(0, 1), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 4, Color(0, 0, 0, 0.3))
+		ci.draw_string_outline(fnt, pos, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 3, Color(0.04, 0.06, 0.09, 0.9))
+		ci.draw_string(fnt, pos, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
+
+	func _draw_tag(ci: Control, it: Dictionary) -> void:
+		var font: Font = m.hud.font_bold
+		var r2: Rect2 = it["r"]
+		var rk: int = int(it["rank"])
+		_plate(ci, r2, bool(it["sel"]))
+		ci.draw_rect(Rect2(r2.position.x + 2.0, r2.position.y + 2.0, 2.0, r2.size.y - 4.0), GuData.ESS_COL[rk])
+		ci.draw_string(font, Vector2(r2.position.x + 6.0, r2.position.y + 11.0), it["txt"], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, GuData.ESS_COL[rk].lightened(0.2))
 
 	func _weather(vs: Vector2) -> void:
 		var wt: String = m.sim.weather.get("type", "")
@@ -2366,168 +2775,70 @@ class ScreenLayer:
 				p.x = -20.0
 			wparts[k] = p
 
-	func _labels(o: Vector2, z: float, vs: Vector2) -> void:
-		var sim: Sim = m.sim
-		var font: Font = m.hud.font_bold
-		var cjk: Font = m.hud.font_cjk
-		var fs: int = 11
-		var h: float = 15.0
-		var sink: Callable = func(r: Rect2, c: Color) -> void: draw_rect(r, c)
-		Sprites.outline_col = Sprites.OUTLINE
-		# Übersicht mit Gebietsanzeige: nur die Hauptstädte tragen Schilder, die Gebietsnamen erledigen den Rest
-		# Ebene „Einflusssphären“ ist eine Machtkarte: dort stehen in der Übersicht nur die Namen der Mächte
-		var only_caps: bool = m.show_terr and not m.reg_view and sim.world.layer != 2 and z < m.terr_zoom() * 0.85
-		var no_banners: bool = only_caps and sim.world.layer == 3
-		for v: Village in sim.villages:
-			if not v.alive or no_banners:
-				continue
-			var c: Clan = sim.clans[v.clan]
-			if only_caps and c.cap >= 0 and c.cap != v.id:
-				continue
-			var X: float = v.cx * z + o.x
-			# Oberkante des Dorfzentrums (Lagerfeuer 7, Halle 10/13 Pixel hoch)
-			var th: float = 7.0 if v.lvl == 0 else (13.0 if Sprites.village_tier(v) == 2 else 10.0)
-			var Y: float = (v.y + 2.0 - th) * z + o.y - 2.0
-			if X < -140 or X > vs.x + 140 or Y < -30 or Y > vs.y + 20:
-				continue
-			var txt: String = "%s %d" % [v.name, v.pop]
-			var tw: float = font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-			var bw: float = 13.0
-			var cw: float = 4.0
-			var pw: float = 13.0
-			var w: float = bw + cw + pw + tw + 10.0
-			var rx: float = roundf(X - w / 2.0)
-			var ry: float = roundf(Y - h)
-			var placed: bool = false
-			for dy: float in [0.0, -(h + 5.0), h + 5.0]:
-				var rr: Rect2 = Rect2(rx - 1.0, ry + dy - 3.0, w + 2.0, h + 6.0)
-				var clash: bool = false
-				for q: Rect2 in rects:
-					if q.intersects(rr):
-						clash = true
-						break
-				if not clash:
-					rects.append(rr)
-					ry += dy
-					placed = true
-					break
-			if not placed:
-				continue
-			_kingdom_label(rx, ry, w, h, bw, cw, pw, c, v, txt, font, cjk, fs, sink)
-		for u: Unit in sim.units:
-			if u.k != "p" or u.hp <= 0.0:
-				continue
-			var named: bool = u.fig != "" or u.ow
-			if not (u.rank >= 6 or named or u == m.sel_unit or (u.rank >= 4 and z >= 8.0)):
-				continue
-			if u.rank < 9 and z < 3.0 and u != m.sel_unit and not named:
-				continue
-			var X2: float = u.x * z + o.x
-			var Y2: float = (u.y - (9.0 if u.rank >= 9 else (6.5 if u.rank >= 6 else 4.5))) * z + o.y - 6.0
-			if X2 < 0 or X2 > vs.x or Y2 < 0 or Y2 > vs.y:
-				continue
-			var t2: String = "%s · R%d" % [u.given if u.sur == "" or u.fig == "" else u.sur + " " + u.given, u.rank]
-			if u.ow:
-				t2 = "Otherworldly Demon · R%d" % u.rank
-			var tw2: float = font.get_string_size(t2, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-			var r2: Rect2 = Rect2(roundf(X2 - tw2 / 2.0 - 5.0), roundf(Y2 - 7.0), roundf(tw2 + 10.0), 13.0)
-			var clash2: bool = false
-			for q: Rect2 in rects:
-				if q.intersects(r2):
-					clash2 = true
-					break
-			if clash2:
-				continue
-			rects.append(r2)
-			_plate(r2)
-			draw_rect(Rect2(r2.position.x + 2.0, r2.position.y + 2.0, 2.0, r2.size.y - 4.0), GuData.ESS_COL[u.rank])
-			draw_string(font, Vector2(r2.position.x + 6.0, r2.position.y + 10.0), t2, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, GuData.ESS_COL[u.rank].lightened(0.15))
-
-	## Namen der Orte der Gu-Weltkarte und gesetzter Orte im Fernblick: klein, schräg, weiß mit dunkler Kontur.
-	func _landmarks(o: Vector2, z: float, vs: Vector2) -> void:
-		if z > 3.4:
-			return
-		var a: float = clampf((3.4 - z) / 0.8, 0.0, 1.0)
-		if m.lm_font == null:
-			m.lm_font = FontVariation.new()
-			m.lm_font.base_font = ThemeDB.fallback_font
-			m.lm_font.variation_embolden = 0.35
-			m.lm_font.variation_transform = Transform2D(Vector2(1, 0), Vector2(0.22, 1), Vector2.ZERO)
-		var fnt: Font = m.lm_font
-		var fs: int = 9 if z < 2.0 else 10
-		var lms: Array = []
-		for l0: Dictionary in m.sim.world.landmarks:
-			var dup: bool = false
-			for p0: Place in m.sim.places:
-				if p0.alive and absf(p0.x - float(l0["x"])) < 14.0 and absf(p0.y - float(l0["y"])) < 14.0:
-					dup = true
-					break
-			if not dup:
-				lms.append(l0)
-		for p: Place in m.sim.places:
-			if p.alive:
-				lms.append({"name": p.name, "x": p.x, "y": p.y + 3.0, "kind": "ort"})
-		for l: Dictionary in lms:
-			var nm: String = l["name"]
-			var tw: float = fnt.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-			var pos: Vector2 = Vector2(float(l["x"]) * z + o.x - tw / 2.0, float(l["y"]) * z + o.y + (fs + 4.0 if l["kind"] == "siedlung" else 3.0))
-			if pos.x < -tw or pos.x > vs.x or pos.y < 0 or pos.y > vs.y:
-				continue
-			var col: Color = Color(1, 1, 1, a * 0.92)
-			if l["kind"] == "fluss":
-				col = Color(0.8, 0.92, 1.0, a * 0.92)
-			draw_string_outline(fnt, pos, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 3, Color(0.05, 0.07, 0.1, a * 0.85))
-			draw_string(fnt, pos, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
-
-	## Dunkle Namensplatte mit abgeschrägten Ecken und heller Kante (WorldBox).
-	func _plate(r: Rect2) -> void:
+	## Dunkle Namensplatte mit abgeschrägten Ecken und heller Kante (WorldBox); gewählt: goldene Kante.
+	func _plate(ci: Control, r: Rect2, sel: bool = false) -> void:
 		var x: float = r.position.x
 		var y: float = r.position.y
 		var w: float = r.size.x
 		var hh: float = r.size.y
-		var edge: Color = Color("#55574b")
-		draw_rect(Rect2(x + 1.0, y, w - 2.0, hh), Color(0.04, 0.045, 0.035, 0.75))
-		draw_rect(Rect2(x, y + 1.0, w, hh - 2.0), Color(0.04, 0.045, 0.035, 0.75))
-		draw_rect(Rect2(x + 1.0, y + 1.0, w - 2.0, hh - 2.0), Color("#1d1f1a"))
-		draw_rect(Rect2(x + 2.0, y + 1.0, w - 4.0, 1.0), edge)
-		draw_rect(Rect2(x + 2.0, y + hh - 2.0, w - 4.0, 1.0), edge)
-		draw_rect(Rect2(x + 1.0, y + 2.0, 1.0, hh - 4.0), edge)
-		draw_rect(Rect2(x + w - 2.0, y + 2.0, 1.0, hh - 4.0), edge)
-		draw_rect(Rect2(x + 2.0, y + 2.0, w - 4.0, 1.0), Color(1, 1, 1, 0.04))
+		var edge: Color = Color("#d8b040") if sel else Color("#55574b")
+		ci.draw_rect(Rect2(x + 1.0, y + 1.0, w, hh), Color(0, 0, 0, 0.3))
+		ci.draw_rect(Rect2(x + 1.0, y, w - 2.0, hh), Color(0.04, 0.045, 0.035, 0.85))
+		ci.draw_rect(Rect2(x, y + 1.0, w, hh - 2.0), Color(0.04, 0.045, 0.035, 0.85))
+		ci.draw_rect(Rect2(x + 1.0, y + 1.0, w - 2.0, hh - 2.0), Color("#1d1f1a"))
+		ci.draw_rect(Rect2(x + 2.0, y + 1.0, w - 4.0, 1.0), edge)
+		ci.draw_rect(Rect2(x + 2.0, y + hh - 2.0, w - 4.0, 1.0), edge)
+		ci.draw_rect(Rect2(x + 1.0, y + 2.0, 1.0, hh - 4.0), edge)
+		ci.draw_rect(Rect2(x + w - 2.0, y + 2.0, 1.0, hh - 4.0), edge)
+		ci.draw_rect(Rect2(x + 2.0, y + 2.0, w - 4.0, 1.0), Color(1, 1, 1, 0.04))
 
-	func _kingdom_label(rx: float, ry: float, w: float, h: float, bw: float, cw: float, pw: float, c: Clan, v: Village, txt: String, font: Font, cjk: Font, fs: int, sink: Callable) -> void:
+	func _kingdom_label(ci: Control, it: Dictionary, sink: Callable) -> void:
+		var rx: float = it["x"]
+		var ry: float = it["y"]
+		var w: float = it["w"]
+		var h: float = it["h"]
+		var bw: float = it["bw"]
+		var cw: float = it["cw"]
+		var pw: float = it["pw"]
+		var c: Clan = it["c"]
+		var v: Village = it["v"]
+		var txt: String = it["txt"]
+		var fs: int = int(it["fs"])
+		var font: Font = m.hud.font_bold
+		var cjk: Font = m.hud.font_cjk
 		var px: float = rx + bw + cw
-		_plate(Rect2(px, ry, w - bw - cw, h))
+		_plate(ci, Rect2(px, ry, w - bw - cw, h))
 		# Goldene Zierleiste rechts
 		var gx: float = rx + w - 3.0
-		draw_rect(Rect2(gx, ry - 1.0, 3.0, h + 2.0), Color("#3a2a10"))
+		ci.draw_rect(Rect2(gx, ry - 1.0, 3.0, h + 2.0), Color("#3a2a10"))
 		for k: int in range(int(h + 2.0)):
-			draw_rect(Rect2(gx + 1.0, ry - 1.0 + k, 1.0, 1.0), Color("#f0c048") if k % 3 != 1 else Color("#9a6a1c"))
-		draw_rect(Rect2(gx, ry - 2.0, 3.0, 1.0), Color("#f0c048"))
-		draw_rect(Rect2(gx, ry + h + 1.0, 3.0, 1.0), Color("#f0c048"))
+			ci.draw_rect(Rect2(gx + 1.0, ry - 1.0 + k, 1.0, 1.0), Color("#f0c048") if k % 3 != 1 else Color("#9a6a1c"))
+		ci.draw_rect(Rect2(gx, ry - 2.0, 3.0, 1.0), Color("#f0c048"))
+		ci.draw_rect(Rect2(gx, ry + h + 1.0, 3.0, 1.0), Color("#f0c048"))
 		# Verbindung ≡ zwischen Banner und Platte
 		for k: int in range(3):
-			draw_rect(Rect2(rx + bw, ry + h / 2.0 - 3.0 + k * 3.0, cw + 1.0, 1.0), Color("#c8ccc4"))
+			ci.draw_rect(Rect2(rx + bw, ry + h / 2.0 - 3.0 + k * 3.0, cw + 1.0, 1.0), Color("#c8ccc4"))
 		# Banner in Clanfarbe mit Siegel
 		var bc: Color = c.col
 		var by: float = ry - 2.0
 		var bh: float = h + 4.0
-		draw_rect(Rect2(rx, by, bw, bh), bc.darkened(0.62))
-		draw_rect(Rect2(rx + 1.0, by + 1.0, bw - 2.0, bh - 2.0), bc.darkened(0.08))
-		draw_rect(Rect2(rx + 2.0, by + 2.0, bw - 4.0, bh - 4.0), bc.lightened(0.38), false, 1.0)
-		draw_rect(Rect2(rx + 3.0, by + 3.0, bw - 6.0, bh - 6.0), bc.darkened(0.2))
+		ci.draw_rect(Rect2(rx, by, bw, bh), bc.darkened(0.62))
+		ci.draw_rect(Rect2(rx + 1.0, by + 1.0, bw - 2.0, bh - 2.0), bc.darkened(0.08))
+		ci.draw_rect(Rect2(rx + 2.0, by + 2.0, bw - 4.0, bh - 4.0), bc.lightened(0.38), false, 1.0)
+		ci.draw_rect(Rect2(rx + 3.0, by + 3.0, bw - 6.0, bh - 6.0), bc.darkened(0.2))
 		for q: Vector2 in [Vector2(rx - 1.0, by - 1.0), Vector2(rx + bw - 1.0, by - 1.0), Vector2(rx - 1.0, by + bh - 1.0), Vector2(rx + bw - 1.0, by + bh - 1.0)]:
-			draw_rect(Rect2(q, Vector2(2, 2)), bc.darkened(0.62))
+			ci.draw_rect(Rect2(q, Vector2(2, 2)), bc.darkened(0.62))
 		var gw: float = cjk.get_string_size(c.glyph, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
-		draw_string(cjk, Vector2(roundf(rx + bw / 2.0 - gw / 2.0), by + bh / 2.0 + 3.5), c.glyph, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, bc.lightened(0.7))
+		ci.draw_string(cjk, Vector2(roundf(rx + bw / 2.0 - gw / 2.0), roundf(by + bh / 2.0 + 3.5)), c.glyph, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, bc.lightened(0.7))
 		# Anführer
-		var L: Unit = v.lead
-		if L != null and L.hp > 0.0:
-			var sc: float = 1.45 / (2.1 if L.rank >= 9 else (1.45 if L.rank >= 6 else 1.0))
-			Sprites.draw_person(sink, px + 7.0, ry + h - 1.0, sc, L.race, L.rank, c.col, 1, true, false, 0.0, false, false, false, false, false, 0.7)
-		var tc: Color = Color("#ef7a62") if not c.war.is_empty() else Color("#62a6e6")
-		draw_string(font, Vector2(px + pw + 1.0, ry + h / 2.0 + 5.0), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.55))
-		draw_string(font, Vector2(px + pw, ry + h / 2.0 + 4.0), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, tc)
+		var Ld: Unit = v.lead
+		if Ld != null and Ld.hp > 0.0:
+			var sc: float = (1.3 if fs < 11 else 1.45) / (2.1 if Ld.rank >= 9 else (1.45 if Ld.rank >= 6 else 1.0))
+			Sprites.draw_person(sink, px + 7.0, ry + h - 1.0, sc, Ld.race, Ld.rank, c.col, 1, true, false, 0.0, false, false, false, false, false, 0.7)
+		var tc: Color = Color("#ff8a70") if not c.war.is_empty() else Color("#7ab8f0")
+		var tp: Vector2 = Vector2(px + pw, roundf(ry + h / 2.0 + fs * 0.38))
+		ci.draw_string(font, tp + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.6))
+		ci.draw_string(font, tp, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, tc)
 
 
 # ---------------- Entwickler: Screenshots für Vergleiche ----------------
@@ -2988,6 +3299,102 @@ func _selftest_camera() -> void:
 	for k: int in range(90):
 		await get_tree().process_frame
 	print("cam double tap ", z > zt * 1.5, " insp ", hud.insp.visible)
+
+
+## Entwickler: -- --fresh --uishots=<ordner> – Übersicht und Bedienung: Start (Vorgeschichte), Übersicht,
+## mittlere Zoomstufen (Beschriftung), nah, Meldungen, Werkzeug-Hinweis, Inspektoren, Einstellungen.
+func _dev_uishots(dir: String) -> void:
+	DirAccess.make_dir_recursive_absolute(dir)
+	while loading:
+		await get_tree().process_frame
+	await _wait(1.2)
+	await _shot(dir + "/u01_start.png")
+	while presim_on:
+		if sim.presim_chunk(3000, PRESIM_YEARS) >= 1.0:
+			_end_presim()
+		await get_tree().process_frame
+	for k: int in range(30):
+		sim.step(Sim.DT)
+	await _wait(1.6)
+	await _shot(dir + "/u02_overview.png")
+	for k: int in range(4):
+		hud.toast("Test message %d: a Gu Master of the Shang Clan breaks through to rank %d." % [k, k + 2], "jade", sim.year())
+	await _wait(0.3)
+	await _shot(dir + "/u03_toasts.png")
+	for zz: float in [1.4, 2.0, 2.8]:
+		z = min_z * zz
+		cam = Vector2(W * 0.5, H * 0.5)
+		_clamp_cam()
+		await _wait(0.6)
+		await _shot(dir + "/u04_mid_%s.png" % String.num(zz))
+	var best: Village = null
+	for v: Village in sim.villages:
+		if v.alive and v.reg == 4 and (best == null or v.pop > best.pop):
+			best = v
+	if best != null:
+		z = 4.5
+		cam = Vector2(best.cx, best.cy)
+		_clamp_cam()
+		await _wait(1.0)
+		await _shot(dir + "/u05_close.png")
+		sel_vil = best
+		_open_village()
+		await _wait(0.4)
+		await _shot(dir + "/u06_village.png")
+		_close_insp()
+	var top: Array[Unit] = sim.strongest(1)
+	if not top.is_empty():
+		sel_unit = top[0]
+		z = 6.0
+		cam = Vector2(top[0].x, top[0].y)
+		_clamp_cam()
+		_open_unit()
+		await _wait(0.6)
+		await _shot(dir + "/u07_unit.png")
+		follow = true
+		_open_unit()
+		await _wait(1.2)
+		await _shot(dir + "/u07b_follow.png")
+		hud.insp_collapsed = true
+		hud.tick_layout()
+		await _wait(1.0)
+		await _shot(dir + "/u07c_folded.png")
+		hud.insp_collapsed = false
+		_close_insp()
+	z = min_z
+	cam = Vector2(W / 2.0, H / 2.0)
+	_clamp_cam()
+	_apply_tab(0)
+	_click_tool(Powers.tool_by_id("t_deep"))
+	await _wait(0.4)
+	await _shot(dir + "/u08_tool.png")
+	await _wait(3.8)
+	await _shot(dir + "/u08b_pill.png")
+	hud._tip_btn = hud.tool_btns["t_grass"]
+	hud._tip_tool = Powers.tool_by_id("t_grass")
+	hud._show_tip()
+	await _wait(0.2)
+	await _shot(dir + "/u08c_tip.png")
+	hud._hide_tip()
+	_go_back()
+	_apply_tab(-1)
+	legend.collapsed = false
+	await _wait(0.5)
+	await _shot(dir + "/u10_legend.png")
+	legend.collapsed = true
+	if has_method("_open_settings"):
+		call("_open_settings")
+	else:
+		_open_display()
+	await _wait(0.3)
+	await _shot(dir + "/u09_settings.png")
+	hud.close_modal()
+	ui_scale = 2
+	_on_resize()
+	_home_view()
+	await _wait(0.6)
+	await _shot(dir + "/u12_large.png")
+	get_tree().quit()
 
 
 func _wait(t: float) -> void:

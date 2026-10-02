@@ -64,7 +64,7 @@ var brush_box: PanelContainer
 var brush_btns: Array[Button] = []
 var insp: PanelContainer
 var insp_text: RichTextLabel
-var insp_btns: HBoxContainer
+var insp_btns: HFlowContainer
 var insp_head: HBoxContainer
 var modal: ColorRect
 var modal_panel: PanelContainer
@@ -80,6 +80,27 @@ var legend: Control = null  ## Legende der Mächte (PowerLegend, gesetzt von GuM
 var toggled: Callable = Callable()  ## Werkzeug-Id -> bool: Schalter-Knöpfe (Cheats) leuchten, solange sie an sind
 var modal_input: LineEdit
 var _input_cb: Callable = Callable()
+var tool_pill: PanelContainer  ## dauerhafte Zeile „gewähltes Werkzeug“ über der Leiste (nachdem der große Hinweis verblasst)
+var _pill_icon: TextureRect
+var _pill_lbl: Label
+var tip: PanelContainer  ## Tooltip der Werkzeug-Knöpfe (Maus: verweilen, Touch: lange drücken)
+var _tip_name: Label
+var _tip_desc: Label
+var _tip_mode: Label
+var _tip_btn: Button = null
+var _tip_tool: Dictionary = {}
+var _tip_wait: float = -1.0
+var _tip_life: float = 0.0
+var _down_btn: Button = null
+var _down_scroll: int = 0
+var _long_fired: bool = false
+var _bar_tw: Tween = null
+var _bar_drag_x: float = -1.0  ## Maus-Ziehen der Leiste (Desktop)
+var _bar_drag_s: int = 0
+var _bar_dragged: bool = false
+var insp_scroll: ScrollContainer
+var insp_fold: Button
+var insp_collapsed: bool = false
 
 
 func _ready() -> void:
@@ -101,6 +122,7 @@ func _ready() -> void:
 	_build_bar()
 	_build_top()
 	_build_floaters()
+	_build_tip()
 	_build_windows()
 	_build_loading()
 
@@ -358,8 +380,28 @@ func _build_bar() -> void:
 			elif mbe.button_index == MOUSE_BUTTON_WHEEL_UP or mbe.button_index == MOUSE_BUTTON_WHEEL_LEFT:
 				dir = -1
 			if dir != 0:
-				tools_scroll.scroll_horizontal += dir * (BTN + 7)
-				tools_scroll.accept_event())
+				scroll_bar_to(clampi(_bar_goal() + dir * (BTN + 7) * 2, 0, _bar_max()), 0.16)
+				tools_scroll.accept_event()
+		# Maus ohne Touchscreen: Leiste mit gedrückter Taste waagrecht ziehen (Touch wischt die ScrollContainer selbst)
+		if DisplayServer.is_touchscreen_available():
+			return
+		if e is InputEventMouseButton and (e as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+			var mb2: InputEventMouseButton = e
+			if mb2.pressed:
+				_bar_drag_x = mb2.global_position.x
+				_bar_drag_s = tools_scroll.scroll_horizontal
+				_bar_dragged = false
+			else:
+				_bar_drag_x = -1.0
+		elif e is InputEventMouseMotion and _bar_drag_x >= 0.0 and ((e as InputEventMouseMotion).button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+			var dx: float = (e as InputEventMouseMotion).global_position.x - _bar_drag_x
+			if absf(dx) > 8.0 or _bar_dragged:
+				if not _bar_dragged:
+					_bar_dragged = true
+					_hide_tip()
+					if _bar_tw != null:
+						_bar_tw.kill()
+				tools_scroll.scroll_horizontal = clampi(int(_bar_drag_s - dx), 0, _bar_max()))
 	row.add_child(tools_scroll)
 	tools_box = HBoxContainer.new()
 	tools_box.add_theme_constant_override("separation", 7)
@@ -377,20 +419,26 @@ func _build_bar() -> void:
 	arrow.mouse_filter = Control.MOUSE_FILTER_STOP
 	arrow.draw.connect(func() -> void:
 		var h: float = arrow.size.y
+		var back: bool = _bar_at_end()
 		arrow.draw_rect(Rect2(0, 0, 26, h), Color("#2e3a2b"))
 		arrow.draw_rect(Rect2(1, 0, 25, h), Color("#4a5847"))
 		arrow.draw_rect(Rect2(1, 0, 2, h), Color("#5f735b"))
 		arrow.draw_rect(Rect2(3, 0, 1, h), Color("#3c4939"))
 		arrow.draw_rect(Rect2(22, 0, 1, h), Color("#3c4939"))
 		var cy: float = roundf(h * 0.5)
+		# am Ende der Leiste zeigt der Pfeil zurück an den Anfang
 		for k: int in range(13):
 			var hh: float = 13.0 - k
-			arrow.draw_rect(Rect2(9 + k, cy - hh, 1, hh * 2.0), Color("#5a4a00"))
+			var x0: float = (21 - k) if back else (9 + k)
+			arrow.draw_rect(Rect2(x0, cy - hh, 1, hh * 2.0), Color("#5a4a00"))
 		for k: int in range(11):
 			var hh2: float = 11.0 - k
-			arrow.draw_rect(Rect2(9 + k, cy - hh2, 1, hh2 * 2.0 - 1.0), C_YELLOW)
-			arrow.draw_rect(Rect2(9 + k, cy + hh2 * 0.3, 1, hh2 * 0.7 - 1.0), Color("#b89a00")))
-	arrow.pressed.connect(func() -> void: tools_scroll.scroll_horizontal += int(tools_scroll.size.x * 0.7))
+			var x1: float = (20 - k) if back else (9 + k)
+			arrow.draw_rect(Rect2(x1, cy - hh2, 1, hh2 * 2.0 - 1.0), C_YELLOW)
+			arrow.draw_rect(Rect2(x1, cy + hh2 * 0.3, 1, hh2 * 0.7 - 1.0), Color("#b89a00")))
+	arrow.pressed.connect(func() -> void:
+		var to: int = 0 if _bar_at_end() else mini(_bar_max(), tools_scroll.scroll_horizontal + int(tools_scroll.size.x * 0.7))
+		scroll_bar_to(to))
 	bar.add_child(arrow)
 	var ver: Label = _label("gu-world 0.3-27@gdt (4)", 10, Color("#a4b0a4"))
 	ver.anchor_left = 1.0
@@ -403,6 +451,31 @@ func _build_bar() -> void:
 	ver.offset_bottom = -2
 	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	bar.add_child(ver)
+
+
+func _bar_max() -> int:
+	return maxi(0, int(tools_box.size.x - tools_scroll.size.x))
+
+
+func _bar_at_end() -> bool:
+	return _bar_max() > 0 and tools_scroll.scroll_horizontal >= _bar_max() - 4
+
+
+var _bar_to: int = -1
+
+
+func _bar_goal() -> int:
+	return _bar_to if _bar_tw != null and _bar_tw.is_running() else tools_scroll.scroll_horizontal
+
+
+## Werkzeugleiste weich blättern (Pfeil, Mausrad).
+func scroll_bar_to(to: int, dur: float = 0.3) -> void:
+	if _bar_tw != null:
+		_bar_tw.kill()
+	_bar_to = to
+	_hide_tip()
+	_bar_tw = create_tween()
+	_bar_tw.tween_property(tools_scroll, "scroll_horizontal", to, dur).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 
 func _separator() -> Control:
@@ -462,10 +535,43 @@ func set_tools(tab: int) -> void:
 			gl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			b.add_child(gl)
 		var tt: Dictionary = t
-		b.pressed.connect(func() -> void: tool_pressed.emit(tt))
+		b.tooltip_text = ""  # eigener Tooltip mit Beschreibung (Maus: verweilen, Touch: lange drücken)
+		b.mouse_entered.connect(func() -> void:
+			if _down_btn == null:
+				_tip_btn = b
+				_tip_tool = tt
+				_tip_wait = 0.45)
+		b.mouse_exited.connect(func() -> void:
+			if _tip_btn == b and _down_btn == null:
+				_hide_tip())
+		b.button_down.connect(func() -> void:
+			_down_btn = b
+			_down_scroll = tools_scroll.scroll_horizontal
+			_long_fired = false
+			_tip_btn = b
+			_tip_tool = tt
+			if not tip.visible:
+				_tip_wait = 0.42)
+		b.button_up.connect(func() -> void:
+			if _down_btn == b:
+				_down_btn = null)
+		b.pressed.connect(func() -> void:
+			if _bar_dragged:
+				_bar_dragged = false
+				return
+			if _long_fired:
+				# langes Drücken zeigt nur die Beschreibung
+				_long_fired = false
+				_tip_life = 2.6
+				return
+			_hide_tip()
+			tool_pressed.emit(tt))
 		column.add_child(b)
 		tool_btns[t["id"]] = b
+	if _bar_tw != null:
+		_bar_tw.kill()
 	tools_scroll.scroll_horizontal = 0
+	_hide_tip()
 	var spacer: Control = Control.new()
 	spacer.custom_minimum_size = Vector2(26, 0)
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -483,6 +589,67 @@ func refresh_tools(active_id: String, weather_type: String) -> void:
 		b.add_theme_stylebox_override("pressed", s)
 	var tl: Dictionary = Powers.tool_by_id(active_id)
 	brush_box.visible = not tl.is_empty() and tl["m"] == "paint"
+	_set_pill(tl)
+
+
+const MODE_TEXT: Dictionary = {"paint": "drag to paint", "spawn": "tap to place", "tap": "tap the map", "pair": "tap two targets"}
+
+
+## Zeile „gewähltes Werkzeug“: Icon, Name und was zu tun ist; leer = aus.
+func _set_pill(t: Dictionary) -> void:
+	if t.is_empty() or str(t["m"]) == "act":
+		tool_pill.visible = false
+		return
+	_pill_icon.texture = Icons.get_icon(t["id"])
+	_pill_lbl.text = "%s · %s" % [t["n"], MODE_TEXT.get(str(t["m"]), "")]
+	tool_pill.visible = not bar_hidden
+	tool_pill.reset_size()
+
+
+func _hide_tip() -> void:
+	_tip_btn = null
+	_tip_wait = -1.0
+	_tip_life = 0.0
+	if tip != null:
+		tip.visible = false
+
+
+func _show_tip() -> void:
+	var t: Dictionary = _tip_tool
+	if _tip_btn == null or t.is_empty() or not is_instance_valid(_tip_btn):
+		return
+	_tip_name.text = str(t["n"])
+	var d: String = str(t.get("d", ""))
+	_tip_desc.text = d
+	_tip_desc.visible = d != ""
+	var mt: String = MODE_TEXT.get(str(t["m"]), "")
+	_tip_mode.text = ("Tap to use" if str(t["m"]) == "act" else "Tap to select, then " + mt)
+	var vs: Vector2 = get_viewport_rect().size
+	var w: float = minf(270.0, vs.x - 16.0)
+	_tip_desc.custom_minimum_size.x = w - 20.0
+	tip.custom_minimum_size.x = w
+	_tip_desc.size.x = w - 20.0
+	tip.visible = true
+	_place_tip()
+	_tip_life = 6.0
+
+
+## Tooltip über dem Knopf, über der Reiterzeile; Höhe folgt dem umbrochenen Text (läuft, solange er sichtbar ist).
+func _place_tip() -> void:
+	if _tip_btn == null or not is_instance_valid(_tip_btn):
+		return
+	tip.reset_size()
+	var vs: Vector2 = get_viewport_rect().size
+	var br: Rect2 = _tip_btn.get_global_rect()
+	var x: float = clampf(br.get_center().x - tip.size.x / 2.0, 8.0, vs.x - tip.size.x - 8.0)
+	var y: float = vs.y - bar_height() - 6.0 - tip.size.y
+	if tool_pill.visible:
+		y = minf(y, tool_pill.position.y - 6.0 - tip.size.y)
+	if brush_box.visible:
+		y = minf(y, brush_box.position.y - 6.0 - tip.size.y)
+	tip.position = Vector2(roundf(x), roundf(y))
+	if tip.get_index() != get_child_count() - 1:
+		move_child(tip, -1)
 
 
 func set_paused(p: bool) -> void:
@@ -559,42 +726,64 @@ func _build_top() -> void:
 
 
 const MAX_TOASTS: int = 3
+const TOAST_SECS: float = 3.6
+const TOAST_CHARS: int = 96  ## längere Meldungen werden gekürzt – die Chronik hat alles
 
 
+## Meldung oben links: kompakt (höchstens zwei Zeilen, schmal), verblasst nach TOAST_SECS; höchstens drei.
 func toast(text: String, kind: String, year: int) -> void:
+	var col: Color = GuData.KCOL.get(kind, C_YELLOW)
 	var p: PanelContainer = PanelContainer.new()
-	var s: StyleBoxFlat = sb(Color(0.07, 0.094, 0.078, 0.84), Color.TRANSPARENT, 0, 4)
+	var s: StyleBoxFlat = sb(Color(0.05, 0.07, 0.06, 0.74), Color.TRANSPARENT, 0, 3)
 	s.border_width_left = 3
-	s.border_color = GuData.KCOL.get(kind, C_YELLOW)
-	s.content_margin_left = 8
-	s.content_margin_right = 8
-	s.content_margin_top = 3
-	s.content_margin_bottom = 3
+	s.border_color = col
+	s.content_margin_left = 6
+	s.content_margin_right = 6
+	s.content_margin_top = 1
+	s.content_margin_bottom = 2
 	p.add_theme_stylebox_override("panel", s)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	var r: RichTextLabel = RichTextLabel.new()
 	r.bbcode_enabled = true
 	r.fit_content = true
 	r.scroll_active = false
 	r.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	r.custom_minimum_size = Vector2(160, 0)
 	r.add_theme_font_override("normal_font", ThemeDB.fallback_font)
 	r.add_theme_font_override("bold_font", font_bold)
-	r.add_theme_font_size_override("normal_font_size", 12)
-	r.add_theme_font_size_override("bold_font_size", 12)
+	r.add_theme_font_size_override("normal_font_size", 11)
+	r.add_theme_font_size_override("bold_font_size", 11)
+	r.add_theme_constant_override("line_separation", 0)
+	r.add_theme_color_override("default_color", Color("#e6ece4"))
+	r.add_theme_constant_override("outline_size", 2)
+	r.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.5))
 	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	r.text = "[b][color=#%s]Y%d[/color][/b] %s" % [GuData.KCOL.get(kind, C_YELLOW).to_html(false), year, _esc(text)]
+	var t: String = text.strip_edges()
+	if t.length() > TOAST_CHARS:
+		t = t.substr(0, TOAST_CHARS - 1).strip_edges() + "…"
+	r.text = "[b][color=#%s]Y%d[/color][/b] %s" % [col.to_html(false), year, _esc(t)]
+	# schmal: kurze Meldungen nur so breit wie nötig
+	var tw: float = ThemeDB.fallback_font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + font_bold.get_string_size("Y%d " % year, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 6.0
+	r.custom_minimum_size = Vector2(minf(tw, _toast_w() - 15.0), 0)
 	p.add_child(r)
 	toasts.add_child(p)
 	while toasts.get_child_count() > MAX_TOASTS:
 		var old: Node = toasts.get_child(0)
 		toasts.remove_child(old)
 		old.queue_free()
-	var tw: Tween = p.create_tween()
-	tw.tween_interval(5.0)
-	tw.tween_property(p, "modulate:a", 0.0, 0.6)
-	tw.tween_callback(p.queue_free)
+	p.modulate.a = 0.0
+	var tw2: Tween = p.create_tween()
+	tw2.tween_property(p, "modulate:a", 1.0, 0.15)
+	tw2.tween_interval(TOAST_SECS)
+	tw2.tween_property(p, "modulate:a", 0.0, 0.5)
+	tw2.tween_callback(p.queue_free)
 	tick_layout()
+
+
+## Breite der Meldungsspalte: links oben, nie unter Stern/Geschenk, höchstens 300 px.
+func _toast_w() -> float:
+	var vs: Vector2 = get_viewport_rect().size
+	return clampf(minf(vs.x * 0.68, vs.x - 10.0 - (vs.x - top_r.get_rect().position.x) - 8.0), 160.0, 300.0)
 
 
 static func _esc(s: String) -> String:
@@ -686,6 +875,63 @@ func _build_floaters() -> void:
 		brush_btns.append(b)
 
 
+func _build_tip() -> void:
+	tip = PanelContainer.new()
+	var ts: StyleBoxFlat = sb(Color(0.06, 0.08, 0.07, 1.0), Color("#c8a040"), 1, 4)
+	ts.set_content_margin_all(8)
+	ts.content_margin_top = 5
+	ts.shadow_color = Color(0, 0, 0, 0.4)
+	ts.shadow_size = 6
+	tip.add_theme_stylebox_override("panel", ts)
+	tip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tip.visible = false
+	add_child(tip)
+	var tv: VBoxContainer = VBoxContainer.new()
+	tv.add_theme_constant_override("separation", 2)
+	tip.add_child(tv)
+	_tip_name = _label("", 15, Color("#f5a01e"), 3, Color(0.1, 0.05, 0.0, 0.8))
+	_tip_name.label_settings.font = font_black
+	tv.add_child(_tip_name)
+	_tip_desc = Label.new()
+	_tip_desc.add_theme_font_override("font", ThemeDB.fallback_font)
+	_tip_desc.add_theme_font_size_override("font_size", 12)
+	_tip_desc.add_theme_color_override("font_color", Color("#e8eee6"))
+	_tip_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tv.add_child(_tip_desc)
+	_tip_mode = Label.new()
+	_tip_mode.add_theme_font_override("font", ThemeDB.fallback_font)
+	_tip_mode.add_theme_font_size_override("font_size", 11)
+	_tip_mode.add_theme_color_override("font_color", C_MUTED)
+	tv.add_child(_tip_mode)
+	# Zeile „gewähltes Werkzeug“
+	tool_pill = PanelContainer.new()
+	var ps: StyleBoxFlat = sb(Color(0.06, 0.08, 0.07, 0.86), Color("#c74634"), 0, 4)
+	ps.border_width_left = 3
+	ps.content_margin_left = 5
+	ps.content_margin_right = 9
+	ps.content_margin_top = 2
+	ps.content_margin_bottom = 2
+	tool_pill.add_theme_stylebox_override("panel", ps)
+	tool_pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tool_pill.visible = false
+	add_child(tool_pill)
+	var ph: HBoxContainer = HBoxContainer.new()
+	ph.add_theme_constant_override("separation", 5)
+	ph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tool_pill.add_child(ph)
+	_pill_icon = TextureRect.new()
+	_pill_icon.custom_minimum_size = Vector2(20, 20)
+	_pill_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_pill_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_pill_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	ph.add_child(_pill_icon)
+	_pill_lbl = _label("", 12, Color("#f2f6f0"), 3, Color(0, 0, 0, 0.6))
+	_pill_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_pill_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_pill_lbl.clip_text = true
+	ph.add_child(_pill_lbl)
+
+
 func set_brush(i: int) -> void:
 	for k: int in range(brush_btns.size()):
 		var s: StyleBox = well_style(k == i)
@@ -724,8 +970,15 @@ func layout_floaters() -> void:
 	age_lbl.position = Vector2(12, 8)
 	# Fenster: auf breiten Bildschirmen schmal und mittig statt über die ganze Breite
 	var iw: float = minf(vs.x - 24.0, 400.0)
-	insp.offset_left = roundf((vs.x - iw) / 2.0)
-	insp.offset_right = -roundf((vs.x - iw) / 2.0)
+	if vs.x >= 760.0:
+		# Querformat: Inspektor links, die Karte daneben bleibt frei
+		insp.offset_left = 12
+		insp.offset_right = -roundf(vs.x - 12.0 - iw)
+		insp.offset_top = 40
+	else:
+		insp.offset_left = roundf((vs.x - iw) / 2.0)
+		insp.offset_right = -roundf((vs.x - iw) / 2.0)
+		insp.offset_top = 70
 	var mw: float = minf(vs.x - 24.0, 480.0)
 	modal_panel.offset_left = roundf((vs.x - mw) / 2.0)
 	modal_panel.offset_right = -roundf((vs.x - mw) / 2.0)
@@ -774,19 +1027,39 @@ func tick_layout() -> void:
 		fs -= 1
 	if hint_name.label_settings.font_size != fs:
 		hint_name.label_settings.font_size = fs
-	# Meldungen: oben links, nie unter Stern/Geschenk; liegt der Inspektor darüber, rutschen sie darunter
-	var tw: float = minf(vs.x - 10.0 - (vs.x - top_r.get_rect().position.x) - 8.0, TOAST_MAX_W)
+	# Meldungen: oben links unter Zeitalter-Zeile und Legende, schmal; solange ein Fenster offen ist, ruhen sie (Chronik hat alles)
+	var tw: float = _toast_w()
 	var ty: float = 28.0
 	toasts.offset_left = 10
 	toasts.offset_right = -(vs.x - 10.0 - tw)
-	if insp.visible:
-		var ir: Rect2 = insp.get_global_rect()
-		if ir.position.x < 10.0 + tw:
-			ty = ir.end.y + 6.0
 	if legend != null and legend.visible:
-		ty = maxf(ty, legend.get_global_rect().end.y + 6.0)
+		ty = maxf(ty, legend.get_global_rect().end.y + 4.0)
 	toasts.offset_top = ty
-	toasts.visible = not bar_hidden and ty + 40.0 < vs.y - b - 60.0
+	toasts.visible = not bar_hidden and not insp.visible and not modal.visible and ty + 40.0 < vs.y - b - 60.0
+	# Zeile „gewähltes Werkzeug“: links über der Leiste (neben dem Wetter-Kasten, nicht unter dem Pinsel-Kasten)
+	if tool_pill.visible:
+		var px: float = 10.0
+		if wbox.visible:
+			px = wbox.position.x + wbox.size.x + 8.0
+		var right: float = vs.x - 10.0
+		if brush_box.visible:
+			right = brush_box.position.x - 8.0
+		_pill_lbl.custom_minimum_size.x = 0
+		var want: float = font_bold.get_string_size(_pill_lbl.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 6.0
+		_pill_lbl.custom_minimum_size.x = clampf(minf(want, right - px - 45.0), 40.0, 400.0)
+		_pill_lbl.size.x = _pill_lbl.custom_minimum_size.x
+		tool_pill.reset_size()
+		tool_pill.position = Vector2(px, vs.y - b - 8.0 - tool_pill.size.y)
+	# Inspektor: Werte-Zeilen scrollen, wenn sie mehr als ~40 % des Bildschirms brauchen
+	if insp.visible and insp_scroll != null:
+		var ch: float = insp_rows.get_combined_minimum_size().y
+		var mh: float = clampf(vs.y * 0.4 - 40.0, 120.0, 460.0)
+		var want_h: float = 0.0 if insp_collapsed else minf(ch, mh)
+		if absf(insp_scroll.custom_minimum_size.y - want_h) > 0.5:
+			insp_scroll.custom_minimum_size.y = want_h
+		# nur die Höhe auf den Inhalt schrumpfen (Breite hängt an den Ankern)
+		if insp.size.y > insp.get_combined_minimum_size().y + 0.5:
+			insp.size = Vector2(insp.size.x, 0.0)
 
 
 func _process(delta: float) -> void:
@@ -795,6 +1068,27 @@ func _process(delta: float) -> void:
 		if hint_t <= 0.0:
 			var tw: Tween = create_tween()
 			tw.tween_property(hint_box, "modulate:a", 0.0, 0.45)
+	# die Werkzeug-Zeile erscheint, sobald der große Hinweis verblasst
+	tool_pill.modulate.a = clampf(1.0 - hint_box.modulate.a * 1.6, 0.0, 1.0)
+	# Tooltip: verweilen (Maus) bzw. lange drücken (Touch); Wischen über die Leiste bricht ab
+	if _down_btn != null and absi(tools_scroll.scroll_horizontal - _down_scroll) > 6:
+		_down_btn = null
+		_long_fired = false
+		_hide_tip()
+	if _tip_btn != null and _tip_wait > 0.0:
+		_tip_wait -= delta
+		if _tip_wait <= 0.0:
+			_show_tip()
+			if _down_btn != null and _down_btn == _tip_btn and _down_btn.button_pressed:
+				_long_fired = true
+	elif tip.visible:
+		_place_tip()
+		_tip_life -= delta
+		if _tip_life <= 0.0 or (_tip_btn != null and not is_instance_valid(_tip_btn)):
+			_hide_tip()
+	if _bar_at_end() != arrow.get_meta("back", false):
+		arrow.set_meta("back", _bar_at_end())
+		arrow.queue_redraw()
 
 
 # ---------------- Fenster ----------------
@@ -823,7 +1117,11 @@ const STAT_ICON: Dictionary = {
 	"Feuds": "sword", "Alliances": "hand", "Age": "hourglass", "Path": "orb", "Aptitude": "star", "Talent": "star", "Essence": "gem",
 	"Progress": "arrow", "Aperture": "eye", "Work": "hammer", "Job": "hammer", "Life": "heart", "Health": "heart", "Victories": "sword", "Wins": "sword", "Strength": "sword", "Kills": "skull", "Prey": "skull", "Loot": "skull",
 	"Disposition": "yinyang", "Alignment": "yinyang", "Owner": "crown", "Effect": "gem", "Gu Masters": "person", "Rank": "star", "Tier": "star", "Fades": "hourglass", "Fetus Gu": "orb",
-	"Influence": "crown", "Territory": "flag"}
+	"Influence": "crown", "Territory": "flag",
+	"Stage": "bars", "Might": "bolt", "Tribulation": "bolt", "Capital": "castle", "Clan Leader": "crown", "Dominion": "crown",
+	"Plan": "scroll", "Agenda": "scroll", "Goal": "scroll", "States": "scroll", "Title": "tag", "Id": "tag", "Figure": "tag",
+	"Luck": "clover", "Loyalty": "shield", "War weariness": "sword", "Bloodline": "drop", "Cultivation": "lotus", "Cheat": "wand",
+	"Villages": "house", "Souls": "person"}
 
 
 static func stat_icon(id: String) -> ImageTexture:
@@ -866,6 +1164,26 @@ static func stat_icon(id: String) -> ImageTexture:
 			g = [".......", "SS...TT", "SSS.TTT", ".SSSTT.", "..SST..", "...S...", "......."]
 		"yinyang":
 			g = ["..WWK..", ".WWWKK.", "WWKWKKK", "WWWKKKK", "WWWWKWK", ".WWWKK.", "..WKK.."]
+		"bars":
+			g = [".......", ".....C.", ".....C.", "...C.C.", "...C.C.", ".C.C.C.", ".C.C.C."]
+		"bolt":
+			g = ["...YY..", "..YY...", ".YYYYY.", "...YY..", "..YY...", ".YY....", ".Y....."]
+		"castle":
+			g = ["G.G.G.G", "GGGGGGG", ".GGGGG.", ".GGKGG.", ".GGKGG.", ".GGGGG.", "......."]
+		"scroll":
+			g = [".sssss.", "s.....s", ".sKKKs.", ".s...s.", ".sKKKs.", "s.....s", ".sssss."]
+		"tag":
+			g = [".YYYYY.", "YYYYYYY", "YKYYYYY", "YYYYYYY", ".YYYYY.", ".......", "......."]
+		"clover":
+			g = [".gg.gg.", "gGGgGGg", ".gGGGg.", "gGGgGGg", ".gg.gg.", "...b...", "....b.."]
+		"shield":
+			g = ["BBBBBBB", "BWBBBWB", "BBWBWBB", "BBBWBBB", ".BBBBB.", "..BBB..", "...B..."]
+		"drop":
+			g = ["...R...", "..RRR..", ".RRRRR.", ".RWRRR.", ".RRRRR.", "..RRR..", "......."]
+		"lotus":
+			g = ["...V...", "..VVV..", "V.VVV.V", "VVVVVVV", ".VVVVV.", "..ggg..", "......."]
+		"wand":
+			g = ["Y.....Y", ".Y...Y.", "...Y...", "..b....", ".b.....", "b......", "......."]
 	var pal: Dictionary = {"H": "#5a3a22", "S": "#f0c090", "B": "#3d6fd0", "L": "#3a2c26", "R": "#e0402e", "W": "#eef2f0", "g": "#3a7a2a",
 		"G": "#9aa4ac", "D": "#5a3a22", "P": "#8a6a3a", "F": "#3d6fd0", "Y": "#f0c040", "C": "#62d8a4", "K": "#22262a", "s": "#e8d090",
 		"b": "#7a5030", "T": "#c8a070", "V": "#b98cff"}
@@ -874,6 +1192,11 @@ static func stat_icon(id: String) -> ImageTexture:
 	if id == "house":
 		pal["R"] = "#c63a2a"
 		pal["W"] = "#e8dcc0"
+	if id == "clover":
+		pal["g"] = "#2f8a3a"
+		pal["G"] = "#6fd24a"
+	if id == "lotus":
+		pal["V"] = "#f08ac0"
 	var q: Px = Px.new(9, 9)
 	q.draw_image(Px.grid(g, pal), 1, 1)
 	q.outline(Color("#0e1214"))
@@ -914,7 +1237,7 @@ func _win_bevel(c: Control) -> void:
 	c.draw_rect(Rect2(2, 2, w - 4, h - 4), C_SLATE_EDGE, false, 1.0)
 
 
-func _title_bar(lbl: Label, close_cb: Callable) -> PanelContainer:
+func _title_bar(lbl: Label, close_cb: Callable, fold: Button = null) -> PanelContainer:
 	var tb: PanelContainer = PanelContainer.new()
 	var ts: StyleBoxFlat = sb(C_SLATE_DK, Color("#3a4850"), 0, 2)
 	ts.border_width_bottom = 2
@@ -929,6 +1252,12 @@ func _title_bar(lbl: Label, close_cb: Callable) -> PanelContainer:
 	var h: HBoxContainer = HBoxContainer.new()
 	h.add_theme_constant_override("separation", 6)
 	tb.add_child(h)
+	if fold != null:
+		h.add_child(fold)
+	else:
+		var pad: Control = Control.new()
+		pad.custom_minimum_size = Vector2(0, 0)
+		h.add_child(pad)
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	lbl.clip_text = true
@@ -971,7 +1300,20 @@ func _build_windows() -> void:
 	insp.add_child(v)
 	insp_title = _label("", 16, Color("#f2f6f8"), 4, Color("#0c1013"))
 	insp_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	v.add_child(_title_bar(insp_title, close_insp))
+	# Zuklappen: nur Kopf und Knöpfe, die Karte bleibt frei
+	insp_fold = Button.new()
+	insp_fold.custom_minimum_size = Vector2(26, 26)
+	_style_button(insp_fold, _tex_style(well_tex("n", 26, 26), 6))
+	insp_fold.tooltip_text = "Fold / unfold"
+	insp_fold.draw.connect(func() -> void:
+		var c: Vector2 = insp_fold.size / 2.0
+		var pts: PackedVector2Array = PackedVector2Array([c + Vector2(-5, -2), c + Vector2(5, -2), c + Vector2(0, 4)]) if not insp_collapsed else PackedVector2Array([c + Vector2(-2, -5), c + Vector2(-2, 5), c + Vector2(4, 0)])
+		insp_fold.draw_colored_polygon(pts, Color("#e8c70a")))
+	insp_fold.pressed.connect(func() -> void:
+		insp_collapsed = not insp_collapsed
+		insp_fold.queue_redraw()
+		tick_layout())
+	v.add_child(_title_bar(insp_title, close_insp, insp_fold))
 	var inner: MarginContainer = MarginContainer.new()
 	for side: String in ["left", "right", "top", "bottom"]:
 		inner.add_theme_constant_override("margin_" + side, 8)
@@ -982,14 +1324,21 @@ func _build_windows() -> void:
 	insp_head = HBoxContainer.new()
 	insp_head.add_theme_constant_override("separation", 10)
 	iv.add_child(insp_head)
+	insp_scroll = ScrollContainer.new()
+	insp_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	insp_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	insp_scroll.scroll_deadzone = 6
+	iv.add_child(insp_scroll)
 	insp_rows = VBoxContainer.new()
 	insp_rows.add_theme_constant_override("separation", 1)
-	iv.add_child(insp_rows)
+	insp_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	insp_scroll.add_child(insp_rows)
 	insp_text = _rich()
 	insp_text.visible = false
 	iv.add_child(insp_text)
-	insp_btns = HBoxContainer.new()
-	insp_btns.add_theme_constant_override("separation", 6)
+	insp_btns = HFlowContainer.new()
+	insp_btns.add_theme_constant_override("h_separation", 5)
+	insp_btns.add_theme_constant_override("v_separation", 5)
 	iv.add_child(insp_btns)
 	modal = ColorRect.new()
 	modal.color = Color(0.02, 0.03, 0.05, 0.55)
@@ -1144,7 +1493,10 @@ func open_insp(head_tex: Texture2D, head_glyph: String, head_col: Color, title: 
 	update_insp_body(body)
 	_fill_buttons(insp_btns, buttons)
 	insp_btns.visible = not buttons.is_empty()
+	insp_scroll.scroll_vertical = 0
 	insp.visible = true
+	insp_scroll.custom_minimum_size.y = 0.0
+	tick_layout()
 
 
 ## Zerlegt den BBCode-Text in Zeilen: "Name  Wert" wird zur Werte-Zeile mit Symbol.
@@ -1314,6 +1666,8 @@ func set_ui_hidden(h: bool) -> void:
 	hint_box.visible = not h
 	age_lbl.visible = not h
 	show_btn.visible = h
+	tool_pill.visible = false if h else tool_pill.visible
+	_hide_tip()
 	if h:
 		insp.visible = false
 		brush_box.visible = false
