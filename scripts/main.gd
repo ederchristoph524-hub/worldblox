@@ -139,6 +139,8 @@ func _ready() -> void:
 			_dev_mapimg(a.substr(9))
 		if a == "--sizetest":
 			_dev_sizetest()
+		if a == "--perftest":
+			PerfTest.run(self)
 		if a.begins_with("--terrshots="):
 			_dev_terrshots(a.substr(12))
 		if a.begins_with("--gfxshots="):
@@ -436,7 +438,7 @@ func _process(delta: float) -> void:
 		return
 	if sim.cheats.jumping():
 		# Cheat-Zeitsprung: im Zeitraffer, in Häppchen je Bild
-		if sim.cheats.jump_chunk(50) >= 1.0:
+		if sim.cheats.jump_chunk(80) >= 1.0:
 			hud.toast("Time skip finished: %d years passed – year %d." % [sim.year() - sim.cheats.jump_y0, sim.year()], "violet", sim.year())
 			terr_t = 0.0
 	elif presim_on:
@@ -451,10 +453,13 @@ func _process(delta: float) -> void:
 			_end_presim()
 	elif not paused:
 		sim_acc += rdt * SPEEDS[speed_idx]
+		# Leistung: ab Tempo 2 gestaffelte Wesen, ab Tempo 5 doppelte Schrittweite (siehe Sim.stagger)
+		sim.stagger = SPEEDS[speed_idx] >= 2
+		var sdt: float = Sim.DT * (2.0 if SPEEDS[speed_idx] >= 5 else 1.0)
 		var n: int = 0
-		while sim_acc >= Sim.DT and n < 14:
-			sim.step(Sim.DT)
-			sim_acc -= Sim.DT
+		while sim_acc >= sdt and n < 14:
+			sim.step(sdt)
+			sim_acc -= sdt
 			n += 1
 		if n >= 14:
 			sim_acc = 0.0
@@ -485,8 +490,8 @@ func _process(delta: float) -> void:
 		# Einflusssphären (Bünde, Vormächte, Ehrwürdige) – billig, auch ohne Gebietsanzeige für Inspektor und Auren
 		infl_t = 1.0
 		Influence.compute(sim)
-	if sim.terr_dirty and (show_terr or reg_view) and terr_t <= 0.0:
-		terr_t = 1.5
+	if sim.terr_dirty and (show_terr or reg_view) and terr_t <= 0.0 and not sim.cheats.jumping():
+		terr_t = 4.0 if presim_on else 1.5   # Vorgeschichte: seltener (Zeit für die Simulation); im Zeitsprung erst am Ende
 		sim.terr_dirty = false
 		Influence.compute(sim)
 		sim.world.begin_territory(sim.villages, sim.clans, Influence.head)
@@ -524,7 +529,9 @@ func _process(delta: float) -> void:
 	if legend.visible:
 		legend.near = cl >= 1.0
 		legend.refresh()
-	ents.queue_redraw()
+	# Vorgeschichte und Zeitsprung: Wesen nur jedes zweite Bild neu zeichnen (mehr Zeit für die Simulation)
+	if not (presim_on or sim.cheats.jumping()) or (Engine.get_process_frames() & 1) == 0:
+		ents.queue_redraw()
 	clouds.tick(rdt)
 	clouds.queue_redraw()
 	screen.tick(rdt)

@@ -68,6 +68,11 @@ var edge_tex: ImageTexture
 ## Auflösung der Grenzlinien-Textur je Kachel (Außenlinie, Farblinie, frei)
 const EDGE_S: int = 3
 var dirty: PackedByteArray
+## Je Block das geänderte Rechteck (x0, y0, x1, y1 in Kacheln, x1/y1 exklusiv); x0 >= x1 = ganzer Block.
+## flush_dirty zeichnet nur dieses Rechteck neu (ein gefällter Baum: ~13 × 17 statt bis zu 4 × 32 × 32 Kacheln).
+var drect: PackedInt32Array
+var _upl_pending: bool = false
+var _upl_ms: int = 0
 ## Version je 32er-Block: steigt bei jedem Neuzeichnen (flush_dirty, render_all); die Nahansicht (Detail) backt danach neu.
 var dver: PackedInt32Array
 var water_dirty: bool = false
@@ -116,6 +121,8 @@ func _alloc_images() -> void:
 		edge_tex.set_image(edge_img)
 	dirty = PackedByteArray()
 	dirty.resize(CXN * CXN)
+	drect = PackedInt32Array()
+	drect.resize(CXN * CXN * 4)
 	dver = PackedInt32Array()
 	dver.resize(CXN * CXN)
 	_jphase = -1
@@ -705,28 +712,60 @@ func render_all() -> void:
 	near_tex.update(near_img)
 	far_tex.update(far_img)
 	dirty.fill(0)
+	drect.fill(0)
+	_upl_pending = false
 	for c: int in range(dver.size()):
 		dver[c] += 1
 	gen_ms["render"] = (Time.get_ticks_usec() - t0) / 1000.0
 
 
+## Kachel (x, y) neu zeichnen (mit den Nachbarn im selben Block – Ränder hängen von ihnen ab).
 func mark_dirty(x: int, y: int) -> void:
 	if not in_map(x, y):
 		return
-	dirty[(y / CHK) * CXN + (x / CHK)] = 1
+	var c: int = (y / CHK) * CXN + (x / CHK)
+	var bx: int = (x / CHK) * CHK
+	var by: int = (y / CHK) * CHK
+	_mark_in(c, maxi(bx, x - 1), maxi(by, y - 1), mini(mini(bx + CHK, W), x + 2), mini(mini(by + CHK, H), y + 2))
 
 
-## Ein Objekt auf (x, y) ragt nach oben und zur Seite – betroffene Blöcke neu zeichnen.
+## Ein Objekt auf (x, y) ragt nach oben und zur Seite – betroffene Blöcke (nur das Rechteck darin) neu zeichnen.
 func mark_area(x: int, y: int) -> void:
-	mark_dirty(x, y)
-	mark_dirty(x, y - 15)
-	mark_dirty(x - 6, y)
-	mark_dirty(x + 6, y)
-	mark_dirty(x, y + 1)
-	mark_dirty(x - 6, y - 15)
-	mark_dirty(x + 6, y - 15)
+	mark_rect(x - 6, y - 15, x + 7, y + 2)
 
 
+## Rechteck [x0, x1) × [y0, y1) neu zeichnen.
+func mark_rect(x0: int, y0: int, x1: int, y1: int) -> void:
+	x0 = maxi(0, x0)
+	y0 = maxi(0, y0)
+	x1 = mini(W, x1)
+	y1 = mini(H, y1)
+	if x1 <= x0 or y1 <= y0:
+		return
+	for cy: int in range(y0 / CHK, (y1 - 1) / CHK + 1):
+		for cx: int in range(x0 / CHK, (x1 - 1) / CHK + 1):
+			var bx: int = cx * CHK
+			var by: int = cy * CHK
+			_mark_in(cy * CXN + cx, maxi(x0, bx), maxi(y0, by), mini(x1, bx + CHK), mini(y1, by + CHK))
+
+
+func _mark_in(c: int, x0: int, y0: int, x1: int, y1: int) -> void:
+	var k: int = c * 4
+	if dirty[c] == 0:
+		dirty[c] = 1
+		drect[k] = x0
+		drect[k + 1] = y0
+		drect[k + 2] = x1
+		drect[k + 3] = y1
+	elif drect[k] < drect[k + 2]:   # sonst schon der ganze Block
+		drect[k] = mini(drect[k], x0)
+		drect[k + 1] = mini(drect[k + 1], y0)
+		drect[k + 2] = maxi(drect[k + 2], x1)
+		drect[k + 3] = maxi(drect[k + 3], y1)
+
+
+## Geänderte Blöcke neu zeichnen (höchstens limit je Aufruf). Die Texturen werden höchstens alle 50 ms hochgeladen
+## (je Upload 2 × W·H·4 Byte – auf Handys und im Browser teuer); was noch aussteht, folgt beim nächsten Aufruf.
 func flush_dirty(limit: int = 12) -> void:
 	var n: int = 0
 	for c: int in range(dirty.size()):
@@ -734,12 +773,22 @@ func flush_dirty(limit: int = 12) -> void:
 			dirty[c] = 0
 			var cx: int = (c % CXN) * CHK
 			var cy: int = (c / CXN) * CHK
-			_render_rect(cx, cy, cx + CHK, cy + CHK)
+			var k: int = c * 4
+			if drect[k] < drect[k + 2]:
+				_render_rect(drect[k], drect[k + 1], drect[k + 2], drect[k + 3])
+			else:
+				_render_rect(cx, cy, mini(W, cx + CHK), mini(H, cy + CHK))
+			drect[k] = 0
+			drect[k + 2] = 0
 			dver[c] += 1
 			n += 1
 			if n >= limit:
 				break
 	if n > 0:
+		_upl_pending = true
+	if _upl_pending and Time.get_ticks_msec() - _upl_ms >= 50:
+		_upl_pending = false
+		_upl_ms = Time.get_ticks_msec()
 		near_tex.update(near_img)
 		far_tex.update(far_img)
 
@@ -751,6 +800,7 @@ func refresh_water() -> void:
 		if GuData.is_water(t):
 			tile[i] = GuData.SHAL if wdist[i] <= 4 else GuData.DEEP
 	dirty.fill(1)
+	drect.fill(0)
 	water_dirty = false
 
 

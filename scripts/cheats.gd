@@ -244,12 +244,14 @@ func jumping() -> bool:
 ## Läuft den Zeitsprung im Zeitbudget weiter; gibt den Fortschritt 0..1 zurück (1 = fertig).
 func jump_chunk(budget_ms: int) -> float:
 	var t0: int = Time.get_ticks_msec()
+	sim.fast = true   # Schnelllauf: große Schritte, keine Effekte (Sim.FAST_DT)
 	while jump_left > 0.0 and Time.get_ticks_msec() - t0 < budget_ms:
-		var dt: float = minf(0.1, jump_left)
+		var dt: float = minf(Sim.FAST_DT, jump_left)
 		sim.step(dt)
 		jump_left -= dt
 		if jump_left < 0.001:
 			jump_left = 0.0
+	sim.fast = false
 	if sim.fx.size() > 300:
 		sim.fx = sim.fx.slice(sim.fx.size() - 150)
 	if sim.parts.size() > 1500:

@@ -28,6 +28,7 @@ var spring: bool = false
 var reg: int = 0
 var lvl: int = 0
 var lead: Unit = null
+var bfail: float = -1.0  ## Bauplatz nicht gefunden: bis zu dieser Simulationszeit nicht erneut suchen (nicht gespeichert)
 var loy: float = 80.0      # Loyalität zum Clan (0..100); niedrig = Aufstand
 var capt: float = -999.0   # Zeitpunkt der letzten Eroberung
 var road: bool = false     # Straße zur Hauptstadt gebaut

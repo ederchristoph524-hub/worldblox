@@ -296,7 +296,7 @@ func think(u: Unit) -> bool:
 		"roam":
 			if u.tgt != null:
 				return true
-			var e: Unit = sim.nearest(u, 24.0, func(o: Unit) -> bool: return sim.hostile(u, o))
+			var e: Unit = sim.nearest_hostile(u, 24.0)
 			if e != null:
 				u.tgt = e
 			elif not u.moving or randf() < 0.05:
@@ -309,7 +309,7 @@ func think(u: Unit) -> bool:
 				return false
 			if u.tgt != null:
 				return true
-			var e2: Unit = sim.nearest(u, 22.0, func(o: Unit) -> bool: return sim.hostile(u, o))
+			var e2: Unit = sim.nearest_hostile(u, 22.0)
 			if e2 != null:
 				u.tgt = e2
 			elif randf() < 0.5:

@@ -77,9 +77,75 @@ const F_REFINE: int = 1024
 const F_DREAM: int = 2048
 const F_FATE: int = 4096
 var _grid: Array = []
+var _gused: PackedInt32Array = PackedInt32Array()   # belegte Zellen des Rasters (nur diese werden geleert)
+var _gver: int = 0                                  # zählt jeden Neuaufbau des Rasters
+var _gstamp: PackedInt32Array = PackedInt32Array()  # je Zelle: _gver, für den _gspec gilt
+var _gspec: PackedByteArray = PackedByteArray()     # je Zelle: 1 = enthält ein Wesen, das friedlichen Menschen gefährlich sein kann
 var _fire_acc: float = 0.0
 var _sand: bool = false
 const MOVE_OFFS: PackedFloat32Array = [0.0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9]
+
+## Schnelllauf (Vorgeschichte, Zeitsprung): Schritte zu FAST_DT statt DT, keine rein sichtbaren Effekte
+## (Partikel, Ringe, Säulen, schwebende Texte, Blitzbilder). Spielregeln bleiben gleich, alle Raten hängen an dt.
+var fast: bool = false
+const FAST_DT: float = 0.25
+## Gestaffelt (hohe Spieltempi, von GuMain gesetzt): Wesen ohne Ziel laufen nur jeden zweiten Schritt (mit doppeltem dt,
+## je nach Id gerade/ungerade), das Wesen-Raster wird nur jeden zweiten Schritt neu aufgebaut. Kämpfer jeden Schritt.
+var stagger: bool = false
+var _stepn: int = 0
+var _gn: int = 0          # Wesenzahl beim letzten Rasteraufbau (abzüglich entfernter Toter)
+var _gforce: bool = true  # Raster sicher neu aufbauen (neue Welt, Laden)
+var _fire_any: bool = false   # zu Schrittbeginn: brennt irgendwo etwas?
+var _uid_cache: Dictionary = {}   # unit_by_id: Id -> Wesen
+
+## Entwickler-Profil (--perftest): Zeit je Teilsystem in µs, gemessen nur bei prof = true.
+var prof: bool = false
+var pacc: PackedInt64Array = PackedInt64Array()
+const PK: PackedStringArray = ["grid", "units", "u_think_p", "u_ven", "u_move", "u_combat", "proj", "sched", "fire", "nature",
+	"env", "dead", "month", "m_vil", "m_unit", "m_ven", "m_clan", "m_loyal", "m_capt", "m_year", "m_place", "m_spawn", "m_lead", "m_cheat",
+	"u_think_a", "m_build", "m_colon"]
+const P_GRID: int = 0
+const P_UNITS: int = 1
+const P_THINK: int = 2
+const P_VEN: int = 3
+const P_MOVE: int = 4
+const P_COMBAT: int = 5
+const P_PROJ: int = 6
+const P_SCHED: int = 7
+const P_FIRE: int = 8
+const P_NATURE: int = 9
+const P_ENV: int = 10
+const P_DEAD: int = 11
+const P_MONTH: int = 12
+const P_M_VIL: int = 13
+const P_M_UNIT: int = 14
+const P_M_VEN: int = 15
+const P_M_CLAN: int = 16
+const P_M_LOYAL: int = 17
+const P_M_CAPT: int = 18
+const P_M_YEAR: int = 19
+const P_M_PLACE: int = 20
+const P_M_SPAWN: int = 21
+const P_M_LEAD: int = 22
+const P_M_CHEAT: int = 23
+const P_THINK_A: int = 24
+const P_M_BUILD: int = 25
+const P_M_COLON: int = 26
+var pcnt: PackedInt64Array = PackedInt64Array()   ## Aufrufe je Teilsystem
+
+
+func prof_reset() -> void:
+	pacc.resize(PK.size())
+	pacc.fill(0)
+	pcnt.resize(PK.size())
+	pcnt.fill(0)
+
+
+func _pa(k: int, t0: int) -> int:
+	var t1: int = Time.get_ticks_usec()
+	pacc[k] += t1 - t0
+	pcnt[k] += 1
+	return t1
 
 
 func _init() -> void:
@@ -101,6 +167,10 @@ func _sync_size() -> void:
 	_grid.resize(GW * GH)
 	for k: int in range(GW * GH):
 		_grid[k] = []
+	_gused = PackedInt32Array()
+	_gstamp.resize(GW * GH)
+	_gstamp.fill(-1)
+	_gspec.resize(GW * GH)
 
 
 # ---------------- Hilfen ----------------
@@ -157,11 +227,15 @@ func rank_title(r: int) -> String:
 # ---------------- Effekte ----------------
 
 func puff(x: float, y: float, c: Color, n: int) -> void:
+	if fast:
+		return
 	for k: int in range(n):
 		parts.append({"x": x, "y": y, "vx": (randf() - 0.5) * 5.0, "vy": -randf() * 4.0, "l": 0.6 + randf() * 0.5, "ml": 1.1, "c": c, "s": 0.6 + randf() * 0.7, "g": 3.0})
 
 
 func spark(x: float, y: float, c: Color, n: int, spd: float = 6.0) -> void:
+	if fast:
+		return
 	for k: int in range(n):
 		var a: float = randf() * TAU
 		var v: float = spd * (0.4 + randf())
@@ -169,32 +243,41 @@ func spark(x: float, y: float, c: Color, n: int, spd: float = 6.0) -> void:
 
 
 func float_txt(u: Unit, t: String, c: Color) -> void:
+	if fast:
+		return
 	fx.append({"k": "txt", "x": u.x, "y": u.y - 4.0, "t": t, "c": c, "l": 1.6, "ml": 1.6})
 
 
 func pillar(x: float, y: float, c: Color, sc: float = 1.0) -> void:
+	if fast:
+		return
 	fx.append({"k": "pillar", "x": x, "y": y, "c": c, "l": 1.8 * sc, "ml": 1.8 * sc, "w": sc})
 
 
 func ring(x: float, y: float, r: float, c: Color, l: float = 0.6) -> void:
+	if fast:
+		return
 	fx.append({"k": "ring", "x": x, "y": y, "r": r, "c": c, "l": l, "ml": l})
 
 
 func flash(l: float) -> void:
+	if fast:
+		return
 	fx.append({"k": "flash", "l": l, "ml": l})
 
 
 func bolt(x: float, y: float, dmg: float, ign: bool, src: Unit = null) -> void:
-	var pts: PackedVector2Array = PackedVector2Array()
-	var px: float = x + (randf() - 0.5) * 8.0
-	var py: float = y - 70.0
-	for k: int in range(11):
-		var t: float = k / 10.0
-		var jit: float = (randf() - 0.5) * 5.0 if (k > 0 and k < 10) else 0.0
-		pts.append(Vector2(px + (x - px) * t + jit, py + (y - py) * t))
-	fx.append({"k": "bolt", "pts": pts, "l": 0.35, "ml": 0.35})
-	flash(0.15)
-	spark(x, y, Color("#fff7b0"), 10, 10.0)
+	if not fast:
+		var pts: PackedVector2Array = PackedVector2Array()
+		var px: float = x + (randf() - 0.5) * 8.0
+		var py: float = y - 70.0
+		for k: int in range(11):
+			var t: float = k / 10.0
+			var jit: float = (randf() - 0.5) * 5.0 if (k > 0 and k < 10) else 0.0
+			pts.append(Vector2(px + (x - px) * t + jit, py + (y - py) * t))
+		fx.append({"k": "bolt", "pts": pts, "l": 0.35, "ml": 0.35})
+		flash(0.15)
+		spark(x, y, Color("#fff7b0"), 10, 10.0)
 	var i: int = clampi(int(y), 0, H - 1) * W + clampi(int(x), 0, W - 1)
 	if dmg > 0.0:
 		for o: Unit in near_units(x, y, 3.0):
@@ -209,14 +292,46 @@ func bolt(x: float, y: float, dmg: float, ign: bool, src: Unit = null) -> void:
 # ---------------- Raster ----------------
 
 func rebuild_grid() -> void:
-	for c: Array in _grid:
-		c.clear()
+	# nur die zuletzt belegten Zellen leeren (bei 512er-Karten 1024 Zellen, meist nur wenige hundert belegt)
+	for c: int in _gused:
+		_grid[c].clear()
+	_gused.clear()
+	_gver += 1
+	_gn = units.size()
+	_gforce = false
 	for u: Unit in units:
 		if u.hp <= 0.0:
 			continue
 		var gx: int = clampi(int(u.x / GC), 0, GW - 1)
 		var gy: int = clampi(int(u.y / GC), 0, GH - 1)
-		_grid[gy * GW + gx].append(u)
+		var cell: Array = _grid[gy * GW + gx]
+		if cell.is_empty():
+			_gused.append(gy * GW + gx)
+		cell.append(u)
+
+
+## Gefahrenstufe einer Rasterzelle für friedliche Menschen (kein Jäger, Clan ohne Krieg), je Rasteraufbau einmal
+## berechnet (nearest_hostile): 2 = Abtrünnige, Leichen, Fremdweltdämonen, Bestienkönige, Wolfsflut oder Tiere mit
+## Angreifer; 1 = nur Raubtiere (feindlich nur gegenüber Gu-Meistern); 0 = nichts.
+func _cell_spec(c: int) -> int:
+	if _gstamp[c] == _gver:
+		return _gspec[c]
+	var sp: int = 0
+	for o: Unit in _grid[c]:
+		if o.k == "p":
+			if o.rogue or o.undead or o.ow:
+				sp = 2
+				break
+		else:
+			var ob: int = o.beh
+			if ob == GuData.B_KING or o.tide or (o.aggro != null and ob != GuData.B_GU and ob != GuData.B_IGU):
+				sp = 2
+				break
+			if ob == GuData.B_PRED:
+				sp = 1
+	_gstamp[c] = _gver
+	_gspec[c] = sp
+	return sp
 
 
 func near_units(x: float, y: float, r: float) -> Array[Unit]:
@@ -255,6 +370,125 @@ func nearest(u: Unit, r: float, pred: Callable) -> Unit:
 				var dy: float = o.y - u.y
 				var d2: float = dx * dx + dy * dy
 				if d2 <= bd and pred.call(o):
+					bd = d2
+					best = o
+	return best
+
+
+## Wie nearest(u, r, hostile(u, o) und – bei skip_civ – keine Zivilisten), aber ohne Callable und mit Schnellwegen:
+## wilde Gu sind nie Feinde, friedliche Menschen vergleichen nur Clan und Kriege, Tiere ohne Jagdtrieb nur ihren Angreifer.
+func nearest_hostile(u: Unit, r: float, skip_civ: bool = false) -> Unit:
+	var r2: float = r * r
+	if u.k == "a":
+		var bh: int = u.beh
+		if not u.tide and bh != GuData.B_KING and (bh != GuData.B_PRED or u.hungry <= 0.4):
+			# hostile(u, o) ist hier genau „o ist der Angreifer“
+			var ag: Unit = u.aggro
+			if ag == null or ag == u or ag.hp <= 0.0 or (ag.k == "a" and (ag.beh == GuData.B_GU or ag.beh == GuData.B_IGU)):
+				return null
+			var adx: float = ag.x - u.x
+			var ady: float = ag.y - u.y
+			return ag if adx * adx + ady * ady <= r2 else null
+	var plain: bool = u.k == "p" and not (u.undead or u.rogue or u.ow) and u.duel_t <= sim_time and u.clan >= 0
+	var cw: Dictionary = {}
+	if plain and clans[u.clan].alive:
+		cw = clans[u.clan].war
+	var uc: int = u.clan
+	var best: Unit = null
+	var bd: float = r2
+	var ux: float = u.x
+	var uy: float = u.y
+	var x0: int = clampi(int((ux - r) / GC), 0, GW - 1)
+	var x1: int = clampi(int((ux + r) / GC), 0, GW - 1)
+	var y0: int = clampi(int((uy - r) / GC), 0, GH - 1)
+	var y1: int = clampi(int((uy + r) / GC), 0, GH - 1)
+	if plain and cw.is_empty() and u.job != "hunt":
+		# Friedlicher Mensch ohne Krieg: feindlich kann nur sein, was _cell_spec meldet
+		var any: bool = false
+		var lim: int = 1 if u.rank > 0 else 2
+		for gy0: int in range(y0, y1 + 1):
+			for gx0: int in range(x0, x1 + 1):
+				if _cell_spec(gy0 * GW + gx0) >= lim:
+					any = true
+					break
+			if any:
+				break
+		if not any:
+			return null
+	for gy: int in range(y0, y1 + 1):
+		for gx: int in range(x0, x1 + 1):
+			for o: Unit in _grid[gy * GW + gx]:
+				if o == u or o.hp <= 0.0:
+					continue
+				var dx: float = o.x - ux
+				var dy: float = o.y - uy
+				var d2: float = dx * dx + dy * dy
+				if d2 > bd:
+					continue
+				var ob: int = o.beh
+				if ob == GuData.B_GU or ob == GuData.B_IGU:
+					continue
+				if o.k == "p":
+					if skip_civ and o.rank == 0 and not o.militia and not o.rogue:
+						continue
+					if plain and not (o.undead or o.rogue or o.ow):
+						if o.clan < 0 or o.clan == uc or not cw.has(o.clan):
+							continue
+					elif not hostile(u, o):
+						continue
+				elif not hostile(u, o):
+					continue
+				bd = d2
+				best = o
+	return best
+
+
+## Nächstes Wesen mit Verhalten beh (z. B. wilde Gu) im Umkreis r.
+func nearest_beh(u: Unit, r: float, beh: int) -> Unit:
+	var best: Unit = null
+	var bd: float = r * r
+	var ux: float = u.x
+	var uy: float = u.y
+	var x0: int = clampi(int((ux - r) / GC), 0, GW - 1)
+	var x1: int = clampi(int((ux + r) / GC), 0, GW - 1)
+	var y0: int = clampi(int((uy - r) / GC), 0, GH - 1)
+	var y1: int = clampi(int((uy + r) / GC), 0, GH - 1)
+	for gy: int in range(y0, y1 + 1):
+		for gx: int in range(x0, x1 + 1):
+			for o: Unit in _grid[gy * GW + gx]:
+				if o.beh != beh or o == u or o.hp <= 0.0:
+					continue
+				var dx: float = o.x - ux
+				var dy: float = o.y - uy
+				var d2: float = dx * dx + dy * dy
+				if d2 <= bd:
+					bd = d2
+					best = o
+	return best
+
+
+## Fluchttiere: nächste Bedrohung (Jäger, Raubtier, fremder Bestienkönig) im Umkreis r; L = eigener Rudelführer.
+func nearest_threat(u: Unit, r: float, L: Unit) -> Unit:
+	var best: Unit = null
+	var bd: float = r * r
+	var ux: float = u.x
+	var uy: float = u.y
+	var x0: int = clampi(int((ux - r) / GC), 0, GW - 1)
+	var x1: int = clampi(int((ux + r) / GC), 0, GW - 1)
+	var y0: int = clampi(int((uy - r) / GC), 0, GH - 1)
+	var y1: int = clampi(int((uy + r) / GC), 0, GH - 1)
+	for gy: int in range(y0, y1 + 1):
+		for gx: int in range(x0, x1 + 1):
+			for o: Unit in _grid[gy * GW + gx]:
+				if o == u or o == L or o.hp <= 0.0:
+					continue
+				var ob: int = o.beh
+				if not (ob == GuData.B_PRED or (ob == GuData.B_KING and o.ldr != L) or (o.k == "p" and o.job == "hunt")):
+					continue
+				var dx: float = o.x - ux
+				var dy: float = o.y - uy
+				var d2: float = dx * dx + dy * dy
+				if d2 <= bd:
 					bd = d2
 					best = o
 	return best
@@ -724,22 +958,39 @@ func fig_alive(key: String) -> Unit:
 
 
 func can_place(x: int, y: int, w: int, h: int, m: int) -> bool:
-	for yy: int in range(y - m, y + h + m):
-		for xx: int in range(x - m, x + w + m):
-			if not world.in_map(xx, yy):
+	if x - m < 0 or y - m < 0 or x + w + m > W or y + h + m > H:
+		return false
+	var bm: PackedInt32Array = world.bmap
+	var tl: PackedByteArray = world.tile
+	var ts: PackedByteArray = world.temp_snow
+	var ft: PackedByteArray = world.feat
+	var nofire: bool = fire.is_empty()
+	# zuerst die Innenfläche (scheitert meist schon dort), dann der Rand
+	for yy: int in range(y, y + h):
+		var row: int = yy * W
+		for xx: int in range(x, x + w):
+			var i: int = row + xx
+			if bm[i] >= 0:
 				return false
-			var i: int = yy * W + xx
-			if world.bmap[i] >= 0:
+			var t: int = tl[i]
+			if not (t == GuData.SAND or t == GuData.GRASS or t == GuData.STEP or t == GuData.SOIL or t == GuData.SNOW or t == GuData.ASH or t == GuData.DES):
 				return false
-			if xx >= x and xx < x + w and yy >= y and yy < y + h:
-				if not GuData.buildable(world.tile[i]):
-					return false
-				if world.temp_snow[i] == 1 or world.temp_snow[i] == 2:
-					return false   # zugefrorenes Meer (Frostodem) taut wieder auf
-				var f: int = world.feat[i]
-				if f == GuData.F_ROCK or f == GuData.F_ORE or f == GuData.F_SPRING:
-					return false
-				if fire.has(i):
+			var sn: int = ts[i]
+			if sn == 1 or sn == 2:
+				return false   # zugefrorenes Meer (Frostodem) taut wieder auf
+			var f: int = ft[i]
+			if f == GuData.F_ROCK or f == GuData.F_ORE or f == GuData.F_SPRING:
+				return false
+			if not nofire and fire.has(i):
+				return false
+	if m > 0:
+		for yy: int in range(y - m, y + h + m):
+			var row2: int = yy * W
+			var inner: bool = yy >= y and yy < y + h
+			for xx: int in range(x - m, x + w + m):
+				if inner and xx >= x and xx < x + w:
+					continue
+				if bm[row2 + xx] >= 0:
 					return false
 	return true
 
@@ -856,14 +1107,17 @@ func village_at(tx: int, ty: int) -> Village:
 
 
 func site_ok(tx: int, ty: int, reg: int) -> bool:
-	if not can_place(tx - 3, ty - 2, 7, 4, 2):
+	if tx < 0 or ty < 0 or tx >= W or ty >= H:
 		return false
 	if reg >= 0 and world.region[ty * W + tx] != reg:
 		return false
 	for v: Village in villages:
-		if v.alive and Vector2(v.cx - tx, v.cy - ty).length() < 28.0:
-			return false
-	return true
+		if v.alive:
+			var dx: float = v.cx - tx
+			var dy: float = v.cy - ty
+			if dx * dx + dy * dy < 784.0:
+				return false
+	return can_place(tx - 3, ty - 2, 7, 4, 2)
 
 
 func find_site(x: float, y: float, min_d: float, max_d: float, reg: int) -> Vector2:
@@ -961,7 +1215,7 @@ func try_build(v: Village, type: String) -> bool:
 		var d: float = 5.0 + randf() * r0
 		var x: int = roundi(v.cx + cos(a) * d - s.x / 2.0)
 		var y: int = roundi(v.cy + sin(a) * d * 0.85 - s.y / 2.0)
-		if can_place(x, y, s.x, s.y, 1) and world.region[y * W + x] == v.reg:
+		if x >= 0 and y >= 0 and x < W and y < H and world.region[y * W + x] == v.reg and can_place(x, y, s.x, s.y, 1):
 			place_building(v, type, x, y)
 			return true
 	return false
@@ -1252,53 +1506,73 @@ func fire_step() -> void:
 	var wt: String = weather.get("type", "")
 	var rain: bool = wt == "rain"
 	var dry: bool = wt == "drought"
-	var add: Array[int] = []
-	for i: int in fire.keys():
-		var v: float = fire[i] - (0.5 if rain else 0.09)
-		var t: int = world.tile[i]
+	var fmul: float = (0.15 if not laws["fire"] else 1.0) * (2.0 if dry else 1.0)
+	var add: PackedInt32Array = PackedInt32Array()
+	var out: PackedInt32Array = PackedInt32Array()
+	var hit: PackedInt32Array = PackedInt32Array()
+	_fire_scan(rain, fmul, add, out, hit)
+	# danach erst schreiben (Gebäude, Ascheflächen) – _fire_scan hält lokale Verweise auf die Kartenfelder
+	for bi: int in hit:
+		var b: Building = buildings[bi]
+		if b != null:
+			b.hp -= 3.0
+			if b.hp <= 0.0:
+				remove_building(b)
+	for i: int in out:
+		fire.erase(i)
 		var f: int = world.feat[i]
-		if GuData.is_tree(f):
+		if f != 0 and (GuData.is_tree(f) or f == GuData.F_SHRUB or f == GuData.F_TUFT or f == GuData.F_FLOWER):
+			world.feat[i] = 0
+		var t: int = world.tile[i]
+		if t == GuData.GRASS or t == GuData.STEP or t == GuData.SOIL:
+			world.tile[i] = GuData.ASH
+		world.mark_area(i % W, i / W)
+	for j: int in add:
+		ignite(j, 1.0)
+
+
+## Feuer: Stärke nachführen und Ausbreitung würfeln (nur lesen; Ergebnisse in add/out/hit).
+func _fire_scan(rain: bool, fmul: float, add: PackedInt32Array, out: PackedInt32Array, hit: PackedInt32Array) -> void:
+	var tl: PackedByteArray = world.tile
+	var ft: PackedByteArray = world.feat
+	var bm: PackedInt32Array = world.bmap
+	var dec: float = 0.5 if rain else 0.09
+	for i: int in fire.keys():
+		var v: float = fire[i] - dec
+		var f: int = ft[i]
+		if f >= 1 and f <= 4:
 			v += 0.04
 		if not rain:
 			var x: int = i % W
 			var y: int = i / W
 			for dy: int in range(-1, 2):
+				var yy: int = y + dy
+				if yy < 0 or yy >= H:
+					continue
 				for dx: int in range(-1, 2):
 					if dx == 0 and dy == 0:
 						continue
 					var xx: int = x + dx
-					var yy: int = y + dy
-					if not world.in_map(xx, yy):
+					if xx < 0 or xx >= W:
 						continue
 					var j: int = yy * W + xx
-					if fire.has(j):
-						continue
-					var tj: int = world.tile[j]
-					var fl: float = 0.3 if GuData.is_tree(world.feat[j]) else (0.045 if tj == GuData.GRASS else (0.06 if tj == GuData.STEP else 0.0))
-					if world.bmap[j] >= 0:
+					var fj: int = ft[j]
+					var fl: float
+					if bm[j] >= 0:
 						fl = 0.2
-					if not laws["fire"]:
-						fl *= 0.15
-					if dry:
-						fl *= 2.0
-					if randf() < fl:
+					elif fj >= 1 and fj <= 4:
+						fl = 0.3
+					else:
+						var tj: int = tl[j]
+						fl = 0.045 if tj == GuData.GRASS else (0.06 if tj == GuData.STEP else 0.0)
+					if fl > 0.0 and randf() < fl * fmul and not fire.has(j):
 						add.append(j)
-		var bi: int = world.bmap[i]
-		if bi >= 0 and buildings[bi] != null:
-			buildings[bi].hp -= 3.0
-			if buildings[bi].hp <= 0.0:
-				remove_building(buildings[bi])
+		if bm[i] >= 0:
+			hit.append(bm[i])
 		if v <= 0.0:
-			fire.erase(i)
-			if f != 0 and (GuData.is_tree(f) or f == GuData.F_SHRUB or f == GuData.F_TUFT or f == GuData.F_FLOWER):
-				world.feat[i] = 0
-			if t == GuData.GRASS or t == GuData.STEP or t == GuData.SOIL:
-				world.tile[i] = GuData.ASH
-			world.mark_area(i % W, i / W)
+			out.append(i)
 		else:
 			fire[i] = v
-	for j: int in add:
-		ignite(j, 1.0)
 
 
 # ---------------- Schaden ----------------
@@ -1477,6 +1751,7 @@ func monthly() -> void:
 		if u.rank > 0:
 			v.gm += 1
 	var ad: Dictionary = age_data()
+	var t0: int = Time.get_ticks_usec() if prof else 0
 	for v: Village in villages:
 		if not v.alive:
 			continue
@@ -1504,29 +1779,63 @@ func monthly() -> void:
 				var kid: Unit = mk_person(v.cx + randf() * 2.0 - 1.0, v.cy + 2.5, v.race, 0.0, pick_sur(v))
 				join_village(kid, v)
 				v.food -= 2.0
-		if v.wood >= 10.0 and v.houses < 12 and v.pop >= v.cap - 3:
+		var tb: int = Time.get_ticks_usec() if prof else 0
+		# Kein Platz gefunden: erst nach zwei Monaten wieder suchen (je Suche bis zu 40 Versuche)
+		var bok: bool = v.bfail <= sim_time
+		if not bok:
+			pass
+		elif v.wood >= 10.0 and v.houses < 12 and v.pop >= v.cap - 3:
 			if try_build(v, "house"):
 				v.wood -= 10.0
+			else:
+				v.bfail = sim_time + 2.0
 		elif v.wood >= 6.0 and v.farms < ceili(v.pop / 7.0):
 			if try_build(v, "farm"):
 				v.wood -= 6.0
+			else:
+				v.bfail = sim_time + 2.0
 		elif not v.forge and v.gm > 0 and v.wood >= 12.0:
 			if try_build(v, "forge"):
 				v.wood -= 12.0
+			else:
+				v.bfail = sim_time + 2.0
 		elif not c.war.is_empty() and v.towers < 2 and v.wood >= 12.0 and v.pop > 10:
 			if try_build(v, "tower"):
 				v.wood -= 12.0
+			else:
+				v.bfail = sim_time + 2.0
+		if prof:
+			tb = _pa(P_M_BUILD, tb)
 		if laws["expand"] and v.pop >= mini(v.cap, 40) - 1 and v.houses >= (4 if v.reg == 3 else 6) and randf() < (0.05 if v.reg == 3 else 0.035):
 			colonize(v)
+			if prof:
+				_pa(P_M_COLON, tb)
+	if prof:
+		t0 = _pa(P_M_VIL, t0)
+	# Tiere: wie animal_month, Gesetze nur einmal nachgeschlagen
+	var l_age: bool = laws["age"]
+	var l_breed: bool = laws["growth"] and laws["animals"]
+	var lf: float = GuData.len_f()
 	for u: Unit in units:
 		if u.hp <= 0.0:
 			continue
 		if u.k == "p":
 			person_month(u)
-		else:
-			animal_month(u)
+			continue
+		var bh: int = u.beh
+		var wild: bool = bh == GuData.B_GU or bh == GuData.B_IGU
+		if l_age and not wild and u.rank < 6 and (sim_time - u.birth) / 12.0 > u.life:
+			u.hp = 0.0
+			continue
+		u.hp = minf(u.mhp, u.hp + u.mhp * 0.15)
+		if l_breed and u.rank == 0 and not wild and u.ldr == null and randf() < 0.006 and sp_count.get(u.sp, 0) < int(GuData.SPEC[u.sp]["cap"] * lf) / 2:
+			mk_animal(u.x + (randf() - 0.5) * 2.0, u.y + (randf() - 0.5) * 2.0, u.sp)
+	if prof:
+		t0 = _pa(P_M_UNIT, t0)
 	if not arena:
 		ven.month()
+	if prof:
+		t0 = _pa(P_M_VEN, t0)
 	for c: Clan in clans:
 		if not c.alive:
 			continue
@@ -1603,7 +1912,11 @@ func monthly() -> void:
 			if not cands2.is_empty():
 				add_plan(c, "ally", cands2.pick_random(), 2.0 + randf() * 4.0)
 		run_plans(c)
+	if prof:
+		t0 = _pa(P_M_CLAN, t0)
 	loyalty_month()
+	if prof:
+		t0 = _pa(P_M_LOYAL, t0)
 	for v: Village in villages:
 		if not v.alive:
 			continue
@@ -1631,12 +1944,24 @@ func monthly() -> void:
 					best = kk
 			if best >= 0:
 				capture(v, clans[best])
+	if prof:
+		t0 = _pa(P_M_CAPT, t0)
 	if int(sim_time) % 12 == 0:
 		yearly()
+	if prof:
+		t0 = _pa(P_M_YEAR, t0)
 	place_month()
+	if prof:
+		t0 = _pa(P_M_PLACE, t0)
 	nature_spawns()
+	if prof:
+		t0 = _pa(P_M_SPAWN, t0)
 	update_leaders()
+	if prof:
+		t0 = _pa(P_M_LEAD, t0)
 	cheats.month()
+	if prof:
+		_pa(P_M_CHEAT, t0)
 	terr_dirty = true
 
 
@@ -2002,6 +2327,40 @@ func find_feat(cx: float, cy: float, r: float, pred: Callable) -> int:
 	return best
 
 
+const FF_TREE: int = 0     ## find_feat_k: Baum
+const FF_ORE: int = 1      ## Erzader
+const FF_GATHER: int = 2   ## Baum, Strauch oder Grasbüschel
+
+
+## Wie find_feat mit festen Suchzielen (ohne Callable, gleiche Zufallsfolge).
+func find_feat_k(cx: float, cy: float, r: float, kind: int) -> int:
+	var best: int = -1
+	var bd: float = 1e9
+	var ft: PackedByteArray = world.feat
+	var bm: PackedInt32Array = world.bmap
+	var nofire: bool = fire.is_empty()
+	for k: int in range(90):
+		var x: int = roundi(cx + (randf() - 0.5) * 2.0 * r)
+		var y: int = roundi(cy + (randf() - 0.5) * 2.0 * r)
+		if x < 0 or y < 0 or x >= W or y >= H:
+			continue
+		var i: int = y * W + x
+		var f: int = ft[i]
+		var ok: bool
+		if kind == FF_TREE:
+			ok = f >= 1 and f <= 4
+		elif kind == FF_ORE:
+			ok = f == GuData.F_ORE
+		else:
+			ok = (f >= 1 and f <= 4) or f == GuData.F_SHRUB or f == GuData.F_TUFT
+		if ok and bm[i] < 0 and (nofire or not fire.has(i)):
+			var d: float = (x - cx) * (x - cx) + (y - cy) * (y - cy)
+			if d < bd:
+				bd = d
+				best = i
+	return best
+
+
 func work_at(u: Unit, i: int, t: float, type: String) -> void:
 	var x: float = i % W + 0.5
 	var y: float = i / W + 0.5
@@ -2043,6 +2402,7 @@ func finish_work(u: Unit) -> void:
 			v.food += 2.2
 		"gather":
 			v.food += 1.1
+			u.wi = -1
 
 
 func think_p(u: Unit) -> void:
@@ -2064,7 +2424,7 @@ func think_p(u: Unit) -> void:
 		return
 	if u.tgt == null or randf() < 0.25:
 		# Unsterbliche verschwenden keine Zeit mit Ameisen: Zivilisten (Rang 0 ohne Miliz) greifen sie nicht an
-		var e: Unit = nearest(u, sight, func(o: Unit) -> bool: return hostile(u, o) and not (imm and o.k == "p" and o.rank == 0 and not o.militia and not o.rogue))
+		var e: Unit = nearest_hostile(u, sight, imm)
 		if e != null:
 			if not arena:
 				if a < 14.0 or (u.rank == 0 and not u.militia and u.job != "hunt" and power(e) > power(u) * 1.5):
@@ -2104,7 +2464,7 @@ func think_p(u: Unit) -> void:
 		if prey != null:
 			u.tgt = prey
 			return
-		var g0: Unit = nearest(u, 14.0, func(o: Unit) -> bool: return o.beh == GuData.B_GU)
+		var g0: Unit = nearest_beh(u, 14.0, GuData.B_GU)
 		if g0 != null and u.rank > 0:
 			if Vector2(g0.x - u.x, g0.y - u.y).length() < 1.8:
 				catch_wild_gu(u, g0)
@@ -2133,7 +2493,7 @@ func think_p(u: Unit) -> void:
 	if u.st == "work":
 		return
 	if u.rank > 0:
-		var g: Unit = nearest(u, 18.0, func(o: Unit) -> bool: return o.beh == GuData.B_GU)
+		var g: Unit = nearest_beh(u, 18.0, GuData.B_GU)
 		if g != null and randf() < 0.6:
 			if Vector2(g.x - u.x, g.y - u.y).length() < 1.8:
 				catch_wild_gu(u, g)
@@ -2160,7 +2520,7 @@ func do_job(u: Unit, v: Village) -> void:
 		"wood":
 			var i: int = u.wi
 			if i < 0 or not GuData.is_tree(world.feat[i]):
-				i = find_feat(v.cx, v.cy, 30.0, func(f: int) -> bool: return GuData.is_tree(f))
+				i = find_feat_k(v.cx, v.cy, 30.0, FF_TREE)
 			if i < 0:
 				u.job = "gather"
 				return
@@ -2169,7 +2529,7 @@ func do_job(u: Unit, v: Village) -> void:
 		"mine":
 			var i: int = u.wi
 			if i < 0 or world.feat[i] != GuData.F_ORE:
-				i = find_feat(v.cx, v.cy, 38.0, func(f: int) -> bool: return f == GuData.F_ORE)
+				i = find_feat_k(v.cx, v.cy, 38.0, FF_ORE)
 			if i < 0:
 				u.job = "wood"
 				return
@@ -2187,7 +2547,14 @@ func do_job(u: Unit, v: Village) -> void:
 			var bb: Building = fs.pick_random()
 			work_at(u, (bb.y + randi_range(1, bb.h - 2)) * W + bb.x + randi_range(1, bb.w - 2), 3.0, "farm")
 		"gather":
-			var i: int = find_feat(v.cx, v.cy, 20.0, func(f: int) -> bool: return GuData.is_tree(f) or f == GuData.F_SHRUB or f == GuData.F_TUFT)
+			# Ziel merken, solange es hingeht (vorher: bei jedem Denken neu gesucht); nach der Arbeit neu suchen
+			var i: int = u.wi
+			if i >= 0:
+				var f: int = world.feat[i]
+				if not ((f >= 1 and f <= 4) or f == GuData.F_SHRUB or f == GuData.F_TUFT) or world.bmap[i] >= 0 or fire.has(i):
+					i = -1
+			if i < 0:
+				i = find_feat_k(v.cx, v.cy, 20.0, FF_GATHER)
 			if i < 0:
 				wander_near(u, v.cx, v.cy, 10.0)
 				return
@@ -2242,7 +2609,7 @@ func think_a(u: Unit) -> void:
 		u.ldr = null
 		L = null
 	if bh == GuData.B_PREY or bh == GuData.B_SHY:
-		var th: Unit = nearest(u, 8.0, func(o: Unit) -> bool: return o != L and ((o.k == "p" and o.job == "hunt") or o.beh == GuData.B_PRED or (o.beh == GuData.B_KING and o.ldr != L)))
+		var th: Unit = nearest_threat(u, 8.0, L)
 		if th != null:
 			var d: Vector2 = Vector2(u.x - th.x, u.y - th.y)
 			if d.length() < 0.01:
@@ -2256,7 +2623,7 @@ func think_a(u: Unit) -> void:
 		return
 	if u.tgt == null:
 		var r: float = 14.0 if u.rank >= 6 else (18.0 if (u.rank >= 3 or u.tide) else 10.0)
-		var e: Unit = nearest(u, r, func(o: Unit) -> bool: return hostile(u, o))
+		var e: Unit = nearest_hostile(u, r)
 		if e != null:
 			u.tgt = e
 			return
@@ -2341,28 +2708,46 @@ func move_unit(u: Unit, dt: float) -> void:
 	if d < 0.2:
 		u.moving = false
 		return
-	var ti: int = int(u.y) * W + int(u.x)
-	var mul: float = sp_mul(u, world.tile[ti])
-	if world.feat[ti] == GuData.F_ROAD and not u.fly:
-		mul *= 1.3
-	if _sand and not u.fly:
-		mul *= 0.6
+	var cx: int = int(u.x)
+	var cy: int = int(u.y)
+	var ti: int = cy * W + cx
+	var tc: int = world.tile[ti]
+	var mul: float = 1.0
+	if not u.fly:
+		if tc <= GuData.SHAL or tc >= GuData.HILL or u.boat:
+			mul = sp_mul(u, tc)
+		if world.feat[ti] == GuData.F_ROAD:
+			mul *= 1.3
+		if _sand:
+			mul *= 0.6
 	var spd: float = minf(u.speed * mul * dt, d)
-	var ang: float = atan2(dy, dx)
-	var cur_ok: bool = passable(u, int(u.x), int(u.y))
-	for off: float in MOVE_OFFS:
-		var a: float = ang + off
-		var nx: float = u.x + cos(a) * spd
-		var ny: float = u.y + sin(a) * spd
+	var aq: bool = u.aqua
+	var cur_ok: bool = (tc != GuData.WALL and tc != GuData.DEEP and not aq) or _pass(u, tc)
+	# Schnelllauf: große Schritte prüfen auch die Mitte (nicht über schmale Flüsse oder Wände springen)
+	var mid: bool = spd > 1.2
+	var ang: float = 0.0
+	for k: int in range(MOVE_OFFS.size()):
+		var nx: float
+		var ny: float
+		if k == 0:
+			nx = u.x + dx / d * spd
+			ny = u.y + dy / d * spd
+		else:
+			if k == 1:
+				ang = atan2(dy, dx)
+			var a: float = ang + MOVE_OFFS[k]
+			nx = u.x + cos(a) * spd
+			ny = u.y + sin(a) * spd
 		if nx < 0 or ny < 0 or nx >= W or ny >= H:
 			continue
-		if not cur_ok or passable(u, int(nx), int(ny)):
+		var tn: int = world.tile[int(ny) * W + int(nx)]
+		if not cur_ok or (((tn != GuData.WALL and tn != GuData.DEEP and not aq) or _pass(u, tn)) and (not mid or _pass(u, world.tile[int((u.y + ny) * 0.5) * W + int((u.x + nx) * 0.5)]))):
 			u.x = nx
 			u.y = ny
 			u.moving = true
 			if absf(dx) > 0.05:
 				u.face = 1 if dx > 0 else -1
-			if off != 0.0:
+			if k != 0:
 				u.stuck += dt * 0.5
 			else:
 				u.stuck = maxf(0.0, u.stuck - dt)
@@ -2378,6 +2763,17 @@ func move_unit(u: Unit, dt: float) -> void:
 		u.tgt = null
 		u.col_to = Vector2(-1, -1)
 		wander(u, 12.0)
+
+
+## passable() für eine Kachelart (Lage schon geprüft).
+func _pass(u: Unit, t: int) -> bool:
+	if t == GuData.WALL:
+		return not laws["walls"] or u.rank >= 6
+	if u.aqua:
+		return t == GuData.DEEP or t == GuData.SHAL
+	if t == GuData.DEEP:
+		return u.fly or u.swim or u.boat
+	return true
 
 
 func attack(u: Unit, e: Unit) -> void:
@@ -2420,7 +2816,7 @@ func step_unit(u: Unit, dt: float) -> void:
 		return
 	if t == GuData.DEEP and not u.swim and not u.fly and not u.boat:
 		hurt(u, 4.0 * dt, null)
-	if not u.fly and fire.has(ti):
+	if not u.fly and _fire_any and fire.has(ti):
 		hurt(u, 3.0 * dt, null)
 	if t == GuData.LAVA and not u.fly:
 		hurt(u, (20.0 + u.mhp * 0.2) * dt, null)
@@ -2433,9 +2829,10 @@ func step_unit(u: Unit, dt: float) -> void:
 			var o: Unit = nearest(u, 2.5, func(q: Unit) -> bool: return q.k == u.k and q.sick <= 0.0)
 			if o != null and not (o.k == "p" and o.rank >= 5):
 				o.sick = 18.0 + randf() * 12.0
-		if randf() < dt * 3.0:
+		if not fast and randf() < dt * 3.0:
 			parts.append({"x": u.x, "y": u.y - 3.0, "vx": 0.0, "vy": -2.0, "l": 0.6, "ml": 0.6, "c": Color("#86e04a"), "s": 0.6, "g": 0.0})
-	if u.k == "a":
+	var isp: bool = u.k == "p"
+	if not isp:
 		if u.beh == GuData.B_PRED or u.beh == GuData.B_KING:
 			u.hungry = minf(1.0, u.hungry + dt * 0.006)
 		if u.rank >= 6 and world.bmap[ti] >= 0:
@@ -2449,12 +2846,15 @@ func step_unit(u: Unit, dt: float) -> void:
 	u.think -= dt
 	if u.think <= 0.0:
 		u.think = 0.35 + randf() * 0.45
+		var tt: int = Time.get_ticks_usec() if prof else 0
 		if u.poss:
 			poss_think(u)
-		elif u.k == "p":
+		elif isp:
 			think_p(u)
 		else:
 			think_a(u)
+		if prof:
+			_pa(P_THINK_A if not isp else (P_THINK if u.rank < 9 else P_VEN), tt)
 	if u.tgt != null:
 		var e: Unit = u.tgt
 		if e.hp <= 0.0:
@@ -2468,7 +2868,13 @@ func step_unit(u: Unit, dt: float) -> void:
 				u.ty = u.y
 				u.moving = false
 				if u.cd <= 0.0:
+					var ta: int = Time.get_ticks_usec() if prof else 0
+					var over: float = u.cd
 					attack(u, e)
+					if fast and over < 0.0:
+						u.cd += over   # große Schritte: Überhang mitnehmen, damit die Angriffsrate stimmt
+					if prof:
+						_pa(P_COMBAT, ta)
 				return
 			else:
 				u.tx = e.x
@@ -2481,25 +2887,57 @@ func step_unit(u: Unit, dt: float) -> void:
 		if u.wt <= 0.0:
 			finish_work(u)
 	else:
-		move_unit(u, dt)
-	if u.k == "p" and u.rank > 0 and not u.moving and u.tgt == null and randf() < dt * 0.5:
+		var mdx: float = u.tx - u.x
+		var mdy: float = u.ty - u.y
+		if mdx * mdx + mdy * mdy < 0.04:
+			u.moving = false   # am Ziel (wie move_unit, ohne Aufruf)
+		else:
+			var tmv: int = Time.get_ticks_usec() if prof else 0
+			move_unit(u, dt)
+			if prof:
+				_pa(P_MOVE, tmv)
+	if not fast and isp and u.rank > 0 and not u.moving and u.tgt == null and randf() < dt * 0.5:
 		parts.append({"x": u.x + (randf() - 0.5) * 2.0, "y": u.y - 2.0, "vx": 0.0, "vy": -2.5, "l": 0.9, "ml": 0.9, "c": GuData.ESS_COL[u.rank], "s": 0.5, "g": 0.0})
 
 
 func step(dt: float) -> void:
 	sim_time += dt
+	_fire_any = not fire.is_empty()
 	_sand = weather.get("type", "") == "sand"
 	if parts.size() > 4000:
 		parts = parts.slice(parts.size() - 2000)
 	var m: int = int(sim_time)
 	if m != last_month:
 		last_month = m
+		var tm: int = Time.get_ticks_usec() if prof else 0
 		monthly()
-	rebuild_grid()
-	for k: int in range(units.size()):
-		var u: Unit = units[k]
-		if u.hp > 0.0:
-			step_unit(u, dt)
+		if prof:
+			_pa(P_MONTH, tm)
+	var t0: int = Time.get_ticks_usec() if prof else 0
+	_stepn += 1
+	var stg: bool = stagger and not fast
+	var par: int = _stepn & 1
+	if not stg or par == 0 or _gforce or units.size() < _gn:
+		rebuild_grid()
+	if prof:
+		t0 = _pa(P_GRID, t0)
+	if stg:
+		var dt2: float = dt * 2.0
+		for k: int in range(units.size()):
+			var u: Unit = units[k]
+			if u.hp > 0.0:
+				if u.tgt == null:
+					if (u.id & 1) == par:
+						step_unit(u, dt2)
+				else:
+					step_unit(u, dt)
+	else:
+		for k: int in range(units.size()):
+			var u: Unit = units[k]
+			if u.hp > 0.0:
+				step_unit(u, dt)
+	if prof:
+		t0 = _pa(P_UNITS, t0)
 	var pi: int = projs.size() - 1
 	while pi >= 0:
 		var p: Dictionary = projs[pi]
@@ -2535,6 +2973,8 @@ func step(dt: float) -> void:
 			p["y"] += dy / d * s
 			p["a"] = atan2(dy, dx)
 		pi -= 1
+	if prof:
+		t0 = _pa(P_PROJ, t0)
 	var si: int = sched.size() - 1
 	while si >= 0:
 		if si < sched.size() and sched[si]["t"] <= sim_time:
@@ -2542,18 +2982,27 @@ func step(dt: float) -> void:
 			sched.remove_at(si)
 			fn.call()
 		si -= 1
+	if prof:
+		t0 = _pa(P_SCHED, t0)
 	_fire_acc += dt
-	if _fire_acc >= 0.25:
-		_fire_acc = 0.0
-		fire_step()
+	if _fire_acc >= 0.2499:
+		_fire_acc = maxf(0.0, _fire_acc - 0.25)
+		if not fire.is_empty():
+			fire_step()
+	if prof:
+		t0 = _pa(P_FIRE, t0)
 	if not (lava.is_empty() and volcs.is_empty() and goo.is_empty() and seeds.is_empty()):
 		_nat_acc += dt
-		if _nat_acc >= 0.15:
-			_nat_acc = 0.0
+		while _nat_acc >= 0.1499:
+			_nat_acc = maxf(0.0, _nat_acc - 0.15)
 			nature_tick()
 	if not (storms.is_empty() and acids.is_empty() and mines.is_empty()):
 		forces_step(dt)
+	if prof:
+		t0 = _pa(P_NATURE, t0)
 	env_step(dt)
+	if prof:
+		t0 = _pa(P_ENV, t0)
 	var dead: bool = false
 	for u: Unit in units:
 		if u.hp <= 0.0:
@@ -2572,7 +3021,10 @@ func step(dt: float) -> void:
 				if u == possessed:
 					possessed = null
 				on_death(u)
+		_gn -= units.size() - alive.size()
 		units = alive
+	if prof:
+		_pa(P_DEAD, t0)
 
 
 func on_death(u: Unit) -> void:
@@ -2621,30 +3073,24 @@ func env_step(dt: float) -> void:
 	var grow: float = float(age_data()["grow"])
 	# Stichproben je Schritt wachsen mit der Kartenfläche (gleiches Tempo je Kachel)
 	var af: float = GuData.area_f()
-	var n: int = roundi((26 if rain else 10) * af)
+	# Stichproben im Verhältnis zur Schrittweite (Schnelllauf mit großen Schritten: gleiches Tempo je Monat)
+	var sc: float = dt / DT
+	var n: int = int((26 if rain else 10) * af * sc + randf())
+	var trees: bool = laws["growth"] and laws["trees"] and not dry
+	var grass: bool = laws["grass"]
 	for k: int in range(n):
 		var i: int = randi() % N
 		var t: int = world.tile[i]
 		var x: int = i % W
 		var y: int = i / W
-		if laws["growth"] and laws["trees"] and not dry and (t == GuData.GRASS or t == GuData.STEP) and world.feat[i] == 0 and world.bmap[i] < 0:
-			var near: int = 0
-			for dd: int in [2, 5]:
-				if x >= dd and GuData.is_tree(world.feat[i - dd]):
-					near += 1
-				if x < W - dd and GuData.is_tree(world.feat[i + dd]):
-					near += 1
-				if y >= dd and GuData.is_tree(world.feat[i - dd * W]):
-					near += 1
-				if y < H - dd and GuData.is_tree(world.feat[i + dd * W]):
-					near += 1
-			if (near > 0 and randf() < 0.012 * grow) or randf() < 0.0004 * grow:
+		if trees and (t == GuData.GRASS or t == GuData.STEP) and world.feat[i] == 0 and world.bmap[i] < 0:
+			if (randf() < 0.012 * grow and _trees_near(i, x, y)) or randf() < 0.0004 * grow:
 				world.feat[i] = plant_for(i)
 				world.mark_area(x, y)
-		elif t == GuData.SOIL and laws["grass"] and not dry and world.bmap[i] < 0 and randf() < 0.08:
+		elif t == GuData.SOIL and grass and not dry and world.bmap[i] < 0 and randf() < 0.08:
 			world.tile[i] = land_for(i)
 			world.mark_dirty(x, y)
-		elif t == GuData.ASH and laws["grass"] and randf() < 0.05:
+		elif t == GuData.ASH and grass and randf() < 0.05:
 			world.tile[i] = GuData.SOIL
 			world.mark_dirty(x, y)
 		elif t == GuData.SNOW and world.temp_snow[i] > 0 and not snow and randf() < 0.3:
@@ -2652,7 +3098,7 @@ func env_step(dt: float) -> void:
 			world.temp_snow[i] = 0
 			world.mark_dirty(x, y)
 	if snow:
-		for k: int in range(roundi((40 if wt == "snow" else 6) * af)):
+		for k: int in range(int((40 if wt == "snow" else 6) * af * sc + randf())):
 			var i: int = randi() % N
 			var t: int = world.tile[i]
 			if (t == GuData.GRASS or t == GuData.STEP or t == GuData.SOIL or t == GuData.DES) and world.bmap[i] < 0:
@@ -2660,7 +3106,7 @@ func env_step(dt: float) -> void:
 				world.tile[i] = GuData.SNOW
 				world.mark_dirty(i % W, i / W)
 	if dry:
-		for k: int in range(roundi(16 * af)):
+		for k: int in range(int(16 * af * sc + randf())):
 			var i: int = randi() % N
 			if world.tile[i] == GuData.GRASS and randf() < 0.4:
 				world.tile[i] = GuData.DES if world.region[i] == 2 else GuData.SOIL
@@ -2672,10 +3118,39 @@ func env_step(dt: float) -> void:
 			fire[i] -= dt
 
 
+const _TD: PackedInt32Array = [2, 5]
+
+
+## Steht ein Baum 2 oder 5 Kacheln entfernt (waagrecht/senkrecht)? (eigene Funktion: die lokale Kopie von feat
+## lebt nur hier, sonst würde ein späteres Schreiben in world.feat das ganze Feld kopieren)
+func _trees_near(i: int, x: int, y: int) -> bool:
+	var ft: PackedByteArray = world.feat
+	for dd: int in _TD:
+		if x >= dd:
+			var f: int = ft[i - dd]
+			if f >= 1 and f <= 4:
+				return true
+		if x < W - dd:
+			var f2: int = ft[i + dd]
+			if f2 >= 1 and f2 <= 4:
+				return true
+		if y >= dd:
+			var f3: int = ft[i - dd * W]
+			if f3 >= 1 and f3 <= 4:
+				return true
+		if y < H - dd:
+			var f4: int = ft[i + dd * W]
+			if f4 >= 1 and f4 <= 4:
+				return true
+	return false
+
+
 # ---------------- Welt starten ----------------
 
 func reset_state() -> void:
 	_sync_size()
+	_gforce = true
+	_uid_cache.clear()
 	units.clear()
 	villages.clear()
 	clans.clear()
@@ -2830,9 +3305,11 @@ func new_world(live: bool, mode: String = "gu", opts: Dictionary = {}) -> void:
 func presim_chunk(budget_ms: int, target_years: float) -> float:
 	var total: float = target_years * 12.0
 	var t0: int = Time.get_ticks_msec()
+	fast = true
 	while sim_time < total and Time.get_ticks_msec() - t0 < budget_ms:
-		step(0.1)
-	if sim_time >= total:
+		step(minf(FAST_DT, maxf(0.01, total - sim_time)))
+	fast = false
+	if sim_time >= total - 0.001:
 		presim = false
 		log_event("The world awakens. Year %d." % year(), "jade")
 		return 1.0
@@ -3478,8 +3955,15 @@ func place_at(x: float, y: float) -> Place:
 
 
 func unit_by_id(id: int) -> Unit:
+	# Zwischenspeicher (Ids sind eindeutig, Wesen verlassen units nur tot oder mit reset_state)
+	var cu: Unit = _uid_cache.get(id, null)
+	if cu != null:
+		if cu.hp > 0.0:
+			return cu
+		_uid_cache.erase(id)
 	for u: Unit in units:
 		if u.id == id and u.hp > 0.0:
+			_uid_cache[id] = u
 			return u
 	return null
 
