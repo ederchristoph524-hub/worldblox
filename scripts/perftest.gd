@@ -28,6 +28,9 @@ static func run(m: GuMain) -> void:
 		elif a.begins_with("--perfsize="):
 			size = int(a.substr(11))
 	var sim: Sim = m.sim
+	if "--perfloop" in OS.get_cmdline_user_args():
+		await _loop(m, jump_y)
+		return
 	var presim_ms: Array[float] = []
 	for sd: int in seeds:
 		seed(sd)
@@ -93,7 +96,7 @@ static func run(m: GuMain) -> void:
 		sim.world.territory_step(4000)
 		n_chunks += 1
 	var terr2_ms: float = (Time.get_ticks_usec() - ti) / 1000.0
-	print("PERF territory full %.1f ms · chunked %.1f ms in %d chunks · influence %.2f ms" % [terr_ms, terr2_ms, n_chunks, infl_ms])
+	print("PERF territory full %.1f ms · chunked %.1f ms in %d chunks · influence %.2f ms · phases µs %s (init, claim, keys, colors, borders, pixels, finish)" % [terr_ms, terr2_ms, n_chunks, infl_ms, str(Array(sim.world.terr_phase_us))])
 	# Zeitsprung
 	if jump_y > 0.0:
 		var y0: int = sim.year()
@@ -113,6 +116,29 @@ static func run(m: GuMain) -> void:
 	for p: float in presim_ms:
 		avg += p
 	print("PERF summary presim avg %.0f ms over %d seeds" % [avg / maxf(1.0, presim_ms.size()), presim_ms.size()])
+	print("PERFTEST DONE")
+	m.get_tree().quit()
+
+
+## --perfloop: wie im Spiel (GuMain._process mit Zeichnen): Vorgeschichte im Hintergrund und Zeitsprung je Bild.
+static func _loop(m: GuMain, jump_y: float) -> void:
+	var sim: Sim = m.sim
+	var t0: int = Time.get_ticks_msec()
+	var fr: int = 0
+	await m._start_new_world(true, "gu", {"size": GuData.SIZE_DEF})
+	while m.presim_on:
+		await m.get_tree().process_frame
+		fr += 1
+	print("PERF loop presim %d ms (%d frames) · %s" % [Time.get_ticks_msec() - t0, fr, census(sim)])
+	if jump_y > 0.0:
+		var y0: int = sim.year()
+		t0 = Time.get_ticks_msec()
+		fr = 0
+		sim.cheats.jump(jump_y)
+		while sim.cheats.jumping():
+			await m.get_tree().process_frame
+			fr += 1
+		print("PERF loop jump +%d years %d ms (%d frames) · year %d→%d · %s" % [int(jump_y), Time.get_ticks_msec() - t0, fr, y0, sim.year(), census(sim)])
 	print("PERFTEST DONE")
 	m.get_tree().quit()
 

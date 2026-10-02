@@ -1062,6 +1062,7 @@ func can_place(x: int, y: int, w: int, h: int, m: int) -> bool:
 
 
 func place_building(v: Village, type: String, x: int, y: int) -> Building:
+	var r0: int = World.terr_radius(v)
 	var s: Vector2i = GuData.BSIZE[type]
 	var b: Building = Building.new()
 	b.id = buildings.size()
@@ -1091,7 +1092,8 @@ func place_building(v: Village, type: String, x: int, y: int) -> Building:
 				world.mark_area(xx, yy)
 	recount(v)
 	puff(x + b.w / 2.0, y + b.h / 2.0, Color("#d8c8a0"), 8)
-	terr_dirty = true
+	if World.terr_radius(v) != r0:
+		terr_dirty = true   # Gebiete hängen nur am Radius (Häuser, Türme, Stufe)
 	return b
 
 
@@ -1135,10 +1137,12 @@ func remove_building(b: Building, quiet: bool = false) -> void:
 	if not quiet:
 		puff(b.x + b.w / 2.0, b.y + b.h / 2.0, Color("#6a5a4a"), 12)
 	var v: Village = villages[b.v]
+	var r0: int = World.terr_radius(v)
 	recount(v)
 	if b.type == "hall" and v.alive:
 		abandon_village(v, "The ancestral hall of " + v.name + " has been destroyed.")
-	terr_dirty = true
+	if World.terr_radius(v) != r0:
+		terr_dirty = true
 
 
 func abandon_village(v: Village, why: String) -> void:
@@ -2041,7 +2045,42 @@ func monthly() -> void:
 	cheats.month()
 	if prof:
 		_pa(P_M_CHEAT, t0)
-	terr_dirty = true
+	# Gebiete nur neu berechnen, wenn sich etwas für sie Wichtiges geändert hat (Dörfer, Radien, Clans, Kriege,
+	# Vormächte); spätestens alle 6 Monate trotzdem (Schleier, Land/Wasser). Eingriffe setzen terr_dirty selbst.
+	var sig: int = _terr_signature()
+	_terr_m += 1
+	if sig != _terr_sig or _terr_m >= 6:
+		_terr_sig = sig
+		_terr_m = 0
+		terr_dirty = true
+
+
+var _terr_sig: int = 0
+var _terr_m: int = 0
+
+
+## Prüfsumme über alles, was die Gebietsbilder bestimmt (außer dem Gelände).
+func _terr_signature() -> int:
+	var a: PackedInt32Array = PackedInt32Array()
+	a.append(world.layer)
+	for v: Village in villages:
+		if v.alive:
+			a.append(v.id)
+			a.append(v.clan)
+			a.append(int(v.cx) * 4096 + int(v.cy))
+			a.append(World.terr_radius(v))
+	var hd: PackedInt32Array = Influence.head
+	for c: Clan in clans:
+		if not c.alive:
+			continue
+		a.append(c.id)
+		a.append(c.cap)
+		a.append(c.align)
+		a.append(hd[c.id] if c.id < hd.size() else -1)
+		a.append(c.war.size())
+		for k: Variant in c.war.keys():
+			a.append(int(k))
+	return hash(a)
 
 
 func colonize(v: Village) -> void:
@@ -2468,8 +2507,6 @@ func work_at(u: Unit, i: int, t: float, type: String) -> void:
 
 func finish_work(u: Unit) -> void:
 	u.st = "idle"
-	if fast:
-		u.think = minf(u.think, 0.01)
 	if u.vil < 0:
 		return
 	var v: Village = villages[u.vil]
@@ -2950,8 +2987,9 @@ func step_unit(u: Unit, dt: float) -> void:
 		u.km_cd -= dt
 	u.think -= dt
 	if u.think <= 0.0:
-		# Schnelllauf: wer kein Ziel hat, denkt seltener (nach getaner Arbeit sofort, siehe finish_work)
-		u.think = (0.35 + randf() * 0.45) * (1.6 if fast and u.tgt == null else 1.0)
+		# große Schritte (Schnelllauf, Staffelung, Tempo 5+): Überhang mitnehmen, damit je Monat etwa gleich oft
+		# gedacht wird wie bei DT
+		u.think = 0.35 + randf() * 0.45 + (u.think if dt > 0.051 else 0.0)
 		var tt: int = Time.get_ticks_usec() if prof else 0
 		if u.poss:
 			poss_think(u)
@@ -2977,7 +3015,7 @@ func step_unit(u: Unit, dt: float) -> void:
 					var ta: int = Time.get_ticks_usec() if prof else 0
 					var over: float = u.cd
 					attack(u, e)
-					if fast and over < 0.0:
+					if dt > 0.051 and over < 0.0:
 						u.cd += over   # große Schritte: Überhang mitnehmen, damit die Angriffsrate stimmt
 					if prof:
 						_pa(P_COMBAT, ta)
@@ -2991,6 +3029,8 @@ func step_unit(u: Unit, dt: float) -> void:
 		u.wt -= dt
 		u.moving = false
 		if u.wt <= 0.0:
+			if dt > 0.051:
+				u.think += u.wt   # große Schritte: die Arbeit endete schon mitten im Schritt
 			finish_work(u)
 	else:
 		var mdx: float = u.tx - u.x
