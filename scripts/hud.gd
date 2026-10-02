@@ -11,8 +11,10 @@ signal star_pressed
 signal gift_pressed
 signal weather_stop
 signal brush_changed(i: int)
+signal shape_changed(s: int)
 signal meta_clicked(meta: String)
 signal show_ui_pressed
+signal fullscreen_pressed
 
 const C_FRAME: Color = Color("#414f3e")
 const C_FRAME_HI: Color = Color("#5a6e55")
@@ -60,8 +62,15 @@ var top_r: VBoxContainer
 var gift_btn: Button
 var wbox: PanelContainer
 var wicon: TextureRect
-var brush_box: PanelContainer
+var rotate_box: Control  ## Hinweis „Handy drehen“ (Touch im Hochformat)
+var rotate_dismissed: bool = false
+var brush_box: HBoxContainer  ## Wirkungsbereich: runder Knopf links, klappt Größen und Formen auf
 var brush_btns: Array[Button] = []
+var shape_btns: Array[Button] = []
+var brush_main: Button
+var brush_panel: PanelContainer
+var brush_cur: int = 2
+var shape_cur: int = 0
 var insp: PanelContainer
 var insp_text: RichTextLabel
 var insp_btns: HFlowContainer
@@ -125,6 +134,7 @@ func _ready() -> void:
 	_build_tip()
 	_build_windows()
 	_build_loading()
+	_build_rotate()
 
 
 # ---------------- Stile ----------------
@@ -588,7 +598,7 @@ func refresh_tools(active_id: String, weather_type: String) -> void:
 		b.add_theme_stylebox_override("hover", s)
 		b.add_theme_stylebox_override("pressed", s)
 	var tl: Dictionary = Powers.tool_by_id(active_id)
-	brush_box.visible = not tl.is_empty() and tl["m"] == "paint"
+	brush_box.visible = not tl.is_empty() and tl["m"] != "act" and tl["id"] != "inspect" and not bar_hidden
 	_set_pill(tl)
 
 
@@ -645,8 +655,6 @@ func _place_tip() -> void:
 	var y: float = vs.y - bar_height() - 6.0 - tip.size.y
 	if tool_pill.visible:
 		y = minf(y, tool_pill.position.y - 6.0 - tip.size.y)
-	if brush_box.visible:
-		y = minf(y, brush_box.position.y - 6.0 - tip.size.y)
 	tip.position = Vector2(roundf(x), roundf(y))
 	if tip.get_index() != get_child_count() - 1:
 		move_child(tip, -1)
@@ -852,27 +860,79 @@ func _build_floaters() -> void:
 	wx.add_theme_constant_override("icon_max_width", 22)
 	wx.pressed.connect(func() -> void: weather_stop.emit())
 	wv.add_child(wx)
-	brush_box = PanelContainer.new()
-	var bs: StyleBoxFlat = sb(C_FRAME, C_RIM, 2, 6)
-	bs.set_content_margin_all(4)
-	brush_box.add_theme_stylebox_override("panel", bs)
+	brush_box = HBoxContainer.new()
+	brush_box.add_theme_constant_override("separation", 6)
+	brush_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	brush_box.visible = false
 	add_child(brush_box)
+	brush_main = Button.new()
+	brush_main.custom_minimum_size = Vector2(46, 46)
+	_style_button(brush_main, well_style(false))
+	brush_main.tooltip_text = "Area: size and shape"
+	brush_main.draw.connect(func() -> void: _draw_brush_icon(brush_main, Vector2(23, 21), brush_cur, shape_cur, true))
+	brush_main.pressed.connect(func() -> void:
+		brush_panel.visible = not brush_panel.visible
+		brush_main.queue_redraw())
+	brush_box.add_child(brush_main)
+	brush_panel = PanelContainer.new()
+	var bs: StyleBoxFlat = sb(C_FRAME, C_RIM, 2, 6)
+	bs.set_content_margin_all(4)
+	brush_panel.add_theme_stylebox_override("panel", bs)
+	brush_panel.visible = false
+	brush_box.add_child(brush_panel)
+	var bv: VBoxContainer = VBoxContainer.new()
+	bv.add_theme_constant_override("separation", 4)
+	brush_panel.add_child(bv)
 	var bh: HBoxContainer = HBoxContainer.new()
-	bh.add_theme_constant_override("separation", 4)
-	brush_box.add_child(bh)
-	var sizes: Array[int] = [5, 8, 12, 16, 21]
-	for k: int in range(5):
+	bh.add_theme_constant_override("separation", 3)
+	bv.add_child(bh)
+	for k: int in range(Powers.BRUSH.size()):
 		var b: Button = Button.new()
-		b.custom_minimum_size = Vector2(30, 30)
-		_style_button(b, well_style(k == 2))
-		var d: int = sizes[k]
-		b.draw.connect(func() -> void: b.draw_circle(Vector2(15, 15), d / 2.0, Color("#d2ecdb")))
+		b.custom_minimum_size = Vector2(32, 32)
+		_style_button(b, well_style(k == brush_cur))
 		var kk: int = k
+		b.draw.connect(func() -> void: _draw_brush_icon(b, Vector2(16, 16), kk, shape_cur, false))
 		b.pressed.connect(func() -> void: brush_changed.emit(kk))
-		b.tooltip_text = "Brush size %d" % (Powers.BRUSH[k] * 2 + 1)
+		b.tooltip_text = "Area size %d" % (k + 1)
 		bh.add_child(b)
 		brush_btns.append(b)
+	var sh: HBoxContainer = HBoxContainer.new()
+	sh.add_theme_constant_override("separation", 3)
+	bv.add_child(sh)
+	for k2: int in range(Powers.SHAPE_NAME.size()):
+		var b2: Button = Button.new()
+		b2.custom_minimum_size = Vector2(32, 32)
+		_style_button(b2, well_style(k2 == shape_cur))
+		var s2: int = k2
+		b2.draw.connect(func() -> void: _draw_brush_icon(b2, Vector2(16, 16), 4, s2, false))
+		b2.pressed.connect(func() -> void: shape_changed.emit(s2))
+		b2.tooltip_text = Powers.SHAPE_NAME[k2]
+		sh.add_child(b2)
+		shape_btns.append(b2)
+	var lb: Label = Label.new()
+	lb.text = "Area of effect"
+	lb.add_theme_font_size_override("font_size", 11)
+	lb.add_theme_color_override("font_color", Color("#c8d4dc"))
+	lb.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	sh.add_child(lb)
+
+
+## Symbol eines Wirkungsbereichs: Kreis, Quadrat oder Linie in der Größe k (0..6).
+func _draw_brush_icon(b: Button, c: Vector2, k: int, shp: int, big: bool) -> void:
+	var mx: float = 17.0 if big else 13.0
+	var r: float = 2.0 + (mx - 2.0) * float(k) / float(maxi(1, Powers.BRUSH.size() - 1))
+	var col: Color = Color("#eaf6ee")
+	match shp:
+		1:
+			b.draw_rect(Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0), Color(col, 0.25))
+			b.draw_rect(Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0), col, false, 1.5)
+		2:
+			b.draw_line(c + Vector2(-mx * 0.8, mx * 0.5), c + Vector2(mx * 0.8, -mx * 0.5), col, 2.5)
+		_:
+			b.draw_circle(c, r, Color(col, 0.25))
+			b.draw_arc(c, r, 0.0, TAU, 32, col, 1.5)
+	if big:
+		b.draw_string(font_bold, Vector2(4, 44), "AREA", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color("#ffd24a"))
 
 
 func _build_tip() -> void:
@@ -932,12 +992,23 @@ func _build_tip() -> void:
 	ph.add_child(_pill_lbl)
 
 
-func set_brush(i: int) -> void:
+func set_brush(i: int, shp: int = -1) -> void:
+	brush_cur = i
+	if shp >= 0:
+		shape_cur = shp
 	for k: int in range(brush_btns.size()):
 		var s: StyleBox = well_style(k == i)
 		brush_btns[k].add_theme_stylebox_override("normal", s)
 		brush_btns[k].add_theme_stylebox_override("hover", s)
 		brush_btns[k].add_theme_stylebox_override("pressed", s)
+		brush_btns[k].queue_redraw()
+	for k2: int in range(shape_btns.size()):
+		var s2: StyleBox = well_style(k2 == shape_cur)
+		shape_btns[k2].add_theme_stylebox_override("normal", s2)
+		shape_btns[k2].add_theme_stylebox_override("hover", s2)
+		shape_btns[k2].add_theme_stylebox_override("pressed", s2)
+	if brush_main != null:
+		brush_main.queue_redraw()
 
 
 func show_hint(n: String, d: String) -> void:
@@ -966,7 +1037,7 @@ func layout_floaters() -> void:
 	var vs: Vector2 = get_viewport_rect().size
 	_layout_tabs(vs.x)
 	wbox.position = Vector2(12, vs.y - b - 12 - 80)
-	brush_box.position = Vector2(vs.x - 192, vs.y - b - 12 - 42)
+	brush_box.position = Vector2(10, roundf(clampf((vs.y - b) * 0.5 - 23.0, 60.0, vs.y - b - 110.0)))
 	age_lbl.position = Vector2(12, 8)
 	# Fenster: auf breiten Bildschirmen schmal und mittig statt über die ganze Breite
 	var iw: float = minf(vs.x - 24.0, 400.0)
@@ -1013,8 +1084,6 @@ func tick_layout() -> void:
 	if wbox.visible:
 		side = maxf(side, wbox.position.x + wbox.size.x + 8.0)
 	var bottom: float = b + 10.0
-	if brush_box.visible and brush_box.position.x < vs.x / 2.0 + 180.0:
-		bottom = b + 12.0 + 42.0 + 8.0
 	hint_box.offset_left = side
 	hint_box.offset_right = -side
 	hint_box.offset_bottom = -bottom
@@ -1042,8 +1111,6 @@ func tick_layout() -> void:
 		if wbox.visible:
 			px = wbox.position.x + wbox.size.x + 8.0
 		var right: float = vs.x - 10.0
-		if brush_box.visible:
-			right = brush_box.position.x - 8.0
 		_pill_lbl.custom_minimum_size.x = 0
 		var want: float = font_bold.get_string_size(_pill_lbl.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 6.0
 		_pill_lbl.custom_minimum_size.x = clampf(minf(want, right - px - 45.0), 40.0, 400.0)
@@ -1063,6 +1130,8 @@ func tick_layout() -> void:
 
 
 func _process(delta: float) -> void:
+	if rotate_box != null and rotate_box.visible:
+		rotate_box.get_child(0).get_child(0).get_child(0).get_child(0).queue_redraw()
 	if hint_t > 0.0:
 		hint_t -= delta
 		if hint_t <= 0.0:
@@ -1731,3 +1800,75 @@ class TabButton:
 			var iw: float = minf(w * 0.62, 40.0)
 			var ih: float = iw * 0.5
 			draw_texture_rect(icon_tex, Rect2(roundf((w - iw) * 0.5), roundf((h - ih) * 0.5 + 1), roundf(iw), roundf(ih)), false)
+
+
+
+## Hinweis im Hochformat auf Touch-Geräten: Querformat wie in Handy-Spielen (Vollbild sperrt es auf Android).
+func _build_rotate() -> void:
+	rotate_box = ColorRect.new()
+	(rotate_box as ColorRect).color = Color(0.02, 0.04, 0.03, 0.88)
+	rotate_box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	rotate_box.mouse_filter = Control.MOUSE_FILTER_STOP
+	rotate_box.visible = false
+	add_child(rotate_box)
+	var cc: CenterContainer = CenterContainer.new()
+	cc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	rotate_box.add_child(cc)
+	var pc: PanelContainer = PanelContainer.new()
+	var ps: StyleBoxFlat = sb(C_FRAME, C_RIM, 2, 8)
+	ps.set_content_margin_all(16)
+	pc.add_theme_stylebox_override("panel", ps)
+	cc.add_child(pc)
+	var v: VBoxContainer = VBoxContainer.new()
+	v.add_theme_constant_override("separation", 12)
+	pc.add_child(v)
+	var ic: Control = Control.new()
+	ic.custom_minimum_size = Vector2(260, 90)
+	ic.draw.connect(func() -> void:
+		var t: float = Time.get_ticks_msec() / 1000.0
+		var a: float = -PI / 2.0 * clampf(fmod(t, 2.4) / 1.2, 0.0, 1.0)
+		ic.draw_set_transform(Vector2(130, 45), a, Vector2.ONE)
+		ic.draw_rect(Rect2(-18, -32, 36, 64), Color("#d2ecdb"), false, 3.0)
+		ic.draw_rect(Rect2(-6, 24, 12, 3), Color("#d2ecdb"))
+		ic.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		ic.draw_arc(Vector2(130, 45), 44, -PI * 0.9, -PI * 0.55, 12, Color("#ffd24a"), 2.5))
+	v.add_child(ic)
+	var tl: Label = Label.new()
+	tl.text = "Turn your phone"
+	tl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tl.add_theme_font_override("font", font_black)
+	tl.add_theme_font_size_override("font_size", 22)
+	tl.add_theme_color_override("font_color", Color("#ffd24a"))
+	v.add_child(tl)
+	var dl: Label = Label.new()
+	dl.text = "Gu World Box plays in landscape like other mobile games."
+	dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dl.custom_minimum_size.x = 260
+	dl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dl.add_theme_color_override("font_color", Color("#d2dcd4"))
+	v.add_child(dl)
+	var fb: Button = Button.new()
+	fb.text = "Fullscreen landscape"
+	fb.custom_minimum_size = Vector2(240, 44)
+	_style_button(fb, red_style())
+	fb.add_theme_color_override("font_color", Color.WHITE)
+	fb.pressed.connect(func() -> void: fullscreen_pressed.emit())
+	v.add_child(fb)
+	var cb: Button = Button.new()
+	cb.text = "Continue in portrait"
+	cb.custom_minimum_size = Vector2(240, 36)
+	_style_button(cb, well_style(false))
+	cb.add_theme_color_override("font_color", Color("#c8d4dc"))
+	cb.pressed.connect(func() -> void:
+		rotate_dismissed = true
+		rotate_box.visible = false)
+	v.add_child(cb)
+
+
+func show_rotate(on: bool) -> void:
+	if rotate_box == null:
+		return
+	rotate_box.visible = on and not rotate_dismissed
+	if rotate_box.visible:
+		move_child(rotate_box, -1)
+

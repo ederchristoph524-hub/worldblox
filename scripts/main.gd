@@ -71,6 +71,9 @@ var insp_t: float = 0.0
 var terr_t: float = 0.0
 var auto_t: float = 0.0
 var hover: Vector2 = Vector2(-1, -1)
+var area_flash: float = 0.0  ## Wirkungsbereich kurz in der Bildmitte zeigen (nach Größen-/Formwechsel, Touch)
+var press_on: bool = false
+var press_t: float = 0.0  ## Restzeit der Bereichs-Vorschau am letzten Fingerpunkt (Touch)
 var presim_on: bool = false  ## Vorgeschichte läuft im Hintergrund, die Karte ist schon sichtbar
 var t_boot: int = 0
 var fresh: bool = false  ## Entwickler: --fresh lädt und speichert nichts
@@ -163,6 +166,8 @@ func _ready() -> void:
 			_dev_terrshots(a.substr(12))
 		if a.begins_with("--gfxshots="):
 			_dev_gfx(a.substr(11))
+		if a.begins_with("--areashots="):
+			_dev_areashots(a.substr(12))
 		if a.begins_with("--uishots="):
 			_dev_uishots(a.substr(10))
 		if a.begins_with("--hdsheet="):
@@ -248,9 +253,18 @@ func _build_scene() -> void:
 	hud.weather_stop.connect(func() -> void: _set_weather(""))
 	hud.brush_changed.connect(func(i: int) -> void:
 		powers.brush_idx = i
-		hud.set_brush(i))
+		hud.set_brush(i)
+		area_flash = 1.2)
+	hud.shape_changed.connect(func(sh: int) -> void:
+		powers.shape = sh
+		hud.set_brush(powers.brush_idx, sh)
+		area_flash = 1.2)
 	hud.meta_clicked.connect(_on_meta)
 	hud.show_ui_pressed.connect(func() -> void: _set_ui_hidden(false))
+	hud.fullscreen_pressed.connect(_go_fullscreen)
+	if OS.has_feature("web"):
+		# Im Vollbild das Querformat sperren (Android/Chrome; iOS ignoriert es)
+		JavaScriptBridge.eval("document.addEventListener('fullscreenchange',function(){if(document.fullscreenElement&&screen.orientation&&screen.orientation.lock){screen.orientation.lock('landscape').catch(function(){});}});", true)
 	legend = PowerLegend.new(hud)
 	legend.sim = sim
 	legend.position = Vector2(10, 26)
@@ -266,7 +280,9 @@ func _on_resize() -> void:
 	# Desktop-Fenster im Querformat: etwas größere Oberfläche (Basis 760 statt 880 Pixel hoch)
 	var win: Window = get_window()
 	if win != null and win.content_scale_mode == Window.CONTENT_SCALE_MODE_CANVAS_ITEMS:
-		var base: Vector2 = Vector2(400, 760) if win.size.x > win.size.y * 1.1 else Vector2(400, 880)
+		var land: bool = win.size.x > win.size.y * 1.1
+		# Handy quer: Oberfläche nach der Höhe skalieren, damit Knöpfe fingergroß bleiben
+		var base: Vector2 = (Vector2(400, 560) if is_touch() else Vector2(400, 760)) if land else Vector2(400, 880)
 		var want: Vector2i = Vector2i((base / UI_SCALES[clampi(ui_scale, 0, 2)]).round())
 		if win.content_scale_size != want:
 			win.content_scale_size = want
@@ -280,6 +296,7 @@ func _on_resize() -> void:
 	min_z = minf(vs.x / W, vh / H) * 0.92
 	_clamp_cam()
 	hud.layout_floaters()
+	hud.show_rotate(is_touch() and vs.y > vs.x * 1.1)
 
 
 func view_h() -> float:
@@ -347,6 +364,9 @@ func _home_view() -> void:
 	z = min_z
 	if vs.y > vs.x * 1.3:
 		z = clampf(view_h() * 0.76 / H, min_z, min_z * 1.5)
+	elif vs.x > vs.y * 1.3:
+		# Querformat: Karte füllt die Breite etwas mehr (ganz herauszoomen zeigt weiter die ganze Welt)
+		z = minf(min_z * 1.3, vs.x * 0.7 / W)
 	cam = Vector2(W / 2.0, H / 2.0)
 	_clamp_cam()
 
@@ -507,6 +527,10 @@ func _process(delta: float) -> void:
 	var rdt: float = minf(delta, 0.1)
 	if loading:
 		return
+	area_flash = maxf(0.0, area_flash - rdt)
+	press_t = maxf(0.0, press_t - rdt)
+	if gesture.get("type", "") == "ppend" and touches.size() < 2 and Time.get_ticks_msec() - int(gesture["t0"]) > 90:
+		_start_paint(gesture["last"])
 	if sim.cheats.jumping():
 		# Cheat-Zeitsprung: im Zeitraffer, in Häppchen je Bild
 		if sim.cheats.jump_chunk(80) >= 1.0:
@@ -709,6 +733,8 @@ func _unhandled_input(e: InputEvent) -> void:
 			touches[st.index] = st.position
 			fling = Vector2.ZERO
 			if touches.size() == 2:
+				if gesture.get("type", "") == "paint":
+					powers.end_stroke(-1.0, -1.0)
 				zoom_goal = -1.0
 				var ps: Array = touches.values()
 				var a: Vector2 = ps[0]
@@ -745,6 +771,11 @@ func _unhandled_input(e: InputEvent) -> void:
 		if mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
 			zoom_smooth(mb.position, 1.0 / (1.0 + 0.2 * (mb.factor if mb.factor > 0.0 else 1.0)))
 			return
+		if mb.button_index == MOUSE_BUTTON_LEFT:
+			hover = mb.position
+			press_on = mb.pressed
+			if not mb.pressed:
+				press_t = 1.3
 		if mb.pressed:
 			fling = Vector2.ZERO
 			pan_vel = Vector2.ZERO
@@ -752,13 +783,16 @@ func _unhandled_input(e: InputEvent) -> void:
 			var t: Dictionary = Powers.tool_by_id(tool_id)
 			var pan_btn: bool = mb.button_index != MOUSE_BUTTON_LEFT
 			if not pan_btn and not t.is_empty() and (t["m"] == "paint" or t["m"] == "spawn"):
-				gesture = {"type": "paint", "last": mb.position}
-				stroke = {}
-				powers.begin_stroke()
-				_paint_at(mb.position)
+				if mb.device == InputEvent.DEVICE_ID_EMULATION:
+					# Touch: erst kurz warten – kommt ein zweiter Finger (Zoomen), wird nicht gemalt
+					gesture = {"type": "ppend", "last": mb.position, "t0": Time.get_ticks_msec()}
+				else:
+					_start_paint(mb.position)
 			else:
 				gesture = {"type": "pan", "last": mb.position, "moved": 0.0, "tap": not pan_btn}
 		else:
+			if gesture.get("type", "") == "ppend":
+				_start_paint(mb.position)
 			# Göttliche Hand: beim Loslassen fallen die gehaltenen Wesen herab
 			if gesture.get("type", "") == "paint":
 				var wr: Vector2 = to_world(mb.position)
@@ -776,6 +810,10 @@ func _unhandled_input(e: InputEvent) -> void:
 		var mm: InputEventMouseMotion = e
 		hover = mm.position
 		var gt: String = gesture.get("type", "")
+		if gt == "ppend" and mm.position.distance_to(gesture["last"]) > 9.0:
+			var from: Vector2 = gesture["last"]
+			_start_paint(from)
+			gt = "paint"
 		if gt == "paint":
 			var t2: Dictionary = Powers.tool_by_id(tool_id)
 			if not t2.is_empty() and t2["m"] == "spawn":
@@ -806,6 +844,28 @@ func _unhandled_input(e: InputEvent) -> void:
 			pan_vel = pan_vel.lerp(d2 / dt_s, 0.45) if now_us - pan_us < 100000 else d2 / dt_s
 			pan_us = now_us
 			gesture["last"] = mm.position
+
+
+## Touch-Gerät? (`-- --touch` erzwingt es für Bildschirmfotos)
+func is_touch() -> bool:
+	return DisplayServer.is_touchscreen_available() or "--touch" in OS.get_cmdline_user_args()
+
+
+## Vollbild (im Browser sperrt das Querformat über den Handler aus _ready).
+func _go_fullscreen() -> void:
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("try{var d=document.documentElement;(d.requestFullscreen||d.webkitRequestFullscreen).call(d).then(function(){if(screen.orientation&&screen.orientation.lock){screen.orientation.lock('landscape').catch(function(){});}}).catch(function(){});}catch(e){}", true)
+	hud.rotate_dismissed = true
+	hud.show_rotate(false)
+
+
+## Beginnt einen Pinselstrich (Malen/Setzen) an Bildschirmposition p.
+func _start_paint(p: Vector2) -> void:
+	gesture = {"type": "paint", "last": p}
+	stroke = {}
+	powers.begin_stroke()
+	_paint_at(p)
 
 
 ## Einfaches Tippen löst das Werkzeug aus; zweimal schnell hintereinander (ohne Werkzeug) zoomt hinein.
@@ -852,7 +912,7 @@ func _tap_at(p: Vector2) -> void:
 			return
 		_end_presim()
 		audio.tool(t)
-		var msg: String = powers.tap_tool(t, w.x, w.y)
+		var msg: String = powers.tap_area(t, w.x, w.y)
 		if msg != "":
 			hud.show_hint("", msg)
 	elif t.is_empty():
@@ -971,6 +1031,7 @@ func _run_action(t: Dictionary) -> void:
 			_open_plans()
 		"brushshape":
 			hud.show_hint("Brush shape", powers.cycle_shape())
+			hud.set_brush(powers.brush_idx, powers.shape)
 		"coin":
 			hud.show_hint(t["n"], powers.coin())
 		# Sandkasten (Logik in Powers.world_act / Sim)
@@ -1569,6 +1630,11 @@ func _on_meta(m: String) -> void:
 			"music":
 				music_on = not music_on
 				_apply_audio()
+			"fs":
+				if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN:
+					DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+				else:
+					_go_fullscreen()
 		_settings_changed()
 	elif m.begins_with("snd:"):
 		audio.meta(m.substr(4))
@@ -1645,6 +1711,7 @@ func _open_settings() -> void:
 	var mt: String = "[color=#9db09e]"
 	var s: String = _h("Settings")
 	s += _h3("Interface")
+	s += "[url=set:fs]%s  [b]Fullscreen[/b][/url]\n    %sOn phones this locks landscape (Android).[/color]\n\n" % [_switch(DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN), mt]
 	s += "[b]Interface size[/b]\n" + _choice("set:ui", ["Small", "Normal", "Large"], [0, 1, 2], ui_scale) + "\n" + mt + "Large is easier to tap on small phones.[/color]\n\n"
 	s += "[b]Label density[/b]\n" + _choice("set:lab", ["Few", "Normal", "Many"], [0, 1, 2], label_density) + "\n" + mt + "How early landmarks, village banners and name tags appear while zooming in.[/color]\n"
 	s += _h3("Map")
@@ -2702,13 +2769,53 @@ class ScreenLayer:
 				ci.draw_string_outline(font, (p - Vector2(tw / 2.0, 0)).round(), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 4, Color(0.06, 0.08, 0.06, 1.0 - t))
 				ci.draw_string(font, (p - Vector2(tw / 2.0, 0)).round(), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(e["c"], 1.0 - t))
 		var tl: Dictionary = Powers.tool_by_id(m.tool_id)
-		if m.hover.x >= 0.0 and not tl.is_empty() and (tl["m"] == "paint" or tl["m"] == "spawn"):
-			var rr: float = 7.0 if tl["m"] == "spawn" else maxf(4.0, (m.powers.brush_r() + 0.5) * z)
-			ci.draw_arc(m.hover, rr + 1.0, 0.0, TAU, 48, Color(0, 0, 0, 0.35), 1.5)
-			ci.draw_arc(m.hover, rr, 0.0, TAU, 48, Color(1, 1, 1, 0.9), 1.5)
+		if not tl.is_empty() and tl["m"] != "act" and tl["id"] != "inspect":
+			var touch: bool = m.is_touch()
+			var at: Vector2 = Vector2(-1, -1)
+			var al: float = 1.0
+			if m.hover.x >= 0.0 and (not touch or m.press_on or m.press_t > 0.0):
+				at = m.hover
+				if touch and not m.press_on:
+					al = clampf(m.press_t / 0.6, 0.0, 1.0)
+			elif m.area_flash > 0.0:
+				at = Vector2(ci.size.x * 0.5, (ci.size.y - m.hud.bar_height()) * 0.5)
+				al = clampf(m.area_flash / 0.5, 0.0, 1.0)
+			if at.x >= 0.0 and al > 0.01:
+				_draw_area(ci, at, tl, al)
 		var ps: Village = m.powers.pair_sel
 		if ps != null and ps.alive:
 			ci.draw_arc(Vector2(ps.cx, ps.cy) * z + o, maxf(16.0, 14.0 * z), 0.0, TAU, 48, Color("#ff6a4a"), 2.0)
+
+	## Wirkungsbereich des gewählten Werkzeugs in Weiß: Kreis, Quadrat oder (Linien-Pinsel) Punkt, dazu „×n“ / „n beings“.
+	func _draw_area(ci: Control, at: Vector2, tl: Dictionary, al: float) -> void:
+		var z: float = m.z
+		var pw: Powers = m.powers
+		var r: float = (pw.area_r() + 0.5) * z
+		if tl["m"] == "paint" and pw.shape == 2:
+			r = 0.5 * z
+		r = maxf(r, 3.0)
+		var sh: Color = Color(0, 0, 0, 0.45 * al)
+		var wc: Color = Color(1, 1, 1, 0.95 * al)
+		var fill: Color = Color(1, 1, 1, 0.13 * al)
+		if pw.shape == 1 and not (tl["m"] == "paint" and pw.shape == 2):
+			var rc: Rect2 = Rect2(at - Vector2(r, r), Vector2(r, r) * 2.0)
+			ci.draw_rect(rc, fill)
+			ci.draw_rect(rc.grow(1.0), sh, false, 1.5)
+			ci.draw_rect(rc, wc, false, 1.5)
+		else:
+			ci.draw_circle(at, r, fill)
+			ci.draw_arc(at, r + 1.0, 0.0, TAU, 56, sh, 1.5)
+			ci.draw_arc(at, r, 0.0, TAU, 56, wc, 1.5)
+		ci.draw_line(at - Vector2(4, 0), at + Vector2(4, 0), wc, 1.0)
+		ci.draw_line(at - Vector2(0, 4), at + Vector2(0, 4), wc, 1.0)
+		var w: Vector2 = m.to_world(at)
+		var lab: String = pw.area_label(tl, w.x, w.y)
+		if lab != "":
+			var font: Font = m.hud.font_bold
+			var tw: float = font.get_string_size(lab, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+			var p: Vector2 = (at + Vector2(-tw / 2.0, -r - 6.0)).round()
+			ci.draw_string_outline(font, p, lab, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 4, Color(0.04, 0.06, 0.05, al))
+			ci.draw_string(font, p, lab, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, al))
 
 	func _draw_landmark(ci: Control, it: Dictionary) -> void:
 		var fnt: Font = m.hud.font_bold
@@ -4327,4 +4434,46 @@ func _dev_fxshots(dir: String) -> void:
 			await get_tree().process_frame
 		print("FXPERF z%d entity draw avg ms %.3f (n %d, units %d) sections us %s" % [int(zz), ents.draw_us_sum / 1000.0 / maxi(1, ents.draw_n), ents.draw_n, sim.units.size(), str(Array(ents.prof).map(func(v: int) -> int: return v / maxi(1, ents.draw_n)))])
 	print("FXSHOTS DONE ", ven)
+	get_tree().quit()
+
+
+
+## Entwickler: -- --fresh --touch --areashots=<ordner> – Wirkungsbereich, Bereichs-Knopf, Gu-Hand (Querformat).
+func _dev_areashots(dir: String) -> void:
+	while loading or presim_on:
+		await get_tree().process_frame
+	await _wait(0.5)
+	await _shot(dir + "/a0_start.png")
+	var c: Vector2 = Vector2(W * 0.5, H * 0.52)
+	z = 6.0
+	cam = c
+	_clamp_cam()
+	_apply_tab(5)
+	_click_tool(Powers.tool_by_id("gu_cast"))
+	await _wait(0.4)
+	await _shot(dir + "/a1_gupicker.png")
+	powers.cheat._set_gu("m:Moonlight Gu", "Moonlight Gu")
+	hud.close_modal()
+	hud.brush_panel.visible = true
+	powers.brush_idx = 4
+	hud.set_brush(4, 0)
+	var vs: Vector2 = get_viewport_rect().size
+	hover = Vector2(vs.x * 0.55, view_h() * 0.5)
+	press_on = true
+	await _wait(0.3)
+	await _shot(dir + "/a2_area_circle.png")
+	var w: Vector2 = to_world(hover)
+	print("cast: ", sim.cheats.cast_gu(powers.cheat.gu_sel, 6, w.x, w.y, powers.area_r(), false))
+	await _wait(0.25)
+	await _shot(dir + "/a3_cast.png")
+	powers.shape = 1
+	hud.set_brush(5, 1)
+	powers.brush_idx = 5
+	_apply_tab(4)
+	_click_tool(Powers.tool_by_id("bolt"))
+	await _wait(0.3)
+	await _shot(dir + "/a4_bolt_square.png")
+	print("bolt: ", powers.tap_area(Powers.tool_by_id("bolt"), w.x, w.y))
+	await _wait(0.2)
+	await _shot(dir + "/a5_bolts.png")
 	get_tree().quit()

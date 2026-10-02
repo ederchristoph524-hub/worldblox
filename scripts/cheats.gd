@@ -910,3 +910,154 @@ func from_dict(d: Dictionary) -> void:
 	inf_v.clear()
 	for e3: Variant in d.get("inf_v", []):
 		inf_v[int(e3)] = true
+
+
+# ---------------- Gu-Hand (Reiter 5: „Drop Gu“, „Use Gu“) ----------------
+const GU_HEAL: PackedStringArray = ["Heal", "Purif", "Life", "Spring", "Restor", "Recover", "Rebirth", "Man as Before", "Medicine", "Cure", "Regener", "Revive", "Resurrect"]
+const GU_SHIELD: PackedStringArray = ["Shield", "Armor", "Armour", "Skin", "Clothes", "Wall", "Defen", "Protect", "Obstacle", "Guard", "Barrier", "Coat", "Robe", "Shell"]
+
+
+## Pfad, Rang, Name und Wirkungsart eines gewählten Gu ("m:<Name>" sterblich, "i:<id>" unsterblich).
+func gu_info(sel: String) -> Dictionary:
+	if sel.begins_with("i:"):
+		var e: Dictionary = Lore.igu(sel.substr(2))
+		if e.is_empty():
+			return {}
+		var fx: String = str(e.get("fx", ""))
+		var kind: String = _gu_kind(str(e["n"]), int(e["p"]))
+		if fx in ["revive", "rez", "hp", "life", "eternal"]:
+			kind = "heal"
+		elif fx in ["luck", "fortune", "fate"]:
+			kind = "luck"
+		elif fx in ["tower"]:
+			kind = "shield"
+		return {"n": str(e["n"]), "p": int(e["p"]), "r": mini(int(e["r"]), 9), "kind": kind, "imm": true}
+	var nm: String = sel.substr(2)
+	for p: int in range(GuData.PATH_NAME.size()):
+		var mg: PackedStringArray = Lore.mgu(p)
+		var k: int = mg.find(nm)
+		if k >= 0:
+			var rk: int = 1 + roundi(4.0 * k / maxf(1.0, mg.size() - 1.0))
+			return {"n": nm, "p": p, "r": clampi(rk, 1, 5), "kind": _gu_kind(nm, p), "imm": false}
+	return {}
+
+
+func _gu_kind(nm: String, p: int) -> String:
+	for w: String in GU_HEAL:
+		if nm.contains(w):
+			return "heal"
+	for w2: String in GU_SHIELD:
+		if nm.contains(w2):
+			return "shield"
+	if p == 24 or nm.contains("Luck") or nm.contains("Fortune"):
+		return "luck"
+	return "attack"
+
+
+## „Use Gu“: das Gu wirkt auf den ganzen Bereich (Kreis oder Quadrat mit Radius r) – unbegrenzt.
+## Angriff: Schaden nach dem Machtmodell (Rang des Gu bzw. gewählter Rang), dazu Gelände-Wirkung des Pfades.
+func cast_gu(sel: String, rank_over: int, x: float, y: float, r: float, square: bool) -> String:
+	var info: Dictionary = gu_info(sel)
+	if info.is_empty():
+		return "Choose a Gu first."
+	var p: int = clampi(int(info["p"]), 0, GuData.PATH_NAME.size() - 1)
+	var rk: int = clampi(rank_over if rank_over > 0 else int(info["r"]), 1, 9)
+	var kind: String = info["kind"]
+	var c: Color = GuData.PATH_COL[p]
+	var R: float = maxf(1.5, r + 0.5)
+	var src: Unit = Unit.new()
+	src.k = "p"
+	src.rank = rk
+	src.stage = 3
+	src.apt = "A"
+	src.path = p
+	if bool(info["imm"]):
+		src.igu = PackedStringArray([sel.substr(2)])
+	var hit: int = 0
+	for u: Unit in sim.near_units(x, y, R + 1.5):
+		if u.hp <= 0.0 or u.held:
+			continue
+		var dx: float = u.x - x
+		var dy: float = u.y - 1.0 - y
+		if (square and (absf(dx) > R or absf(dy) > R)) or (not square and dx * dx + dy * dy > R * R):
+			continue
+		hit += 1
+		match kind:
+			"heal":
+				heal(u)
+				sim.spark(u.x, u.y - 2.0, Color("#6ae87a"), 3, 3.0)
+			"shield":
+				u.prot = maxf(u.prot, sim.sim_time + 60.0)
+				u.fxm = true
+				sim.ring(u.x, u.y - 1.5, 1.6, c, 0.6)
+			"luck":
+				u.luck = 1.0
+				sim.spark(u.x, u.y - 2.0, Color("#9aff7a"), 3, 3.0)
+			_:
+				var d: float = sqrt(dx * dx + dy * dy)
+				var dmg: float = GuData.HP[rk] * 1.6 * (1.0 - 0.35 * d / R) * sim.dmg_mul(src, u)
+				sim.hurt(u, dmg, null)
+	if kind == "attack":
+		_cast_terrain(p, x, y, R, square, rk)
+		sim.fx.append({"k": "km", "x": x, "y": y, "r": R, "c": c, "p": p, "l": 1.0, "ml": 1.0})
+		sim.sfx_ev("km", x, y, p)
+		if rk >= 6:
+			sim.shake = minf(1.2, sim.shake + 0.1 * (rk - 5))
+	sim.ring(x, y, R, c, 0.7)
+	sim.spark(x, y, c, int(clampf(R * 3.0, 8.0, 40.0)), 6.0)
+	sim.fx.append({"k": "txt", "x": x, "y": y - R - 2.0, "t": str(info["n"]), "c": c.lightened(0.3), "l": 1.4, "ml": 1.4})
+	return ""
+
+
+## Gelände-Wirkung eines angewandten Gu je nach Pfad (Feuer zündet, Eis friert, Erde bricht auf, Holz lässt wachsen).
+func _cast_terrain(p: int, x: float, y: float, R: float, square: bool, rk: int) -> void:
+	var w: World = sim.world
+	var n: int = clampi(int(R * R * 0.5), 2, 500)
+	for k: int in range(n):
+		var dx: float = (randf() * 2.0 - 1.0) * R
+		var dy: float = (randf() * 2.0 - 1.0) * R
+		if not square and dx * dx + dy * dy > R * R:
+			continue
+		var tx: int = int(x + dx)
+		var ty: int = int(y + dy)
+		if not w.in_map(tx, ty):
+			continue
+		var i: int = ty * w.W + tx
+		var t: int = w.tile[i]
+		if not GuData.is_land(t) or t == GuData.WALL:
+			continue
+		match p:
+			2:
+				if randf() < 0.35:
+					sim.ignite(i, 1.0)
+			5:
+				if randf() < 0.12:
+					sim.ignite(i, 1.0)
+			7, 12:
+				if rk >= 4 and t != GuData.MOUNT and w.bmap[i] < 0 and randf() < 0.5:
+					if w.feat[i] != 0 and w.feat[i] != GuData.F_SPRING and w.feat[i] != GuData.F_ORE:
+						w.feat[i] = 0
+					sim.set_tile(i, GuData.SOIL)
+			14, 15:
+				if w.bmap[i] < 0 and (t == GuData.GRASS or t == GuData.STEP or t == GuData.SOIL or t == GuData.DES):
+					w.temp_snow[i] = t + 1
+					w.tile[i] = GuData.SNOW
+					w.mark_dirty(tx, ty)
+			6:
+				if w.feat[i] == 0 and w.bmap[i] < 0 and (t == GuData.GRASS or t == GuData.STEP or t == GuData.SOIL) and randf() < 0.4:
+					w.feat[i] = sim.plant_for(i)
+					w.mark_area(tx, ty)
+
+
+## „Drop Gu“ auf leeres Land: das Gu fällt als wilder Gu-Wurm herab, den Gu-Meister einfangen können.
+func drop_wild_gu(sel: String, x: float, y: float) -> String:
+	if not sim.world.in_map(int(x), int(y)):
+		return ""
+	if sel.begins_with("i:"):
+		var g: Unit = sim.spawn_wild_igu(x, y, sel.substr(2))
+		return "" if g != null else "The Gu cannot live here."
+	var info: Dictionary = gu_info(sel)
+	if info.is_empty():
+		return "Choose a Gu first."
+	var g2: Unit = sim.spawn_wild_gu(x, y, int(info["p"]))
+	return "" if g2 != null else "The Gu cannot live here."

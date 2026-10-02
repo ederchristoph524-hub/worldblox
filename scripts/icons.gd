@@ -62,6 +62,8 @@ static func _make(id: String) -> Px:
 	var sb: Px = _make_sandbox(id)
 	if sb != null:
 		return sb
+	if id == "gu_drop" or id == "gu_cast":
+		return _make_guhand(id)
 	if id.begins_with("c_") or id == "tab7":
 		var ch: Px = _make_cheat(id)
 		if ch != null:
@@ -1917,4 +1919,37 @@ static func _make_cheat(id: String) -> Px:
 				q.p(3, 1, 2, 6, "#5ad86a")
 		_:
 			return null
+	return q.outline()
+
+
+
+## Gu-Hand: „Drop Gu“ (Gu-Wurm fällt mit Pfeil) und „Use Gu“ (Hand mit Gu und Wirkungsring).
+static func _make_guhand(id: String) -> Px:
+	var q: Px = Px.new(24, 24)
+	if id == "gu_drop":
+		# Pfeil nach unten
+		q.p(11, 1, 2, 7, "#e8f4ff")
+		q.p(9, 6, 6, 1, "#e8f4ff")
+		q.p(10, 7, 4, 1, "#e8f4ff")
+		q.p(11, 8, 2, 1, "#e8f4ff")
+		# Gu-Wurm (gegliedert, jadegrün)
+		for k: int in range(5):
+			q.d(5 + k * 3, 15 + (1 if k % 2 == 0 else 0), 2, "#4fc87a" if k % 2 == 0 else "#3aa862")
+		q.d(19, 14, 2, "#7ae8a0")
+		q.p(20, 13, 1, 1, "#141a16")
+		q.p(4, 20, 17, 1, "#2a3a2e")
+		return q.outline()
+	# Use Gu: Wirkungsring + Hand + Gu-Funke
+	q.d(12, 12, 10, "#ffffff")
+	q.d(12, 12, 9, Color(0, 0, 0, 0))
+	q.d(12, 12, 8, "#2c3a6a")
+	q.d(12, 12, 6, "#3d5ab0")
+	q.p(8, 11, 8, 6, "#e8c8a0")
+	q.p(8, 8, 2, 4, "#e8c8a0")
+	q.p(10, 7, 2, 5, "#e8c8a0")
+	q.p(12, 7, 2, 5, "#e8c8a0")
+	q.p(14, 8, 2, 4, "#e8c8a0")
+	q.p(8, 16, 8, 1, "#b8946a")
+	q.d(17, 6, 3, "#ffd24a")
+	q.d(17, 6, 1, "#ffffff")
 	return q.outline()

@@ -153,7 +153,7 @@ static func _build_tools() -> Array:
 	return L
 
 
-const BRUSH: PackedInt32Array = [1, 2, 4, 7, 11]
+const BRUSH: PackedInt32Array = [1, 2, 3, 5, 8, 12, 18]
 const LADDER: PackedInt32Array = [GuData.DEEP, GuData.SHAL, GuData.SAND, GuData.GRASS, GuData.HILL, GuData.MOUNT]
 
 var sim: Sim
@@ -245,7 +245,128 @@ static func tool_by_id(id: String) -> Dictionary:
 func brush_r() -> int:
 	if shape == 2:
 		return 0
-	return BRUSH[brush_idx] if brush_idx < 3 else roundi(BRUSH[brush_idx] * sqrt(maxf(1.0, GuData.len_f())))
+	return BRUSH[brush_idx] if brush_idx < 4 else roundi(BRUSH[brush_idx] * sqrt(maxf(1.0, GuData.len_f())))
+
+
+# ---------------- Wirkungsbereich (für jedes Werkzeug) ----------------
+## Radius des Wirkungsbereichs in Kacheln (auch bei der Pinselform „Linie“: dann der kleinste Bereich).
+func area_r() -> float:
+	if shape == 2:
+		return 0.6
+	return float(BRUSH[brush_idx] if brush_idx < 4 else roundi(BRUSH[brush_idx] * sqrt(maxf(1.0, GuData.len_f()))))
+
+
+## Liegt der Versatz (dx, dy) im Bereich mit Radius r? Kreis oder Quadrat je nach Pinselform.
+func in_area(dx: float, dy: float, r: float) -> bool:
+	if shape == 1:
+		return absf(dx) <= r + 0.5 and absf(dy) <= r + 0.5
+	return dx * dx + dy * dy <= (r + 0.5) * (r + 0.5)
+
+
+## Fläche des Bereichs in Kacheln.
+func area_tiles() -> float:
+	var r: float = area_r() + 0.5
+	return 4.0 * r * r if shape == 1 else PI * r * r
+
+
+## Zufällige Punkte im Bereich (der erste in der Mitte).
+func area_points(wx: float, wy: float, n: int) -> Array[Vector2]:
+	var out: Array[Vector2] = [Vector2(wx, wy)]
+	var r: float = area_r()
+	var guard: int = 0
+	while out.size() < n and guard < n * 20:
+		guard += 1
+		var dx: float = (randf() * 2.0 - 1.0) * (r + 0.5)
+		var dy: float = (randf() * 2.0 - 1.0) * (r + 0.5)
+		if in_area(dx, dy, r) and sim.world.in_map(int(wx + dx), int(wy + dy)):
+			out.append(Vector2(wx + dx, wy + dy))
+	return out
+
+
+## Wesen im Bereich (persons: nur Menschen), höchstens cap.
+func area_units(wx: float, wy: float, persons: bool, cap: int = 400) -> Array[Unit]:
+	var out: Array[Unit] = []
+	var r: float = area_r()
+	for u: Unit in sim.near_units(wx, wy, r + 2.0):
+		if u.hp <= 0.0 or u.held or (persons and u.k != "p"):
+			continue
+		if in_area(u.x - wx, u.y - 1.0 - wy, r + 0.5):
+			out.append(u)
+			if out.size() >= cap:
+				break
+	return out
+
+
+## Eigenradius der Punkt-Wirkungen (Kacheln): danach richtet sich, wie oft sie im Bereich auftreten.
+const TAP_R0: Dictionary = {"bolt": 2.0, "det": 5.0, "cres": 5.0, "meteor": 9.0, "wrath": 26.0, "trib": 10.0, "quake": 14.0,
+	"volcano": 8.0, "tornado": 6.0, "acid": 8.0, "tnt": 4.0, "napalm": 6.0, "km6": 6.0, "km8": 10.0, "km9": 16.0, "void": 10.0,
+	"goo": 8.0, "ev_calam": 30.0, "seed_grass": 6.0, "seed_des": 6.0, "seed_snow": 6.0, "c_army": 8.0}
+## Werkzeuge, die auf einzelne Wesen wirken: im Bereich trifft es alle (Menschen bzw. alle Wesen).
+const UNIT_TOOLS: PackedStringArray = ["c_rup", "c_rdown", "c_rset", "c_path", "c_align", "c_apt", "c_imm", "c_inv", "c_god",
+	"c_young", "c_old", "c_clone", "c_give", "c_strip", "c_luck", "c_will", "c_trib", "c_ward", "gu_drop"]
+const UNIT_ANY: PackedStringArray = ["c_imm", "c_inv", "c_god", "c_young", "c_old", "c_clone"]
+
+
+## Wie oft eine Punkt-Wirkung im aktuellen Bereich auftritt (1 = einmal in der Mitte).
+func tap_count(t: Dictionary) -> int:
+	var id: String = t["id"]
+	if not TAP_R0.has(id):
+		return 1
+	var r0: float = float(TAP_R0[id])
+	var cap: int = 6 if r0 >= 9.0 else 16
+	return clampi(roundi(area_tiles() / (PI * r0 * r0 * 0.55)), 1, cap)
+
+
+## Wie viele Wesen ein Setz-Werkzeug je Tipp im Bereich setzt (ohne Spawn-Menge).
+func spawn_count(t: Dictionary) -> int:
+	var sp: String = str(t.get("sp", ""))
+	var heavy: bool = sp.begins_with("ven") or sp.begins_with("fig") or sp.begins_with("ig") or sp in ["imm", "gi7", "gi8", "ow"] or str(t["id"]) in ["s_imm", "s_gi7", "s_gi8", "ev_ow"]
+	if heavy:
+		return clampi(int(area_tiles() / 400.0) + 1, 1, 5)
+	return clampi(roundi(area_tiles() / 40.0), 1, 12)
+
+
+## Vorschau-Text am Bereich (z. B. „×4“ oder „7 beings“).
+func area_label(t: Dictionary, wx: float, wy: float) -> String:
+	var id: String = t["id"]
+	if id in UNIT_TOOLS and area_r() > 1.0:
+		var n: int = area_units(wx, wy, not (id in UNIT_ANY)).size()
+		return "%d %s" % [n, "being" if n == 1 else "beings"]
+	if t["m"] == "spawn":
+		var n2: int = spawn_count(t) * maxi(1, sim.cheats.mult)
+		return "×%d" % n2 if n2 > 1 else ""
+	if t["m"] == "tap":
+		var n3: int = tap_count(t)
+		return "×%d" % n3 if n3 > 1 else ""
+	return ""
+
+
+## Tippen mit Wirkungsbereich: Wesen-Werkzeuge treffen alle Wesen im Bereich, Punkt-Wirkungen treten je nach
+## Bereichsgröße mehrfach auf, alles andere wirkt einmal in der Mitte.
+func tap_area(t: Dictionary, wx: float, wy: float) -> String:
+	var id: String = t["id"]
+	if id in UNIT_TOOLS and area_r() > 1.0:
+		var us: Array[Unit] = area_units(wx, wy, not (id in UNIT_ANY))
+		if us.is_empty():
+			if id == "gu_drop":
+				return tap_tool(t, wx, wy)
+			return "Nobody in the area."
+		var last: String = ""
+		for u: Unit in us:
+			if u.hp > 0.0:
+				last = tap_tool(t, u.x, u.y - 1.5)
+		return last if us.size() == 1 else "%d beings affected." % us.size()
+	if t["m"] == "tap" and TAP_R0.has(id):
+		var pts: Array[Vector2] = area_points(wx, wy, tap_count(t))
+		var first: String = ""
+		for k: int in range(pts.size()):
+			var pp: Vector2 = pts[k]
+			if k == 0:
+				first = tap_tool(t, pp.x, pp.y)
+			else:
+				sim.later(k * 0.07, func() -> void: tap_tool(t, pp.x, pp.y))
+		return first
+	return tap_tool(t, wx, wy)
 
 
 func cycle_shape() -> String:
@@ -317,7 +438,7 @@ func apply_paint(t: Dictionary, wx: float, wy: float, stroke: Dictionary) -> voi
 	else:
 		_seg_from = Vector2(-1, -1)
 	stroke["lp"] = Vector2(tx, ty)
-	if int(t["tab"]) == CheatTools.TAB:
+	if int(t["tab"]) == CheatTools.TAB or t.get("ct", false):
 		cheat.paint(t, wx, wy, stroke_id)
 		return
 	if paint_parity(t, wx, wy, stroke) or paint_sandbox(t, tx, ty):
@@ -440,21 +561,16 @@ func spawn_at(t: Dictionary, wx: float, wy: float) -> String:
 	var C: Cheats = sim.cheats
 	if not C.room():
 		return C.full_msg()
-	var n: int = C.mult
+	var n: int = maxi(1, C.mult) * spawn_count(t)
 	if n <= 1:
 		return _spawn_one(t, wx, wy)
 	var first: String = ""
 	var ok: int = 0
-	var rr: float = 1.5 + sqrt(float(n)) * 1.2
-	for k: int in range(n):
+	for pt: Vector2 in area_points(wx, wy, n):
 		if not C.room():
 			return C.full_msg()
-		var a: float = randf() * TAU
-		var d: float = 0.0 if k == 0 else sqrt(randf()) * rr
-		var px: float = wx + cos(a) * d
-		var py: float = wy + sin(a) * d
-		if not sim.world.in_map(int(px), int(py)):
-			continue
+		var px: float = pt.x
+		var py: float = pt.y
 		var msg: String = _spawn_one(t, px, py)
 		if msg == "":
 			ok += 1
@@ -557,7 +673,7 @@ func tap_tool(t: Dictionary, wx: float, wy: float) -> String:
 		return ""
 	if t.has("org"):
 		return sim.found_org(Lore.org(t["org"]), wx, wy)
-	if int(t["tab"]) == CheatTools.TAB:
+	if int(t["tab"]) == CheatTools.TAB or t.get("ct", false):
 		return cheat.tap(t, wx, wy)
 	if t.has("seed"):
 		if not sim._solid(ty * W + tx):

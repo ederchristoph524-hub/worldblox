@@ -18,6 +18,9 @@ var path_sel: int = 24
 var apt_sel: String = "X"
 var give_sel: String = "i:spring_autumn_cicada"
 var give_open: int = -1       ## im Gu-Fenster aufgeklappter Pfad (sterbliche Gu)
+var pick_for: String = "c_give"  ## für welches Werkzeug das Gu-Fenster wählt (c_give, gu_drop, gu_cast)
+var gu_sel: String = "m:Moonlight Gu"  ## gewähltes Gu der Gu-Hand (Reiter 5)
+var cast_rank: int = 0        ## Wirkungsrang beim Anwenden (0 = Rang des Gu)
 var grave_sel: int = 0
 var army_n: int = 25
 var army_r: int = 3
@@ -35,6 +38,9 @@ func _init(s: Sim, p: Powers) -> void:
 static func add_tools(L: Array) -> void:
 	var T: int = TAB
 	L.append_array([
+		# Reiter 5 „Gu and Fate“: die Gu-Hand – jedes Gu unbegrenzt verteilen oder selbst anwenden
+		{"id": "gu_drop", "tab": 5, "g": -2, "ct": true, "n": "Drop Gu", "d": "Choose any mortal or Immortal Gu, then tap: everyone in the white area receives it – no limit. Tap empty land to drop it as a wild Gu worm.", "m": "tap", "pick": true},
+		{"id": "gu_cast", "tab": 5, "g": -2, "ct": true, "n": "Use Gu", "d": "Choose any Gu and its power (rank), then tap or drag over the map: its effect strikes the whole white area – attack, healing, shields, luck, fire, ice, earth, wood … unlimited.", "m": "paint", "pick": true},
 		# 0: Schalter
 		{"id": "c_menu", "tab": T, "g": 0, "n": "Cheat Menu", "d": "All cheat switches (uniqueness, infinite primeval essence, instant cultivation, no tribulations …), spawn amount and instant actions.", "m": "act"},
 		{"id": "c_mult", "tab": T, "g": 0, "n": "Spawn Amount", "d": "How many beings each spawn tool places at once: ×1, ×5, ×10 or ×50.", "m": "act"},
@@ -187,6 +193,11 @@ func tap(t: Dictionary, wx: float, wy: float) -> String:
 			return C.fate_fix(wx, wy)
 		"c_possess":
 			return powers.possess_tap(wx, wy, false)
+		"gu_drop":
+			var ud: Unit = unit_at(wx, wy, true)
+			if ud == null:
+				return C.drop_wild_gu(gu_sel, wx, wy)
+			return C.give(ud, gu_sel)
 	var persons: bool = not (id in ["c_imm", "c_inv", "c_god", "c_young", "c_old", "c_clone", "c_soul"])
 	var u: Unit = unit_at(wx, wy, persons)
 	if u == null:
@@ -263,7 +274,19 @@ func tap(t: Dictionary, wx: float, wy: float) -> String:
 
 
 ## Pinsel-Werkzeuge des Reiters. true = behandelt.
+var _cast_ms: int = 0
+
+
 func paint(t: Dictionary, wx: float, wy: float, stroke_id: int) -> bool:
+	if t["id"] == "gu_cast":
+		var now: int = Time.get_ticks_msec()
+		if now - _cast_ms < 140:
+			return true
+		_cast_ms = now
+		var msg: String = sim.cheats.cast_gu(gu_sel, cast_rank, wx, wy, powers.area_r(), powers.shape == 1)
+		if msg != "" and m != null:
+			m.hud.show_hint("", msg)
+		return true
 	if t["id"] != "c_heal":
 		return false
 	for u: Unit in sim.near_units(wx, wy, powers.brush_r() + 1.5):
@@ -474,7 +497,8 @@ func open_picker(id: String) -> void:
 			_pick_path()
 		"c_apt":
 			_pick_apt()
-		"c_give":
+		"c_give", "gu_drop", "gu_cast":
+			pick_for = id
 			_pick_gu()
 		"c_revive":
 			_pick_grave()
@@ -519,12 +543,21 @@ func _pick_apt() -> void:
 
 
 func _pick_gu() -> void:
-	var s: String = _h("Give Gu") + "Tap a Gu, then humans. No limit.\n"
+	var cur: String = give_sel if pick_for == "c_give" else gu_sel
+	var ttl: String = {"c_give": "Give Gu", "gu_drop": "Drop Gu", "gu_cast": "Use Gu"}.get(pick_for, "Gu")
+	var s: String = _h(ttl) + ("Tap a Gu, then tap the map – its effect hits the white area. No limit.\n" if pick_for == "gu_cast" else "Tap a Gu, then humans. No limit.\n")
+	if pick_for == "gu_cast":
+		var rs: PackedStringArray = PackedStringArray()
+		for r0: int in range(0, 10):
+			var lab: String = "Gu rank" if r0 == 0 else "R%d" % r0
+			var col0: String = "c8c0b0" if r0 == 0 else GuData.ESS_COL[r0].to_html(false)
+			rs.append("[url=c:gr:%d][color=#%s]%s[/color][/url]" % [r0, col0, ("[b][u]%s[/u][/b]" if cast_rank == r0 else "%s") % lab])
+		s += _h3("Power") + "   ".join(rs) + "\n[color=#9db09e]A Rank 6+ power wipes out mortals; mortal power barely scratches Immortals.[/color]\n"
 	for r: int in [10, 9, 8, 7, 6]:
 		var items: PackedStringArray = PackedStringArray()
 		for e: Dictionary in Lore.IGU:
 			if int(e["r"]) == r:
-				var on: bool = give_sel == "i:" + str(e["id"])
+				var on: bool = cur == "i:" + str(e["id"])
 				items.append("[url=c:gi:%s][color=#%s]■[/color] %s[/url]" % [e["id"], GuData.PATH_COL[int(e["p"])].to_html(false), ("[b][u]%s[/u][/b]" if on else "%s") % str(e["n"])])
 		if not items.is_empty():
 			s += _h3("Immortal Gu · Rank %d" % r) + "   ".join(items) + "\n"
@@ -537,7 +570,7 @@ func _pick_gu() -> void:
 		var mg: PackedStringArray = Lore.mgu(give_open)
 		var gi: PackedStringArray = PackedStringArray()
 		for k: int in range(mg.size()):
-			gi.append("[url=c:gm:%d:%d]%s[/url]" % [give_open, k, ("[b][u]%s[/u][/b]" if give_sel == "m:" + mg[k] else "%s") % mg[k]])
+			gi.append("[url=c:gm:%d:%d]%s[/url]" % [give_open, k, ("[b][u]%s[/u][/b]" if cur == "m:" + mg[k] else "%s") % mg[k]])
 		s += "\n[color=#%s][b]%s Path:[/b][/color] " % [GuData.PATH_COL[give_open].to_html(false), GuData.PATH_NAME[give_open]] + "   ".join(gi) + "\n"
 	_modal(s)
 
@@ -639,20 +672,17 @@ func meta(mm: String) -> void:
 			m.hud.close_modal()
 			_hint("Set Aptitude", ("Extreme Physique" if v == "X" else v + "-grade") + ". Tap humans.")
 		"gi":
-			give_sel = "i:" + v
-			_select("c_give")
-			m.hud.close_modal()
-			_hint("Give Gu", Lore.igu_name(v) + ". Tap humans.")
+			_set_gu("i:" + v, Lore.igu_name(v))
 		"gp":
 			give_open = -1 if give_open == int(v) else clampi(int(v), 0, GuData.PATH_NAME.size() - 1)
 			_pick_gu()
 		"gm":
 			var mg: PackedStringArray = Lore.mgu(clampi(int(v), 0, GuData.PATH_NAME.size() - 1))
 			var idx: int = clampi(int(parts[2]) if parts.size() > 2 else 0, 0, mg.size() - 1)
-			give_sel = "m:" + mg[idx]
-			_select("c_give")
-			m.hud.close_modal()
-			_hint("Give Gu", mg[idx] + ". Tap humans.")
+			_set_gu("m:" + mg[idx], mg[idx])
+		"gr":
+			cast_rank = clampi(int(v), 0, 9)
+			_pick_gu()
 		"d":
 			grave_sel = clampi(int(v), 0, maxi(0, C.grave.size() - 1))
 			_select("c_revive")
@@ -668,13 +698,30 @@ func meta(mm: String) -> void:
 			_pick_army()
 
 
+## Gewähltes Gu für das Werkzeug, für das das Gu-Fenster offen ist.
+func _set_gu(sel: String, nm: String) -> void:
+	if pick_for == "c_give":
+		give_sel = sel
+	else:
+		gu_sel = sel
+	_select(pick_for)
+	m.hud.close_modal()
+	match pick_for:
+		"gu_drop":
+			_hint("Drop Gu", nm + ". Tap the map – everyone in the white area receives it.")
+		"gu_cast":
+			_hint("Use Gu", nm + " (%s). Tap or drag over the map." % ("its own rank" if cast_rank == 0 else "Rank %d" % cast_rank))
+		_:
+			_hint("Give Gu", nm + ". Tap humans.")
+
+
 ## Wählt ein Werkzeug (ohne das Auswahlfenster erneut zu öffnen).
 func _select(id: String) -> void:
 	if m == null or m.tool_id == id:
 		return
 	var t: Dictionary = Powers.tool_by_id(id)
-	if m.tab != TAB:
-		m._apply_tab(TAB)
+	if m.tab != int(t["tab"]):
+		m._apply_tab(int(t["tab"]))
 	m.tool_id = id
 	powers.pair_sel = null
 	clear_sel()
