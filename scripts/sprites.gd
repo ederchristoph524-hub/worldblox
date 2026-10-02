@@ -444,108 +444,128 @@ static func draw_person(sink: Callable, X: float, Y: float, sc: float, race: int
 	if not adult:
 		s *= 0.72
 	var parts: Array = []
-	var st: int = (int(anim * 7.0) & 1) if moving else 0
-	var bob: float = -0.5 if st == 1 else 0.0
+	var ph: float = anim * 7.0
+	var st: int = (int(ph) & 1) if moving else 0
+	var bob: float = -0.4 if st == 1 else 0.0
+	# Schwung von Armen und Beinen beim Gehen
+	var sw: float = sin(ph * PI) * 0.55 if moving else 0.0
 	var P: Callable = func(x: float, y: float, w: float, h: float, c: Color) -> void:
 		var rx: float = X + (x if f > 0 else -x - w) * s
 		parts.append([Rect2(rx, Y + y * s, w * s, h * s), c])
+	var ec: Color = GuData.ESS_COL[rank] if rank > 0 else Color.WHITE
 	# Aura der Uressenz
 	if rank > 0 and not no_aura:
-		var ec: Color = GuData.ESS_COL[rank]
 		var pul: float = 0.5 + 0.5 * sin(tnow * 3.0 + X * 0.7)
 		var ga: float = (0.09 + 0.05 * pul) if imm else (0.06 + 0.05 * pul)
 		var gr: float = 1.0 if imm else 0.7
-		# ovaler Schein aus drei Lagen
-		P.call(-3.0 * gr, -8.0 - gr, 6.0 * gr, 6.0 + gr, Color(ec, ga))
-		P.call(-2.2 * gr, -9.0 - gr, 4.4 * gr, 9.0 + gr, Color(ec, ga))
-		P.call(-1.6 * gr, -9.6 - gr, 3.2 * gr, 10.0 + gr, Color(ec, ga * 0.8))
+		P.call(-3.0 * gr, -8.6 - gr, 6.0 * gr, 6.6 + gr, Color(ec, ga))
+		P.call(-2.2 * gr, -9.6 - gr, 4.4 * gr, 9.6 + gr, Color(ec, ga))
+		P.call(-1.6 * gr, -10.2 - gr, 3.2 * gr, 10.6 + gr, Color(ec, ga * 0.8))
+		if rank >= 9:
+			# Heiligenschein hinter dem Kopf
+			P.call(-2.3, -10.2 + bob, 4.6, 4.6, Color(1.0, 0.86, 0.35, 0.22 + 0.08 * pul))
 	if ow and not no_aura:
 		var pa: float = 0.12 + 0.08 * sin(tnow * 5.0 + X)
-		P.call(-2.6, -9.0, 5.2, 9.0, Color(0.75, 0.2, 1.0, pa))
-	P.call(-2.0, -0.5, 4.0, 1.0, Color(0, 0, 0, 0.28))
+		P.call(-2.6, -9.6, 5.2, 9.6, Color(0.75, 0.2, 1.0, pa))
+	P.call(-2.0, -0.45, 4.2, 0.9, Color(0, 0, 0, 0.28))
 	var skin: Color = Color.WHITE if flash else GuData.RACE_SKIN[race]
+	var skd: Color = skin.darkened(0.2)
 	var hair: Color = GuData.RACE_HAIR[race]
 	var shirt: Color = Color.WHITE if flash else cl
 	var pants: Color = Color("#3a2c26") if not rogue else Color("#241820")
-	# Federschwingen (hinter dem Körper)
+	var shoe: Color = Color("#22180f")
+	# Federschwingen, Schwanz, Fell (hinter dem Körper)
 	if race == 4:
 		var wf: float = sin(anim * 9.0) * 0.5 if moving else 0.0
-		P.call(-3.4, -5.6 + bob - wf, 2.0, 3.2, Color("#f4ead8"))
-		P.call(-3.8, -4.6 + bob - wf, 0.9, 2.4, Color("#e8d4b0"))
-		P.call(-3.8, -3.0 + bob - wf, 0.9, 0.8, hair)
+		P.call(-3.5, -6.2 + bob - wf, 2.1, 3.4, Color("#f4ead8"))
+		P.call(-3.9, -5.2 + bob - wf, 0.9, 2.6, Color("#e8d4b0"))
+		P.call(-3.9, -3.4 + bob - wf, 0.9, 0.8, hair)
 	elif race == 6:
-		P.call(-2.8, -2.6 + bob, 1.4, 0.7, skin.darkened(0.15))
-		P.call(-3.4, -2.2 + bob, 0.8, 0.6, skin.darkened(0.25))
+		P.call(-2.8, -2.8 + bob, 1.4, 0.7, skin.darkened(0.15))
+		P.call(-3.4, -2.4 + bob, 0.8, 0.6, skin.darkened(0.25))
 	elif race == 7:
-		P.call(-2.6, -3.6 + bob, 1.2, 0.6, hair)
-		P.call(-3.0, -4.2 + bob, 0.7, 0.8, hair)
-	# Beine
-	if moving:
-		P.call(-1.0, -2.0 - (0.6 if st == 1 else 0.0), 1.0, 2.0 - (0.0 if st == 1 else 0.0), pants)
-		P.call(0.0, -2.0 - (0.0 if st == 1 else 0.6), 1.0, 2.0, pants)
-	else:
-		P.call(-1.0, -2.0, 1.0, 2.0, pants)
-		P.call(0.0, -2.0, 1.0, 2.0, pants)
-	# Körper
+		P.call(-2.6, -3.8 + bob, 1.2, 0.6, hair)
+		P.call(-3.0, -4.4 + bob, 0.7, 0.8, hair)
+	# hinterer Arm
+	P.call(-0.6 - sw * 0.6, -5.0 + bob, 0.8, 2.3, shirt.darkened(0.35))
 	if imm:
-		P.call(-1.5, -5.0 + bob, 3.0, 4.2, shirt)
-		P.call(-1.5, -5.0 + bob, 1.0, 4.2, shirt.darkened(0.25))
-		P.call(-1.5, -3.2 + bob, 3.0, 0.6, GuData.ESS_COL[rank])
+		# Gewand bis zum Boden mit Saum in der Essenzfarbe
+		P.call(-1.2, -0.45, 1.0, 0.45, shoe)
+		P.call(0.4, -0.45, 1.0, 0.45, shoe)
+		P.call(-1.7, -5.6 + bob, 3.4, 5.2 - bob, shirt)
+		P.call(-2.0, -1.6, 4.0, 1.2, shirt.darkened(0.08))
+		P.call(-1.7, -5.6 + bob, 0.8, 5.2 - bob, shirt.lightened(0.2))
+		P.call(1.0, -5.6 + bob, 0.7, 5.2 - bob, shirt.darkened(0.25))
+		P.call(-2.0, -0.75, 4.0, 0.4, ec)
+		P.call(-1.7, -3.4 + bob, 3.4, 0.5, ec)
+		P.call(-0.4, -5.6 + bob, 0.8, 2.2, ec.lightened(0.3))
 	else:
-		P.call(-1.5, -5.0 + bob, 3.0, 3.0, shirt)
-		P.call(-1.5, -5.0 + bob, 1.0, 3.0, shirt.darkened(0.25))
-		P.call(-1.0, -5.0 + bob, 2.0, 0.5, shirt.darkened(0.4))
+		# Beine mit Schuhen
+		P.call(-1.1 - sw * 0.5, -2.3, 1.0, 1.9, pants.darkened(0.25))
+		P.call(0.1 + sw * 0.5, -2.3, 1.0, 1.9, pants)
+		P.call(-1.2 - sw * 0.5, -0.5, 1.2, 0.5, shoe)
+		P.call(0.1 + sw * 0.5, -0.5, 1.3, 0.5, shoe)
+		# Oberkörper, links hell, rechts dunkel
+		P.call(-1.5, -5.5 + bob, 3.0, 3.4, shirt)
+		P.call(-1.5, -5.5 + bob, 0.7, 3.4, shirt.lightened(0.18))
+		P.call(0.9, -5.5 + bob, 0.6, 3.4, shirt.darkened(0.22))
+		P.call(-1.5, -2.6 + bob, 3.0, 0.5, ec if rank > 0 else Color("#5a3e26"))
 		if rank > 0:
-			P.call(-1.5, -2.7 + bob, 3.0, 0.6, GuData.ESS_COL[rank])
-		else:
-			P.call(-1.5, -2.6 + bob, 3.0, 0.5, Color("#5a3e26"))
+			P.call(0.6, -2.6 + bob, 0.5, 0.5, ec.lightened(0.5))
 	# Volksmerkmale am Körper
 	match race:
 		5:
-			P.call(-1.7, -5.3 + bob, 3.4, 0.8, Color("#f8fbff"))
+			P.call(-1.7, -5.8 + bob, 3.4, 0.8, Color("#f8fbff"))
 		9:
-			P.call(-1.5, -2.5 + bob, 0.5, 0.9, skin.darkened(0.3))
-			P.call(1.0, -3.2 + bob, 0.5, 1.0, skin.darkened(0.3))
+			P.call(-1.5, -2.7 + bob, 0.5, 0.9, skin.darkened(0.3))
+			P.call(1.0, -3.4 + bob, 0.5, 1.0, skin.darkened(0.3))
 		10:
-			P.call(-0.3, -4.8 + bob, 0.4, 2.4, Color("#6a4a2a"))
-	# Kopf
-	var hy: float = -7.0 + bob
+			P.call(-0.3, -5.2 + bob, 0.4, 2.6, Color("#6a4a2a"))
+	# Kopf (3 × 3): Gesicht, Haar oben und hinten, Auge vorne
+	var hy: float = -8.5 + bob
+	P.call(-0.5, -5.8 + bob, 1.0, 0.4, skd)
 	if race == 2:
-		P.call(-1.2, hy - 0.4, 2.6, 2.4, skin)
-		P.call(-1.2, hy - 0.4, 2.6, 0.6, hair)
-		P.call(0.0, hy + 0.3, 0.4, 0.9, Color("#7a766e"))
+		P.call(-1.4, hy - 0.3, 2.9, 3.0, skin)
+		P.call(-1.4, hy - 0.3, 2.9, 0.7, hair)
+		P.call(1.2, hy + 1.6, 0.3, 0.8, skd)
+		P.call(-0.2, hy + 0.9, 0.5, 1.0, Color("#7a766e"))
 	elif race == 8:
-		P.call(-1.0, hy, 2.0, 2.0, skin)
-		P.call(-1.9, hy - 1.4, 3.8, 1.3, hair)
-		P.call(-1.4, hy - 2.0, 2.8, 0.7, hair)
-		P.call(-1.1, hy - 1.6, 0.6, 0.5, Color("#fff6ee"))
-		P.call(0.5, hy - 1.2, 0.6, 0.5, Color("#fff6ee"))
+		P.call(-1.2, hy + 0.4, 2.6, 2.4, skin)
+		P.call(-2.2, hy - 1.0, 4.4, 1.6, hair)
+		P.call(-1.6, hy - 1.7, 3.2, 0.8, hair)
+		P.call(-1.3, hy - 1.3, 0.7, 0.6, Color("#fff6ee"))
+		P.call(0.6, hy - 0.9, 0.7, 0.6, Color("#fff6ee"))
 	elif race == 10:
-		P.call(-1.0, hy, 2.0, 2.0, skin)
-		P.call(-1.5, hy - 1.0, 3.0, 1.2, hair)
-		P.call(-0.6, hy - 1.7, 1.4, 0.8, hair.lightened(0.25))
-		P.call(-1.5, hy, 0.6, 0.8, hair)
+		P.call(-1.3, hy, 2.8, 2.9, skin)
+		P.call(-1.8, hy - 1.0, 3.6, 1.4, hair)
+		P.call(-0.8, hy - 1.8, 1.6, 0.9, hair.lightened(0.25))
+		P.call(-1.8, hy, 0.8, 1.2, hair)
 	else:
-		P.call(-1.0, hy, 2.0, 2.0, skin)
-		P.call(-1.0, hy - 0.4, 2.0, 0.8, hair)
-		P.call(-1.0, hy, 0.6, 1.2, hair)
+		P.call(-1.3, hy, 2.8, 2.9, skin)
+		P.call(1.0, hy + 1.8, 0.5, 1.1, skd)
+		P.call(-1.5, hy - 0.4, 3.1, 1.1, hair)
+		P.call(-1.5, hy, 1.0, 2.1, hair)
+		if race == 0 and adult:
+			# Haarknoten der Gu-Meister
+			P.call(-1.2, hy - 1.0, 1.0, 0.7, hair)
 	match race:
 		1:
-			P.call(-1.0, hy + 1.0, 2.0, 0.6, hair)
+			P.call(-1.3, hy + 2.0, 2.8, 0.8, hair)
 		3:
-			P.call(-1.6, hy + 0.2, 0.6, 1.0, Color("#3a9a8a"))
+			P.call(-1.8, hy + 0.5, 0.6, 1.2, Color("#3a9a8a"))
+			P.call(0.2, hy + 2.2, 0.5, 0.4, Color("#3a9a8a"))
 		4:
-			P.call(-0.8, hy - 1.4, 0.8, 1.1, hair)
+			P.call(-0.9, hy - 1.4, 0.8, 1.1, hair)
 			P.call(0.1, hy - 1.0, 0.6, 0.7, Color("#f0c040"))
 		5:
-			P.call(0.4, hy + 1.1, 0.6, 0.4, Color("#a8d4f0"))
+			P.call(0.4, hy + 2.2, 0.6, 0.4, Color("#a8d4f0"))
 		6:
-			P.call(-0.9, hy - 1.3, 0.5, 1.0, Color("#e8c860"))
-			P.call(0.5, hy - 1.3, 0.5, 1.0, Color("#e8c860"))
-			P.call(-1.0, hy + 1.2, 2.0, 0.4, skin.darkened(0.2))
+			P.call(-1.0, hy - 1.4, 0.5, 1.1, Color("#e8c860"))
+			P.call(0.6, hy - 1.4, 0.5, 1.1, Color("#e8c860"))
+			P.call(-1.3, hy + 2.4, 2.8, 0.5, skin.darkened(0.2))
 		7:
-			P.call(-1.1, hy - 1.1, 0.6, 0.8, hair)
-			P.call(0.6, hy - 1.1, 0.6, 0.8, hair)
+			P.call(-1.3, hy - 1.1, 0.7, 0.9, hair)
+			P.call(0.7, hy - 1.1, 0.7, 0.9, hair)
 	var eye: Color = Color("#1a1210")
 	if rogue:
 		eye = Color("#ff3030")
@@ -553,32 +573,41 @@ static func draw_person(sink: Callable, X: float, Y: float, sc: float, race: int
 		eye = Color("#d04aff")
 	elif race == 6 or race == 7:
 		eye = Color("#e8b020")
-	P.call(0.6, hy + 0.7, 0.4, 0.5, eye)
-	# Arm und Werkzeug
+	P.call(0.55, hy + 1.1, 0.5, 0.7, eye)
+	P.call(0.55, hy + 1.1, 0.5, 0.2, Color(1, 1, 1, 0.35))
+	# vorderer Arm mit Hand, ggf. Werkzeug
 	if working:
 		var up: bool = sin(anim * 14.0) > 0.0
 		if up:
-			P.call(1.2, -5.2 + bob, 0.8, 1.2, skin)
-			P.call(1.5, -8.0 + bob, 0.6, 3.2, Color("#8a5a30"))
-			P.call(1.0, -8.4 + bob, 1.6, 0.7, Color("#b8b8c0"))
+			P.call(1.0, -5.4 + bob, 0.8, 1.4, shirt.darkened(0.1))
+			P.call(1.3, -8.4 + bob, 0.6, 3.2, Color("#8a5a30"))
+			P.call(0.8, -8.8 + bob, 1.6, 0.7, Color("#b8b8c0"))
+			P.call(1.0, -6.0 + bob, 0.8, 0.7, skin)
 		else:
-			P.call(1.2, -4.4 + bob, 0.8, 1.2, skin)
-			P.call(1.8, -4.2 + bob, 2.4, 0.6, Color("#8a5a30"))
-			P.call(3.8, -5.0 + bob, 0.7, 1.6, Color("#b8b8c0"))
+			P.call(1.0, -4.8 + bob, 0.8, 1.4, shirt.darkened(0.1))
+			P.call(1.6, -4.4 + bob, 2.4, 0.6, Color("#8a5a30"))
+			P.call(3.6, -5.2 + bob, 0.7, 1.6, Color("#b8b8c0"))
+			P.call(1.2, -3.6 + bob, 0.8, 0.7, skin)
 	else:
-		P.call(1.2, -4.6 + bob, 0.6, 1.6, skin)
+		P.call(0.2 + sw * 0.6, -5.2 + bob, 0.8, 2.3, shirt.darkened(0.08))
+		P.call(0.2 + sw * 0.6, -2.9 + bob, 0.8, 0.6, skin)
 	if rank >= 9:
-		P.call(-1.0, hy - 1.4, 2.0, 0.6, Color("#ffd24a"))
-		P.call(-1.0, hy - 2.0, 0.5, 0.6, Color("#ffd24a"))
-		P.call(0.5, hy - 2.0, 0.5, 0.6, Color("#ffd24a"))
+		P.call(-1.3, hy - 1.4, 2.8, 0.6, Color("#ffd24a"))
+		P.call(-1.3, hy - 2.1, 0.6, 0.7, Color("#ffd24a"))
+		P.call(-0.3, hy - 2.4, 0.6, 1.0, Color("#fff0a0"))
+		P.call(0.9, hy - 2.1, 0.6, 0.7, Color("#ffd24a"))
 	if sick:
 		P.call(1.4, hy - 1.4, 0.8, 0.8, Color("#86e04a"))
 	_emit(sink, parts, ol * s)
+	# kleines Gu, das um Gu-Meister kreist (Rang 1–5)
+	if rank > 0 and rank < 6 and not no_aura and adult:
+		var ga2: float = tnow * 2.2 + X * 1.3
+		var gx: float = X + cos(ga2) * 2.4 * s
+		var gy: float = Y + (-6.0 + sin(ga2) * 0.9) * s
+		sink.call(Rect2(gx - 0.3 * s, gy - 0.3 * s, 0.6 * s, 0.6 * s), Color(ec, 0.9))
 	if lucky and int(anim * 4.0) % 3 == 0:
 		var rx2: float = X + (-2.8 if f > 0 else 2.0) * s
-		sink.call(Rect2(rx2, Y - 8.0 * s, 0.8 * s, 0.8 * s), Color("#ffe27a"))
-
-
+		sink.call(Rect2(rx2, Y - 9.0 * s, 0.8 * s, 0.8 * s), Color("#ffe27a"))
 
 
 static var _pal_cache: Dictionary = {}
@@ -984,10 +1013,13 @@ static func place_size(type: String) -> float:
 	return float(PLACE_SIZE.get(type, 20))
 
 
+## Textur eines Ortes für die Karte: place_image_hd (4 Texel je Kachel wie die Nahansicht) mit Mipmaps.
+## Größe in Kacheln = Texturgröße / 4.
 static func place_tex(type: String) -> ImageTexture:
 	if _place_cache.has(type):
 		return _place_cache[type]
-	var im: Image = place_image(type)
+	var im: Image = place_image_hd(type)
+	im.generate_mipmaps()
 	var t: ImageTexture = ImageTexture.create_from_image(im)
 	_place_cache[type] = t
 	return t
@@ -1164,3 +1196,1286 @@ static func place_image(type: String) -> Image:
 			q.p(int(cx) + 1, H2 - 5, 1, 1, Color("#ff3a2a"))
 			q.p(int(cx) - 1, H2 - 3, 3, 1, Color("#e8e0d0"))
 	return q.outline(Color(0.08, 0.07, 0.06, 0.85)).img
+
+
+# ---------------- Nahansicht (4 Texel je Kachel) ----------------
+# Objekte für Detail: Bilder mit Fußpunkt (Bodenmitte), Licht von links oben, dunkle Kontur,
+# weicher Schatten nach rechts unten. Erzeugt einmal beim Start (hd_init).
+
+const HD_SHADOW: Color = Color(0.04, 0.12, 0.03, 0.34)
+static var _hd: Dictionary = {}
+static var _hd_ready: bool = false
+
+
+static func hd_init() -> void:
+	if _hd_ready:
+		return
+	_hd_ready = true
+	var trees: Array = []
+	var pi: int = 0
+	for p: Array in GuData.TREEPAL:
+		for big: int in range(2):
+			var vs: Array = []
+			for v: int in range(2):
+				var e: Array = _hd_tree(p, big == 0, pi * 31 + big * 7 + v * 3 + 1)
+				vs.append(e)
+				vs.append([(e[0] as Image).duplicate(), e[1]])
+				(vs[vs.size() - 1][0] as Image).flip_x()
+				vs[vs.size() - 1][1] = Vector2i((e[0] as Image).get_width() - 1 - (e[1] as Vector2i).x, (e[1] as Vector2i).y)
+			trees.append(vs)
+		pi += 1
+	_hd["tree"] = trees
+	_hd["pine"] = [_hd_pine(false, 3), _hd_pine(false, 4), _hd_pine(true, 5), _hd_pine(true, 6)]
+	_hd["palm"] = [_hd_palm(1, false), _hd_palm(2, true)]
+	_hd["bamb"] = [_hd_bamboo(1), _hd_bamboo(2)]
+	_hd["rock"] = [_hd_rock(1, false), _hd_rock(2, false)]
+	_hd["ore"] = [_hd_rock(3, true), _hd_rock(4, true)]
+	_hd["spring"] = [_hd_spring()]
+	_hd["shrub"] = [_hd_shrub(1), _hd_shrub(2)]
+	_hd["tuft"] = [_hd_tuft(1), _hd_tuft(2), _hd_tuft(3)]
+	_hd["flower"] = [_hd_flower(0), _hd_flower(1), _hd_flower(2), _hd_flower(3)]
+
+
+## Bild und Fußpunkt eines Objekts für die Nahansicht.
+static func hd_feat(f: int, x: int, y: int, reg: int) -> Array:
+	var h: float = GuData.hash2(x, y, 79)
+	match f:
+		GuData.F_TREE:
+			var tv: int = tree_variant(x, y, reg)
+			var vs: Array = _hd["tree"][tv]
+			return vs[int(h * vs.size()) % vs.size()]
+		GuData.F_PINE:
+			return _hd["pine"][(2 if reg == 0 else 0) + (1 if h < 0.5 else 0)]
+		GuData.F_PALM:
+			return _hd["palm"][1 if h < 0.5 else 0]
+		GuData.F_BAMB:
+			return _hd["bamb"][1 if h < 0.5 else 0]
+		GuData.F_ROCK:
+			return _hd["rock"][1 if h < 0.5 else 0]
+		GuData.F_ORE:
+			return _hd["ore"][1 if h < 0.5 else 0]
+		GuData.F_SPRING:
+			return _hd["spring"][0]
+		GuData.F_SHRUB:
+			return _hd["shrub"][1 if h < 0.5 else 0]
+		GuData.F_TUFT:
+			return _hd["tuft"][int(h * 3.0) % 3]
+		GuData.F_FLOWER:
+			return _hd["flower"][int(h * 4.0) % 4]
+	return _hd["tuft"][0]
+
+
+static func _hdh(x: int, y: int, s: int) -> float:
+	return GuData.hash2(x, y, s)
+
+
+## Weiches Wertrauschen auf einem Gitter der Weite sc (für Blattbüschel).
+static func _hdvn(x: float, y: float, sc: float, s: int) -> float:
+	var fx: float = x / sc
+	var fy: float = y / sc
+	var ix: int = int(floorf(fx))
+	var iy: int = int(floorf(fy))
+	var tx: float = fx - ix
+	var ty: float = fy - iy
+	tx = tx * tx * (3.0 - 2.0 * tx)
+	ty = ty * ty * (3.0 - 2.0 * ty)
+	var a: float = lerpf(_hdh(ix, iy, s), _hdh(ix + 1, iy, s), tx)
+	var b: float = lerpf(_hdh(ix, iy + 1, s), _hdh(ix + 1, iy + 1, s), tx)
+	return lerpf(a, b, ty)
+
+
+## Weicher Bodenschatten unter allem Bisherigen (nur auf leere Pixel).
+static func _hd_ground_shadow(im: Image, cx: float, cy: float, rx: float, ry: float) -> void:
+	for y: int in range(int(cy - ry) - 1, int(cy + ry) + 2):
+		for x: int in range(int(cx - rx) - 1, int(cx + rx) + 2):
+			if x < 0 or y < 0 or x >= im.get_width() or y >= im.get_height():
+				continue
+			var dx: float = (x + 0.5 - cx) / rx
+			var dy: float = (y + 0.5 - cy) / ry
+			if dx * dx + dy * dy <= 1.0 and im.get_pixel(x, y).a < 0.1:
+				im.set_pixel(x, y, HD_SHADOW)
+
+
+## Dunkle Kontur um alle deckenden Pixel (Schatten zählt nicht).
+static func _hd_outline(im: Image, col: Color) -> void:
+	var w: int = im.get_width()
+	var h: int = im.get_height()
+	var src: Image = im.duplicate()
+	for y: int in range(h):
+		for x: int in range(w):
+			if src.get_pixel(x, y).a > 0.6:
+				continue
+			var n: bool = (x > 0 and src.get_pixel(x - 1, y).a > 0.6) or (x < w - 1 and src.get_pixel(x + 1, y).a > 0.6) or (y > 0 and src.get_pixel(x, y - 1).a > 0.6) or (y < h - 1 and src.get_pixel(x, y + 1).a > 0.6)
+			if n:
+				im.set_pixel(x, y, col)
+
+
+## Kugeliger Klumpen mit Licht von links oben in vier Stufen (+ Blattsprenkel).
+static func _hd_blob(im: Image, cx: float, cy: float, r: float, cols: Array, sd: int, leafy: bool, ao_y: float = 99999.0) -> void:
+	for y: int in range(int(cy - r) - 1, int(cy + r) + 2):
+		for x: int in range(int(cx - r) - 1, int(cx + r) + 2):
+			if x < 0 or y < 0 or x >= im.get_width() or y >= im.get_height():
+				continue
+			var nx: float = (x + 0.5 - cx) / r
+			var ny: float = (y + 0.5 - cy) / r
+			var d2: float = nx * nx + ny * ny
+			if d2 > 1.0:
+				continue
+			var s: float = -(nx * 0.55 + ny * 0.83) * 0.85 + (_hdh(x, y, sd) - 0.5) * 0.18
+			if leafy:
+				# kleine Blattbüschel: eigenes Licht je Büschel (Gitter 3 px)
+				var bx: float = _hdvn(x + 0.5 - 0.7, y + 0.5 - 0.7, 3.0, sd + 7) - _hdvn(x + 0.5 + 0.7, y + 0.5 + 0.7, 3.0, sd + 7)
+				s += bx * 1.3
+			var k: int = 3 if s > 0.55 else (2 if s > 0.1 else (1 if s > -0.38 else 0))
+			if d2 > 0.78 and s < -0.05:
+				k = 0
+			if leafy:
+				var lh: float = _hdh(x, y, sd + 1)
+				if lh < 0.05:
+					k = mini(3, k + 1)
+				elif lh > 0.95:
+					k = maxi(0, k - 1)
+			if y + 0.5 > ao_y:
+				k = maxi(0, k - 1)
+			im.set_pixel(x, y, cols[k])
+
+
+static func _hd_tree(p: Array, big: bool, sd: int) -> Array:
+	var w: int = 34 if big else 26
+	var h: int = 41 if big else 32
+	var im: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = sd
+	var foot: Vector2i = Vector2i(w / 2, h - 3)
+	var li: Color = Color(p[0])
+	var mi: Color = Color(p[1])
+	var dk: Color = Color(p[2])
+	var cols: Array = [dk.darkened(0.12), mi, li, li.lightened(0.13)]
+	var bark: Array = [Color("#4a3424"), Color("#6e4e34"), Color("#94704c")]
+	# Stamm mit Wurzelansatz
+	var tw: int = 4 if big else 3
+	var cr: float = w * 0.4
+	var ccx: float = w * 0.5
+	var ccy: float = cr + 2.0
+	var tx0: int = foot.x - tw / 2
+	for y: int in range(int(ccy), foot.y + 1):
+		for x: int in range(tx0, tx0 + tw):
+			var c: Color = bark[1]
+			if x == tx0:
+				c = bark[2]
+			elif x == tx0 + tw - 1:
+				c = bark[0]
+			if _hdh(x, y, sd + 5) < 0.12:
+				c = bark[0]
+			im.set_pixel(x, y, c)
+	im.set_pixel(tx0 - 1, foot.y, bark[1])
+	im.set_pixel(tx0 + tw, foot.y, bark[0])
+	if big:
+		im.set_pixel(tx0 - 1, foot.y - 1, bark[2])
+		# Ast
+		im.set_pixel(tx0 + tw, int(ccy + cr * 0.75), bark[1])
+		im.set_pixel(tx0 + tw + 1, int(ccy + cr * 0.65), bark[1])
+	# Krone aus Klumpen, von hinten (oben) nach vorne (unten)
+	# Grundkörper zuerst, dann die Büschel darüber (sonst verdeckt er sie)
+	_hd_blob(im, ccx, ccy + cr * 0.05, cr * 0.85, cols, sd * 13 + 99, true, ccy + cr * 0.75)
+	var lobes: Array[Vector3] = []
+	var n: int = 5 if big else 4
+	for k: int in range(n):
+		var a: float = -PI * 0.5 + (k - (n - 1) * 0.5) * (2.6 / n) + rng.randf_range(-0.18, 0.18)
+		var dd: float = cr * rng.randf_range(0.42, 0.6)
+		lobes.append(Vector3(ccx + cos(a) * dd * 1.1, ccy + sin(a) * dd * 0.9, cr * rng.randf_range(0.5, 0.66)))
+	lobes.append(Vector3(ccx - cr * rng.randf_range(0.35, 0.5), ccy + cr * 0.42, cr * rng.randf_range(0.5, 0.6)))
+	lobes.append(Vector3(ccx + cr * rng.randf_range(0.35, 0.5), ccy + cr * 0.38, cr * rng.randf_range(0.48, 0.58)))
+	lobes.sort_custom(func(a: Vector3, b: Vector3) -> bool: return a.y < b.y)
+	for k: int in range(lobes.size()):
+		var lb: Vector3 = lobes[k]
+		_hd_blob(im, lb.x, lb.y, lb.z, cols, sd * 13 + k, true, ccy + cr * 0.75)
+	# Früchte/Blüten bei manchen Bäumen
+	if rng.randf() < 0.35 and li.g > li.r + 0.05:
+		var fc: Color = Color("#e84a3a") if rng.randf() < 0.6 else Color("#f8f0f0")
+		for k: int in range(4 if big else 3):
+			var fx: int = int(ccx + rng.randf_range(-cr * 0.7, cr * 0.7))
+			var fy: int = int(ccy + rng.randf_range(-cr * 0.4, cr * 0.6))
+			if im.get_pixel(fx, fy).a > 0.5:
+				im.set_pixel(fx, fy, fc)
+	_hd_outline(im, dk.darkened(0.55))
+	_hd_ground_shadow(im, foot.x + 3.0, foot.y + 0.8, w * 0.36, 2.2)
+	return [im, foot + Vector2i(0, 1)]
+
+
+static func _hd_pine(snowy: bool, sd: int) -> Array:
+	var w: int = 24
+	var h: int = 48
+	var im: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
+	var foot: Vector2i = Vector2i(12, h - 3)
+	var cols: Array = [Color("#183a2a"), Color("#24503a"), Color("#3a7050"), Color("#5a9a6a"), Color("#7ab88a")]
+	var snow: Array = [Color("#c8d8e8"), Color("#eef4f6"), Color("#ffffff")]
+	for y: int in range(37, foot.y + 1):
+		im.set_pixel(11, y, Color("#7a6a5a"))
+		im.set_pixel(12, y, Color("#5a4a3a"))
+		im.set_pixel(13, y, Color("#4a3e34"))
+	var tiers: int = 5
+	for k: int in range(tiers):
+		var top: int = 2 + k * 7
+		var bot: int = top + 11 + k
+		var wmax: float = 3.5 + k * 1.75
+		for y: int in range(top, bot + 1):
+			var hw: float = (y - top + 1.0) / float(bot - top + 1) * wmax + 0.6 + (_hdh(y, k, sd) - 0.5) * 1.1
+			for x: int in range(int(12.0 - hw), int(12.0 + hw) + 1):
+				if x < 0 or x >= w:
+					continue
+				var rel: float = (x + 0.5 - 12.0) / maxf(1.0, hw)
+				var ci: int = 3 if rel < -0.4 else (2 if rel < 0.2 else 1)
+				if y >= bot - 1:
+					ci = maxi(0, ci - 1)
+				if k > 0 and y < top + 2:
+					ci = maxi(0, ci - 1)
+				var hh: float = _hdh(x, y, sd + 9)
+				if hh < 0.08:
+					ci = mini(4, ci + 1)
+				elif hh > 0.93:
+					ci = maxi(0, ci - 1)
+				var c: Color = cols[ci]
+				if snowy and (y < top + 3 or (y >= bot - 1 and rel < 0.3)) and hh < 0.75:
+					c = snow[2] if rel < -0.3 else (snow[1] if rel < 0.3 else snow[0])
+				im.set_pixel(x, y, c)
+	_hd_outline(im, Color("#0e2418"))
+	_hd_ground_shadow(im, 15.0, foot.y + 0.8, 8.0, 2.0)
+	return [im, foot + Vector2i(0, 1)]
+
+
+static func _hd_palm(sd: int, lean_r: bool) -> Array:
+	var w: int = 38
+	var h: int = 46
+	var im: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
+	var foot: Vector2i = Vector2i(19, h - 3)
+	var dir: float = 1.0 if lean_r else -1.0
+	var top: Vector2 = Vector2(19, 14)
+	# geschwungener Stamm mit Ringen
+	for y: int in range(int(top.y), foot.y + 1):
+		var t: float = float(foot.y - y) / float(foot.y - int(top.y))
+		var x: int = int(roundf(foot.x + dir * sin(t * 1.5) * 4.0))
+		for dx: int in range(-1, 2):
+			var c: Color = Color("#c09a5a") if dx < 0 else (Color("#a07a44") if dx == 0 else Color("#7a5a32"))
+			if y % 3 == 0:
+				c = c.darkened(0.22)
+			im.set_pixel(x + dx, y, c)
+		top.x = x
+	var cx: float = top.x
+	var cy: float = top.y
+	var fl: Color = Color("#8ad85a")
+	var fm: Color = Color("#4ea83a")
+	var fd: Color = Color("#2e7a2a")
+	var angs: Array[float] = [-2.75, -2.2, -1.25, -0.6, 0.05, 2.95, 0.55, 2.45]
+	for a: float in angs:
+		var ln: float = 15.0 if absf(sin(a)) < 0.6 else 11.0
+		for s: int in range(1, int(ln)):
+			var px: float = cx + cos(a) * s
+			var py: float = cy + sin(a) * s * 0.6 + s * s * 0.045
+			var ix: int = int(px)
+			var iy: int = int(py)
+			if ix < 1 or ix >= w - 1 or iy < 1 or iy >= h - 1:
+				continue
+			im.set_pixel(ix, iy, fm if sin(a) < 0.2 else fd)
+			if s < ln - 2:
+				im.set_pixel(ix, iy - 1, fl if cos(a) < 0.3 else fm)
+				if s % 2 == 0:
+					im.set_pixel(ix, iy + 1, fd)
+	for k: int in range(3):
+		var ox: int = int(cx) - 2 + k * 2
+		im.set_pixel(ox, int(cy) + 2, Color("#6a4a22"))
+		im.set_pixel(ox + 1, int(cy) + 2, Color("#4a3018"))
+		im.set_pixel(ox, int(cy) + 3, Color("#4a3018"))
+	im.set_pixel(int(cx), int(cy), fl)
+	_hd_outline(im, Color("#183a14"))
+	_hd_ground_shadow(im, foot.x + 4.0, foot.y + 0.8, 10.0, 2.0)
+	return [im, foot + Vector2i(0, 1)]
+
+
+static func _hd_bamboo(sd: int) -> Array:
+	var w: int = 28
+	var h: int = 52
+	var im: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = sd * 101
+	var foot: Vector2i = Vector2i(14, h - 3)
+	var gl: Color = Color("#a8dc68")
+	var gm: Color = Color("#78b448")
+	var gd: Color = Color("#4e8030")
+	for k: int in range(6):
+		var x: int = 3 + k * 4 + rng.randi_range(-1, 1)
+		var top: int = foot.y - rng.randi_range(30, 46)
+		var off: int = rng.randi_range(0, 5)
+		for y: int in range(top, foot.y + 1 - (k % 2)):
+			var node: bool = (y + off) % 6 == 0
+			im.set_pixel(x, y, gd if node else gl)
+			im.set_pixel(x + 1, y, gd if node else gm)
+			if node and y < foot.y - 8 and rng.randf() < 0.55:
+				var dx: int = -1 if rng.randf() < 0.5 else 1
+				for s: int in range(1, 5):
+					var lx: int = x + (0 if dx < 0 else 1) + dx * s
+					var ly: int = y - s / 2
+					if lx >= 0 and lx < w and ly >= 0:
+						im.set_pixel(lx, ly, gl if s < 3 else gm)
+						if ly + 1 < h and s > 1:
+							im.set_pixel(lx, ly + 1, gd)
+		im.set_pixel(x, top - 1, gl)
+		im.set_pixel(x - 1, top - 2, gl)
+	_hd_outline(im, Color("#1e3a12"))
+	_hd_ground_shadow(im, foot.x + 3.0, foot.y + 0.8, 12.0, 2.0)
+	return [im, foot + Vector2i(0, 1)]
+
+
+static func _hd_rock(sd: int, ore: bool) -> Array:
+	var w: int = 16
+	var h: int = 13
+	var im: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
+	var foot: Vector2i = Vector2i(8, h - 3)
+	var cols: Array = [Color("#5e5a56"), Color("#8a8680"), Color("#aeaaa2"), Color("#d0ccc2")]
+	if ore:
+		cols = [Color("#46423e"), Color("#6e6a66"), Color("#8e8a84"), Color("#aaa69e")]
+	var rx: float = 6.6 if sd % 2 == 1 else 5.6
+	for y: int in range(1, foot.y + 1):
+		for x: int in range(w):
+			var nx: float = (x + 0.5 - 8.0) / rx
+			var ny: float = (y + 0.5 - (foot.y - 3.2)) / 4.4
+			if ny > 0.0:
+				ny *= 1.6
+			var d2: float = nx * nx + ny * ny
+			if d2 > 1.0:
+				continue
+			var s: float = -(nx * 0.6 + ny * 0.8) + (_hdh(x, y, sd) - 0.5) * 0.35
+			var k: int = 3 if s > 0.55 else (2 if s > 0.1 else (1 if s > -0.4 else 0))
+			im.set_pixel(x, y, cols[k])
+	# Riss
+	im.set_pixel(9, foot.y - 4, cols[0])
+	im.set_pixel(10, foot.y - 3, cols[0])
+	if ore:
+		var cry: Array = [Color("#e8fff6"), Color("#8ff0c8"), Color("#3aa888")]
+		for c: Vector2i in [Vector2i(5, foot.y - 6), Vector2i(9, foot.y - 7), Vector2i(11, foot.y - 4)]:
+			im.set_pixel(c.x, c.y - 1, cry[0])
+			im.set_pixel(c.x, c.y, cry[1])
+			im.set_pixel(c.x + 1, c.y, cry[2])
+			im.set_pixel(c.x, c.y + 1, cry[1])
+	_hd_outline(im, Color("#2e2a26"))
+	_hd_ground_shadow(im, 10.0, foot.y + 0.6, 7.0, 1.6)
+	return [im, foot + Vector2i(0, 1)]
+
+
+static func _hd_spring() -> Array:
+	var w: int = 20
+	var h: int = 12
+	var im: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
+	var foot: Vector2i = Vector2i(10, h - 2)
+	for y: int in range(h):
+		for x: int in range(w):
+			var nx: float = (x + 0.5 - 10.0) / 9.0
+			var ny: float = (y + 0.5 - 6.0) / 5.0
+			var d2: float = nx * nx + ny * ny
+			if d2 > 1.0:
+				continue
+			var c: Color
+			if d2 > 0.55:
+				var s: float = -(nx * 0.5 + ny * 0.85)
+				c = Color("#b4b0a6") if s > 0.2 else (Color("#8e8a82") if s > -0.4 else Color("#64605a"))
+				if _hdh(x, y, 3) < 0.15:
+					c = c.darkened(0.15)
+			else:
+				var s2: float = nx * 0.5 + ny * 0.85
+				c = Color("#3a9ab8") if s2 < -0.25 else (Color("#6fd6e8") if s2 < 0.35 else Color("#9ae8f4"))
+			im.set_pixel(x, y, c)
+	im.set_pixel(7, 5, Color.WHITE)
+	im.set_pixel(8, 5, Color("#e0fbff"))
+	im.set_pixel(12, 7, Color("#e0fbff"))
+	_hd_outline(im, Color("#2a3a3e"))
+	return [im, foot + Vector2i(0, 1)]
+
+
+static func _hd_shrub(sd: int) -> Array:
+	var w: int = 15
+	var h: int = 11
+	var im: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
+	var foot: Vector2i = Vector2i(7, h - 2)
+	var cols: Array = [Color("#5e5228"), Color("#8a7a3a"), Color("#a8964a"), Color("#c8b468")]
+	_hd_blob(im, 4.5, 5.5, 3.6, cols, sd * 7, true)
+	_hd_blob(im, 10.0, 5.8, 3.4, cols, sd * 7 + 1, true)
+	_hd_blob(im, 7.2, 4.0, 3.8, cols, sd * 7 + 2, true)
+	_hd_outline(im, Color("#3a3018"))
+	_hd_ground_shadow(im, 9.0, foot.y + 0.6, 6.0, 1.4)
+	return [im, foot + Vector2i(0, 1)]
+
+
+static func _hd_tuft(sd: int) -> Array:
+	var w: int = 9
+	var h: int = 7
+	var im: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
+	var dk: Color = Color(0.12, 0.27, 0.08, 0.9)
+	var md: Color = Color(0.22, 0.42, 0.14, 0.95)
+	var lt: Color = Color(0.45, 0.66, 0.26, 1.0)
+	var xs: Array[int] = [1, 3, 4, 6, 7]
+	for k: int in range(xs.size()):
+		var hh: int = 2 + int(_hdh(k, sd, 4) * 3.0)
+		var x: int = xs[k]
+		for y: int in range(h - 1 - hh, h - 1):
+			im.set_pixel(x, y, lt if y == h - 1 - hh else (md if k % 2 == 0 else dk))
+	return [im, Vector2i(4, h)]
+
+
+static func _hd_flower(v: int) -> Array:
+	var w: int = 8
+	var h: int = 8
+	var im: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
+	var head: Color = [Color("#f07ac8"), Color("#ffd84a"), Color("#f8f4f0"), Color("#8aa8ff")][v]
+	var stem: Color = Color("#2e6a22")
+	for s: Vector3i in [Vector3i(2, 3, 0), Vector3i(5, 2, 1), Vector3i(4, 5, 0)]:
+		for y: int in range(s.y + 1, h - 1):
+			im.set_pixel(s.x, y, stem)
+		im.set_pixel(s.x, s.y, head)
+		im.set_pixel(s.x - 1, s.y, head.darkened(0.15))
+		im.set_pixel(s.x + 1, s.y, head.darkened(0.15))
+		im.set_pixel(s.x, s.y - 1, head.lightened(0.3))
+		im.set_pixel(s.x, s.y + 1, head.darkened(0.3))
+		im.set_pixel(s.x, s.y, Color("#ffe27a") if v != 1 else Color("#c87a20"))
+	im.set_pixel(3, h - 2, stem)
+	return [im, Vector2i(4, h - 1)]
+
+
+## Entwickler: alle Nahansicht-Objekte (und Gebäude) vergrößert auf einen Bogen schreiben.
+static func hd_sheet(path: String, extra: Array[Image] = []) -> void:
+	hd_init()
+	var ims: Array[Image] = []
+	for key: String in ["tree", "pine", "palm", "bamb", "rock", "ore", "spring", "shrub", "tuft", "flower"]:
+		var arr: Array = _hd[key]
+		for e: Variant in arr:
+			if e is Array and (e as Array).size() == 2 and (e as Array)[0] is Image:
+				ims.append((e as Array)[0])
+			elif e is Array:
+				for e2: Array in (e as Array):
+					ims.append(e2[0])
+	ims.append_array(extra)
+	var sc: int = 3
+	var W2: int = 1400
+	var x: int = 4
+	var y: int = 4
+	var rowh: int = 0
+	var out: Image = Image.create_empty(W2, 2200, false, Image.FORMAT_RGBA8)
+	out.fill(Color8(76, 132, 46))
+	for im: Image in ims:
+		var big: Image = im.duplicate()
+		big.resize(im.get_width() * sc, im.get_height() * sc, Image.INTERPOLATE_NEAREST)
+		if x + big.get_width() > W2:
+			x = 4
+			y += rowh + 6
+			rowh = 0
+		if y + big.get_height() > out.get_height():
+			break
+		out.blend_rect(big, Rect2i(Vector2i.ZERO, big.get_size()), Vector2i(x, y))
+		x += big.get_width() + 6
+		rowh = maxi(rowh, big.get_height())
+	out.crop(W2, mini(out.get_height(), y + rowh + 6))
+	out.save_png(path)
+
+
+## Entwickler: Zusatzbilder für hd_sheet (Gebäude der Nahansicht).
+static func hd_sheet_extra() -> Array[Image]:
+	var out: Array[Image] = []
+	# Wesen in der Größe wie bei z ≈ 24 (eine Einheit ≈ 6,5 Bildpunkte, hier durch 3 geteilt)
+	for r: int in range(GuData.RACE_NAME.size()):
+		var q: Px = Px.new(120, 40)
+		var sk: Callable = func(rr: Rect2, c: Color) -> void: q.p(roundi(rr.position.x), roundi(rr.position.y), maxi(1, roundi(rr.position.x + rr.size.x) - roundi(rr.position.x)), maxi(1, roundi(rr.position.y + rr.size.y) - roundi(rr.position.y)), c)
+		var k2: int = 0
+		for rk: int in [0, 3, 6, 9]:
+			draw_person(sk, 10.0 + k2 * 26.0, 36.0, 2.2 if rk < 9 else 1.3, r, rk, GuData.CLANCOL[(r + k2) % 16], 1, true, k2 == 1, 0.15, false, k2 == 2, false, false, false, 0.45, 0.0, false)
+			k2 += 1
+		out.append(q.img)
+	for sp: String in GuData.SPEC.keys():
+		var q2: Px = Px.new(60, 40)
+		var sk2: Callable = func(rr: Rect2, c: Color) -> void: q2.p(roundi(rr.position.x), roundi(rr.position.y), maxi(1, roundi(rr.position.x + rr.size.x) - roundi(rr.position.x)), maxi(1, roundi(rr.position.y + rr.size.y) - roundi(rr.position.y)), c)
+		var ss: float = float(GuData.SPEC[sp].get("ss", 1.0))
+		draw_animal(sk2, 30.0, 36.0, 2.2 / maxf(1.0, ss * 0.6), sp, 1, false, 1.0, false, false, 3, 0.45, 1)
+		out.append(q2.img)
+	for pt: String in ["blessed", "grotto", "court", "imperial", "langya", "hu", "dream", "palace", "mushroom"]:
+		out.append(place_image_hd(pt))
+	for k: int in range(4):
+		var d: Dictionary = clan_textures_hd(GuData.CLANCOL[k * 3], k)
+		for key: String in ["fire", "tent", "hut", "house", "house_b", "hall1", "hall2", "forge", "tower", "farm", "pen"]:
+			if k > 0 and key in ["farm", "pen", "hall2", "tower", "fire"]:
+				continue
+			out.append((d[key] as ImageTexture).get_image())
+	return out
+
+
+# ---------------- Gebäude der Nahansicht (4 Texel je Kachel) ----------------
+# Jede Textur trägt Meta "foot" (Bodenmitte in Texeln); EntityLayer setzt diesen Punkt auf die
+# Mitte der Grundfläche-Unterkante. Licht von links oben, dunkle Kontur, Schlagschatten nach rechts unten.
+
+static var _clan_cache_hd: Dictionary = {}
+const HD_OL: Color = Color(0.13, 0.08, 0.06, 1.0)
+
+
+## Gebäude-Texturen der Nahansicht in der Farbe eines Clans (zwischengespeichert), Schlüssel wie clan_textures.
+static func clan_textures_hd(col: Color, race: int = 0) -> Dictionary:
+	var key: String = col.to_html(false) + str(race)
+	if _clan_cache_hd.has(key):
+		return _clan_cache_hd[key]
+	var res: Dictionary = {}
+	res["fire"] = _hd_bt(_hdb_fire(), Vector2i(12, 13))
+	var tent: Image = _hdb_tent(col, race)
+	res["tent"] = _hd_bt(tent, Vector2i(12, 21))
+	var tent_b: Image = tent.duplicate()
+	tent_b.flip_x()
+	res["tent_b"] = _hd_bt(tent_b, Vector2i(12, 21))
+	var hut: Image = _hdb_hut(col, race)
+	res["hut"] = _hd_bt(hut, Vector2i(15, 26))
+	var hut_b: Image = hut.duplicate()
+	hut_b.flip_x()
+	res["hut_b"] = _hd_bt(hut_b, Vector2i(15, 26))
+	res["house"] = _hd_bt(_hdb_house(col, race, false), Vector2i(17, 33))
+	res["house_b"] = _hd_bt(_hdb_house(col, race, true), Vector2i(17, 43))
+	res["hall1"] = _hd_bt(_hdb_hall(col, false), Vector2i(23, 38))
+	res["hall2"] = _hd_bt(_hdb_hall(col, true), Vector2i(30, 54))
+	res["hall"] = res["hall2"]
+	res["forge"] = _hd_bt(_hdb_forge(col), Vector2i(18, 29))
+	res["tower"] = _hd_bt(_hdb_tower(col), Vector2i(12, 53))
+	res["farm"] = _hd_bt(_hdb_farm(col, false), Vector2i(31, 46), false)
+	res["pen"] = _hd_bt(_hdb_farm(col, true), Vector2i(31, 46), false)
+	_clan_cache_hd[key] = res
+	return res
+
+
+## Kontur, Schlagschatten (2 Texel nach rechts unten) und Mipmaps; Fußpunkt als Meta.
+static func _hd_bt(im: Image, foot: Vector2i, outline: bool = true) -> ImageTexture:
+	var w: int = im.get_width()
+	var h: int = im.get_height()
+	var src: Image = Image.create_empty(w + 2, h + 2, false, Image.FORMAT_RGBA8)
+	src.blit_rect(im, Rect2i(0, 0, w, h), Vector2i(1, 1))
+	if outline:
+		_hd_outline(src, HD_OL)
+	var out: Image = Image.create_empty(w + 5, h + 5, false, Image.FORMAT_RGBA8)
+	for y: int in range(h + 2):
+		for x: int in range(w + 2):
+			if src.get_pixel(x, y).a > 0.5:
+				out.set_pixel(x + 2, y + 2, HD_SHADOW)
+	out.blend_rect(src, Rect2i(0, 0, w + 2, h + 2), Vector2i.ZERO)
+	out.generate_mipmaps()
+	var t: ImageTexture = ImageTexture.create_from_image(out)
+	t.set_meta("foot", Vector2(foot.x + 1, foot.y + 1))
+	return t
+
+
+## Dach von vorn: Trapez mit Ziegelreihen, Grat oben, Traufe unten; up = hochgezogene Ecken (Pagode).
+static func _hdb_roof(q: Px, cx: float, top: int, ht: float, hb: float, h: int, C: Color, up: bool, ridge: Color = Color.TRANSPARENT) -> void:
+	var cl: Color = C.lightened(0.22)
+	var cd: Color = C.darkened(0.42)
+	var cr: Color = C.darkened(0.18)
+	for r: int in range(h):
+		var y: int = top + r
+		var t: float = float(r) / maxf(1.0, h - 1.0)
+		var half: float = lerpf(ht, hb, t)
+		var x0: int = int(roundf(cx - half))
+		var x1: int = int(roundf(cx + half))
+		for x: int in range(x0, x1):
+			var c: Color = C
+			var rel: float = (x + 0.5 - cx) / maxf(1.0, half)
+			if rel < -0.55:
+				c = cl
+			elif rel > 0.55:
+				c = cr
+			if (x - x0) % 3 == 2:
+				c = c.darkened(0.12)
+			if r % 3 == 2:
+				c = c.darkened(0.2)
+			if r == h - 1:
+				c = cd
+			q.p(x, y, 1, 1, c)
+		if up and r == h - 1:
+			q.p(x0 - 2, y - 1, 2, 1, C)
+			q.p(x0 - 3, y - 2, 1, 1, cl)
+			q.p(x1, y - 1, 2, 1, cr)
+			q.p(x1 + 2, y - 2, 1, 1, cr)
+			q.p(x0 - 1, y, 1, 1, cd)
+			q.p(x1, y, 1, 1, cd)
+	var rx0: int = int(roundf(cx - ht))
+	var rx1: int = int(roundf(cx + ht))
+	q.p(rx0, top - 1, rx1 - rx0, 1, ridge if ridge.a > 0.0 else cl)
+	if up:
+		q.p(rx0 - 1, top - 2, 1, 1, ridge if ridge.a > 0.0 else cl)
+		q.p(rx1, top - 2, 1, 1, ridge if ridge.a > 0.0 else cl)
+
+
+## Wand: kind "plaster" (Fachwerk), "log" (Blockbohlen), "stone" (Mauer), "wood" (Halle mit roten Säulen).
+static func _hdb_wall(q: Px, x0: int, y0: int, w: int, h: int, kind: String) -> void:
+	for y: int in range(y0, y0 + h):
+		for x: int in range(x0, x0 + w):
+			var c: Color
+			match kind:
+				"log":
+					c = Color("#a8743c") if (y - y0) % 3 != 2 else Color("#7a4e2a")
+					if (y - y0) % 3 == 0:
+						c = Color("#bc8a50")
+				"stone":
+					var row: int = (y - y0) / 3
+					var bx: int = (x - x0 + (row % 2) * 2) % 5
+					c = Color("#b0aa9c")
+					if (y - y0) % 3 == 2 or bx == 4:
+						c = Color("#7e786c")
+					elif GuData.hash2(x, y, 31) < 0.15:
+						c = Color("#c4beb0")
+				"wood":
+					c = Color("#8a5434") if (x - x0) % 2 == 0 else Color("#7a4a2c")
+				_:
+					c = Color("#ecdcbc")
+					if GuData.hash2(x, y, 33) < 0.08:
+						c = Color("#e0ceaa")
+			if x == x0 + w - 1:
+				c = c.darkened(0.18)
+			if y == y0:
+				c = c.darkened(0.35)
+			elif y == y0 + 1:
+				c = c.darkened(0.15)
+			q.p(x, y, 1, 1, c)
+	if kind == "plaster":
+		var beam: Color = Color("#6a4428")
+		q.p(x0, y0 + 1, w, 1, beam)
+		q.p(x0, y0, 1, h, beam)
+		q.p(x0 + w - 1, y0, 1, h, beam.darkened(0.2))
+	if kind == "log":
+		for y: int in range(y0 + 1, y0 + h, 3):
+			q.p(x0 - 1, y, 1, 2, Color("#d8b07a"))
+			q.p(x0 + w, y, 1, 2, Color("#8a5a30"))
+
+
+static func _hdb_window(q: Px, x: int, y: int, w: int = 4, h: int = 4) -> void:
+	q.p(x - 1, y - 1, w + 2, h + 2, Color("#4a2e1a"))
+	q.p(x, y, w, h, Color("#ffd27a"))
+	q.p(x, y, w, 1, Color("#fff0b4"))
+	q.p(x + w / 2, y, 1, h, Color("#8a5a2a"))
+	q.p(x, y + h / 2, w, 1, Color("#c08a3a"))
+	q.p(x - 1, y + h, w + 2, 1, Color("#b8a080"))
+
+
+static func _hdb_door(q: Px, x: int, y: int, w: int, h: int, col: Color = Color("#3a2414")) -> void:
+	q.p(x - 1, y - 1, w + 2, h + 1, Color("#6a4428"))
+	q.p(x, y, w, h, col)
+	q.p(x, y, w, 1, col.darkened(0.4))
+	q.p(x + w - 2, y + h / 2, 1, 1, Color("#e8c060"))
+
+
+static func _hdb_found(q: Px, x0: int, y: int, w: int) -> void:
+	for x: int in range(x0, x0 + w):
+		q.p(x, y, 1, 1, Color("#a49e90") if (x - x0) % 4 != 3 else Color("#6e6a60"))
+		q.p(x, y + 1, 1, 1, Color("#7a766c"))
+
+
+static func _hdb_fire() -> Image:
+	var q: Px = Px.new(24, 16)
+	# Sitzbänke aus Stämmen
+	q.p(1, 11, 5, 2, Color("#8a5a30"))
+	q.p(1, 11, 5, 1, Color("#b07a44"))
+	q.p(18, 10, 5, 2, Color("#8a5a30"))
+	q.p(18, 10, 5, 1, Color("#b07a44"))
+	# Steinring
+	for k: int in range(14):
+		var a: float = k * TAU / 14.0
+		var x: int = int(roundf(12.0 + cos(a) * 6.0))
+		var y: int = int(roundf(10.0 + sin(a) * 3.2))
+		var c: Color = Color("#c4c4bc") if sin(a) < 0.0 else Color("#8a8a84")
+		q.p(x - 1, y - 1, 2, 2, c)
+		q.p(x, y, 1, 1, c.darkened(0.25))
+	# Asche und Holzscheite
+	q.p(8, 9, 8, 3, Color("#3a302a"))
+	q.p(8, 8, 8, 2, Color("#7a5432"))
+	q.p(9, 8, 6, 1, Color("#a8743c"))
+	q.p(10, 10, 5, 2, Color("#55361e"))
+	q.p(11, 7, 2, 4, Color("#6a4428"))
+	return q.img
+
+
+static func _hdb_tent(C: Color, race: int) -> Image:
+	var tp: Array = [["#e6fff6", "#a4e8dc", "#6fc4bc", "#3f8e94"], ["#f0d8b0", "#c89a68", "#a07448", "#6e4c2e"],
+		["#ecece4", "#bcb8ae", "#8e8a82", "#64605a"], ["#f0fbff", "#a8d4f0", "#74a8d8", "#4a74a8"]][clampi(race, 0, 3)]
+	var q: Px = Px.new(24, 23)
+	var ax: float = 12.0
+	for y: int in range(5, 21):
+		var half: float = (y - 4.0) / 16.0 * 11.0
+		for x: int in range(int(ax - half), int(ax + half) + 1):
+			var rel: float = (x + 0.5 - ax) / maxf(1.0, half)
+			var c: Color = Color(tp[1]) if rel < 0.0 else Color(tp[2])
+			if rel < -0.6:
+				c = Color(tp[0])
+			elif rel > 0.6:
+				c = Color(tp[3])
+			if (x + 64) % 5 == 0:
+				c = c.darkened(0.12)
+			if y == 20:
+				c = Color(tp[3]).darkened(0.2)
+			q.p(x, y, 1, 1, c)
+	# Eingang
+	for y: int in range(12, 21):
+		var hw: float = (y - 11.0) / 9.0 * 3.4
+		q.p(int(ax - hw), y, int(hw * 2.0) + 1, 1, Color("#1a1210"))
+	q.p(int(ax) - 4, 18, 2, 3, Color(tp[0]))
+	q.p(int(ax) + 3, 18, 2, 3, Color(tp[2]))
+	# Stange mit Wimpel in Clanfarbe
+	q.p(12, 0, 1, 6, Color("#6a4428"))
+	q.p(13, 0, 4, 1, C.lightened(0.15))
+	q.p(13, 1, 3, 1, C)
+	q.p(13, 2, 2, 1, C.darkened(0.3))
+	# Pflöcke
+	q.p(0, 20, 1, 2, Color("#8a5a2e"))
+	q.p(23, 20, 1, 2, Color("#8a5a2e"))
+	q.p(1, 19, 2, 1, Color("#e8b850"))
+	q.p(21, 19, 2, 1, Color("#e8b850"))
+	return q.img
+
+
+static func _hdb_hut(C: Color, race: int) -> Image:
+	var q: Px = Px.new(31, 28)
+	# Strohdach
+	for r: int in range(13):
+		var y: int = 2 + r
+		var half: float = lerpf(5.0, 15.0, r / 12.0)
+		var x0: int = int(15.5 - half)
+		var x1: int = int(15.5 + half)
+		for x: int in range(x0, x1):
+			var hh: float = GuData.hash2(x, y / 2, 21)
+			var rel: float = (x + 0.5 - 15.5) / half
+			var c: Color = Color("#d8a058") if hh < 0.45 else (Color("#c8884a") if hh < 0.85 else Color("#e8bc74"))
+			if rel < -0.6:
+				c = c.lightened(0.12)
+			elif rel > 0.55:
+				c = c.darkened(0.2)
+			if r == 12 or (r == 11 and hh > 0.7):
+				c = Color("#94582c")
+			q.p(x, y, 1, 1, c)
+		if r == 12:
+			for x2: int in range(x0, x1, 3):
+				q.p(x2, y + 1, 1, 1, Color("#94582c"))
+	q.p(11, 1, 10, 1, Color("#e8bc74"))
+	q.p(14, 0, 3, 1, C)
+	# Wand
+	_hdb_wall(q, 4, 15, 23, 9, "stone" if race == 2 else "log")
+	_hdb_door(q, 14, 18, 4, 6)
+	_hdb_window(q, 7, 18, 3, 3)
+	_hdb_window(q, 21, 18, 3, 3)
+	_hdb_found(q, 3, 24, 25)
+	return q.img
+
+
+static func _hdb_house(C: Color, race: int, two: bool) -> Image:
+	var hh: int = 44 if two else 34
+	var q: Px = Px.new(35, hh)
+	var off: int = 10 if two else 0
+	# Schornstein
+	q.p(25, 1, 3, 7, Color("#8a7e74"))
+	q.p(25, 1, 1, 7, Color("#a89a8e"))
+	q.p(24, 0, 5, 2, Color("#6a6058"))
+	_hdb_roof(q, 17.5, 3, 9.0, 16.5, 13, C, true)
+	if two:
+		_hdb_wall(q, 6, 16, 23, 8, "plaster" if race != 2 else "stone")
+		_hdb_window(q, 9, 18, 3, 3)
+		_hdb_window(q, 16, 18, 3, 3)
+		_hdb_window(q, 23, 18, 3, 3)
+		_hdb_roof(q, 17.5, 24, 13.0, 16.5, 4, C, true)
+	var wy: int = 16 + off
+	_hdb_wall(q, 4, wy, 27, 15, "plaster" if race != 2 else "stone")
+	_hdb_window(q, 8, wy + 4, 4, 4)
+	_hdb_window(q, 23, wy + 4, 4, 4)
+	_hdb_door(q, 15, wy + 6, 5, 9)
+	# Laterne
+	q.p(13, wy + 5, 1, 1, Color("#3a2414"))
+	q.p(12, wy + 6, 3, 3, Color("#e04030"))
+	q.p(12, wy + 6, 1, 1, Color("#ff8a6a"))
+	_hdb_found(q, 3, wy + 15, 29)
+	return q.img
+
+
+static func _hdb_hall(C: Color, big: bool) -> Image:
+	var Y: Color = Color("#f0c040")
+	var red: Color = Color("#c63a2a")
+	if not big:
+		var q: Px = Px.new(47, 39)
+		q.p(21, 0, 5, 1, Y)
+		q.p(22, 1, 3, 2, Y.darkened(0.15))
+		_hdb_roof(q, 23.5, 4, 11.0, 22.5, 13, C, true, Y)
+		_hdb_wall(q, 5, 17, 37, 15, "wood")
+		for x: int in [5, 12, 19, 27, 34, 40]:
+			q.p(x, 17, 2, 15, red)
+			q.p(x, 17, 1, 15, red.lightened(0.2))
+		_hdb_window(q, 8, 21, 3, 4)
+		_hdb_window(q, 14, 21, 4, 4)
+		_hdb_window(q, 30, 21, 4, 4)
+		_hdb_window(q, 36, 21, 3, 4)
+		_hdb_door(q, 21, 22, 6, 10, Color("#5a2416"))
+		q.p(23, 24, 1, 1, Y)
+		q.p(24, 24, 1, 1, Y)
+		q.p(23, 28, 1, 1, Y)
+		q.p(24, 28, 1, 1, Y)
+		# Laternen
+		for x2: int in [17, 29]:
+			q.p(x2, 19, 2, 3, Color("#e84a2a"))
+			q.p(x2, 19, 1, 1, Color("#ffb08a"))
+		# Steinpodest mit Stufen
+		q.p(2, 32, 43, 3, Color("#b4ae9e"))
+		q.p(2, 32, 43, 1, Color("#cac4b4"))
+		q.p(2, 34, 43, 1, Color("#8a847a"))
+		q.p(19, 35, 10, 2, Color("#a49e90"))
+		q.p(19, 35, 10, 1, Color("#bcb6a8"))
+		return q.img
+	var q2: Px = Px.new(61, 55)
+	q2.p(28, 0, 5, 1, Y)
+	q2.p(29, 1, 3, 2, Y.darkened(0.15))
+	_hdb_roof(q2, 30.5, 4, 10.0, 19.5, 10, C, true, Y)
+	_hdb_wall(q2, 14, 14, 33, 8, "wood")
+	for x: int in [14, 20, 26, 33, 39, 45]:
+		q2.p(x, 14, 2, 8, red)
+	_hdb_window(q2, 17, 16, 2, 3)
+	_hdb_window(q2, 29, 16, 3, 3)
+	_hdb_window(q2, 42, 16, 2, 3)
+	_hdb_roof(q2, 30.5, 22, 20.0, 29.0, 8, C, true, Y)
+	_hdb_wall(q2, 5, 30, 51, 16, "wood")
+	for x: int in [5, 12, 19, 26, 34, 41, 48, 54]:
+		q2.p(x, 30, 2, 16, red)
+		q2.p(x, 30, 1, 16, red.lightened(0.2))
+	for x: int in [8, 15, 22, 37, 44, 51]:
+		_hdb_window(q2, x, 34, 3, 5)
+	_hdb_door(q2, 27, 35, 8, 11, Color("#5a2416"))
+	for yy: int in [37, 42]:
+		q2.p(29, yy, 1, 1, Y)
+		q2.p(32, yy, 1, 1, Y)
+	# Banner in Clanfarbe
+	for x3: int in [1, 57]:
+		q2.p(x3 + 1, 26, 1, 22, Color("#5a3a20"))
+		q2.p(x3, 28, 3, 10, C)
+		q2.p(x3, 28, 1, 10, C.lightened(0.2))
+		q2.p(x3 + 1, 32, 1, 2, Y)
+	q2.p(2, 46, 57, 4, Color("#b4ae9e"))
+	q2.p(2, 46, 57, 1, Color("#cac4b4"))
+	q2.p(2, 49, 57, 1, Color("#8a847a"))
+	q2.p(25, 50, 12, 2, Color("#a49e90"))
+	q2.p(25, 50, 12, 1, Color("#bcb6a8"))
+	q2.p(27, 52, 8, 2, Color("#9a9486"))
+	return q2.img
+
+
+static func _hdb_forge(C: Color) -> Image:
+	var q: Px = Px.new(37, 30)
+	_hdb_roof(q, 11.5, 3, 6.0, 11.5, 9, C, false)
+	_hdb_wall(q, 1, 12, 21, 13, "stone")
+	# offene Werkstatt mit Glut
+	q.p(6, 16, 10, 9, Color("#2a1a12"))
+	q.p(7, 21, 8, 4, Color("#4a2a1a"))
+	q.p(8, 22, 3, 2, Color("#ff8a3a"))
+	q.p(9, 22, 1, 1, Color("#ffe27a"))
+	# Ofen mit Jade-Glut (Gu-Veredelung)
+	for y: int in range(8, 26):
+		for x: int in range(23, 35):
+			var rel: float = (x + 0.5 - 29.0) / 6.0
+			var c: Color = Color("#6a6a74") if rel < -0.3 else (Color("#54545e") if rel < 0.4 else Color("#3e3e48"))
+			if (y + (x / 3) % 2) % 3 == 0:
+				c = c.darkened(0.15)
+			q.p(x, y, 1, 1, c)
+	q.p(22, 7, 14, 2, Color("#7a7a84"))
+	q.p(26, 17, 6, 5, Color("#2a1410"))
+	q.p(27, 18, 4, 4, Color("#ff8a3a"))
+	q.p(28, 19, 2, 2, Color("#ffe27a"))
+	q.p(26, 2, 6, 6, Color("#4a4a52"))
+	q.p(27, 1, 4, 1, Color("#8ff0c8"))
+	q.p(28, 0, 2, 1, Color("#e8fff6"))
+	# Amboss
+	q.p(16, 24, 6, 2, Color("#5a5a62"))
+	q.p(17, 23, 5, 1, Color("#8a8a94"))
+	q.p(18, 26, 2, 1, Color("#3a3a42"))
+	_hdb_found(q, 0, 26, 36)
+	return q.img
+
+
+static func _hdb_tower(C: Color) -> Image:
+	var q: Px = Px.new(24, 54)
+	var wd: Color = Color("#7a5030")
+	var wl: Color = Color("#a8743c")
+	# Beine und Streben
+	for x: int in [3, 19]:
+		q.p(x, 20, 2, 32, wd)
+		q.p(x, 20, 1, 32, wl)
+	for k: int in range(3):
+		var y0: int = 22 + k * 10
+		for s: int in range(10):
+			q.p(5 + int(s * 1.4), y0 + s, 1, 1, wd)
+			q.p(18 - int(s * 1.4), y0 + s, 1, 1, wd.darkened(0.15))
+		q.p(4, y0, 16, 1, wl)
+	# Plattform mit Geländer
+	q.p(1, 17, 22, 3, Color("#9a6a3a"))
+	q.p(1, 17, 22, 1, Color("#c08a50"))
+	q.p(1, 19, 22, 1, Color("#5a3a20"))
+	q.p(2, 11, 20, 6, Color("#8a5a30"))
+	q.p(9, 12, 6, 3, Color("#1a1210"))
+	q.p(11, 13, 1, 1, Color("#ffd27a"))
+	# Dach
+	_hdb_roof(q, 12.0, 5, 2.0, 11.5, 7, C, true)
+	q.p(12, 0, 1, 5, Color("#5a4030"))
+	q.p(13, 0, 5, 1, C.lightened(0.15))
+	q.p(13, 1, 4, 1, C)
+	q.p(13, 2, 3, 1, C.darkened(0.3))
+	q.p(1, 52, 22, 2, Color("#6a5a46"))
+	return q.img
+
+
+static func _hdb_farm(C: Color, pen: bool) -> Image:
+	var q: Px = Px.new(63, 48)
+	var fx0: int = 1
+	var fy0: int = 4
+	var fx1: int = 61
+	var fy1: int = 45
+	if not pen:
+		# Äcker: zwei Felder mit unterschiedlicher Frucht, Furchen quer
+		for y: int in range(fy0 + 2, fy1 - 1):
+			for x: int in range(fx0 + 2, fx1 - 1):
+				var left: bool = x < 31
+				var row: int = (y - fy0) % 4
+				var c: Color
+				if row == 3:
+					c = Color("#6a4c2c") if (x + y) % 3 else Color("#7a5a34")
+				else:
+					var hh: float = GuData.hash2(x, y, 5)
+					if left:
+						c = Color("#e0c450") if hh < 0.55 else (Color("#c8a43a") if hh < 0.85 else Color("#f0dc80"))
+						if row == 2:
+							c = c.darkened(0.15)
+					else:
+						c = Color("#7ab83e") if hh < 0.6 else (Color("#5e9a2e") if hh < 0.9 else Color("#9ad05a"))
+						if row == 0 and x % 3 == 0:
+							c = Color("#a8dc68")
+						if row == 2:
+							c = c.darkened(0.18)
+				q.p(x, y, 1, 1, c)
+		q.p(31, fy0 + 2, 1, fy1 - fy0 - 3, Color("#8a6a40"))
+	else:
+		# Gehege: zertretene Wiese, Heuhaufen, Trog, Stall
+		for y: int in range(fy0 + 1, fy1):
+			for x: int in range(fx0 + 1, fx1):
+				var hh2: float = GuData.hash2(x, y, 9)
+				var c2: Color = Color("#8a9a4a") if hh2 < 0.5 else (Color("#7a8a40") if hh2 < 0.85 else Color("#a08a58"))
+				q.p(x, y, 1, 1, c2)
+		_hdb_roof(q, 49.0, 6, 6.0, 9.0, 6, C, false)
+		q.p(41, 12, 16, 8, Color("#8a5a30"))
+		q.p(41, 12, 16, 1, Color("#5a3a20"))
+		q.p(47, 14, 4, 6, Color("#2a1a10"))
+		for k: int in range(3):
+			q.d(9 + k * 4, 12 - (k % 2), 3, Color("#e0c060"))
+		q.p(7, 9, 12, 2, Color("#f0d878"))
+		q.p(7, 15, 12, 1, Color("#a88a34"))
+		q.p(26, 33, 10, 3, Color("#6a4a2a"))
+		q.p(27, 33, 8, 1, Color("#7ab0d8"))
+	# Zaun: Pfosten und zwei Latten
+	var rail: Color = Color("#c09a64")
+	var raild: Color = Color("#7a5a34")
+	q.p(fx0, fy0, fx1 - fx0 + 1, 1, rail)
+	q.p(fx0, fy0 + 1, fx1 - fx0 + 1, 1, raild)
+	q.p(fx0, fy1, 26, 1, rail)
+	q.p(fx1 - 25, fy1, 26, 1, rail)
+	q.p(fx0, fy1 + 1, 26, 1, raild)
+	q.p(fx1 - 25, fy1 + 1, 26, 1, raild)
+	q.p(fx0, fy0, 1, fy1 - fy0 + 2, rail)
+	q.p(fx1, fy0, 1, fy1 - fy0 + 2, raild)
+	for x: int in range(fx0, fx1 + 1, 6):
+		for y: int in [fy0, fy1]:
+			if y == fy1 and x > 26 and x < fx1 - 25:
+				continue
+			q.p(x, y - 2, 2, 4, Color("#e4b44e"))
+			q.p(x + 1, y - 1, 1, 3, Color("#a8743c"))
+	for y: int in range(fy0, fy1 + 1, 6):
+		q.p(fx0 - 1, y - 1, 2, 3, Color("#e4b44e"))
+		q.p(fx1, y - 1, 2, 3, Color("#a8743c"))
+	# Fahne in Clanfarbe
+	q.p(31, 0, 1, 5, Color("#5a4030"))
+	q.p(32, 0, 4, 2, C)
+	q.p(32, 0, 4, 1, C.lightened(0.2))
+	return q.img
+
+
+## Scale2x (EPX): verdoppelt ein Pixelbild und rundet dabei Diagonalen ab.
+static func scale2x(src: Image) -> Image:
+	var w: int = src.get_width()
+	var h: int = src.get_height()
+	var sd: PackedByteArray = src.get_data()
+	if src.get_format() != Image.FORMAT_RGBA8:
+		var c: Image = src.duplicate()
+		c.convert(Image.FORMAT_RGBA8)
+		sd = c.get_data()
+	var px: PackedInt32Array = sd.to_int32_array()
+	var out: PackedInt32Array = PackedInt32Array()
+	out.resize(w * h * 4)
+	var w2: int = w * 2
+	for y: int in range(h):
+		for x: int in range(w):
+			var P: int = px[y * w + x]
+			var A: int = px[(y - 1) * w + x] if y > 0 else P
+			var B: int = px[y * w + x + 1] if x < w - 1 else P
+			var C: int = px[y * w + x - 1] if x > 0 else P
+			var D: int = px[(y + 1) * w + x] if y < h - 1 else P
+			var e0: int = P
+			var e1: int = P
+			var e2: int = P
+			var e3: int = P
+			if C == A and C != D and A != B:
+				e0 = A
+			if A == B and A != C and B != D:
+				e1 = B
+			if D == C and D != B and C != A:
+				e2 = C
+			if B == D and B != A and D != C:
+				e3 = D
+			var o: int = (y * 2) * w2 + x * 2
+			out[o] = e0
+			out[o + 1] = e1
+			out[o + w2] = e2
+			out[o + w2 + 1] = e3
+	return Image.create_from_data(w2, h * 2, false, Image.FORMAT_RGBA8, out.to_byte_array())
+
+
+## Feine Körnung in großen einfarbigen Flächen (vergrößerte Orte wirken sonst flach).
+static func _grain(im: Image, sd: int) -> void:
+	for y: int in range(1, im.get_height() - 1):
+		for x: int in range(1, im.get_width() - 1):
+			var c: Color = im.get_pixel(x, y)
+			if c.a < 0.95:
+				continue
+			# nur im Inneren einfarbiger Flächen
+			if im.get_pixel(x - 1, y) != c or im.get_pixel(x, y - 1) != c:
+				continue
+			var h: float = GuData.hash2(x, y, sd)
+			if h < 0.1:
+				im.set_pixel(x, y, c.darkened(0.07))
+			elif h > 0.93:
+				im.set_pixel(x, y, c.lightened(0.06))
+
+
+# ---------------- Orte in der Nahansicht (4 Texel je Kachel) ----------------
+# Gleicher Aufbau wie place_image, aber in feinen Pixeln gezeichnet: Inseln mit Gesteinsschichten
+# und Licht, Bäume der Nahansicht, Pagoden mit Ziegeldächern.
+
+const PK: int = 4
+static var _pink_tree: Array = []
+
+
+static func place_image_hd(type: String) -> Image:
+	hd_init()
+	var k: int = PK
+	var W2: int = int(place_size(type))
+	var H2: int = int(W2 * 0.95)
+	var q: Px = Px.new(W2 * k, H2 * k)
+	# Rechteck in Kachel-Einheiten
+	var P: Callable = func(x: float, y: float, w: float, h: float, c: Variant) -> void:
+		var x0: int = roundi(x * k)
+		var y0: int = roundi(y * k)
+		q.p(x0, y0, maxi(1, roundi((x + w) * k) - x0), maxi(1, roundi((y + h) * k) - y0), c)
+	var grass: Array = [Color("#9ade6a"), Color("#6ab84a"), Color("#4a8a34"), Color("#2e5e24")]
+	var rock: Array = [Color("#a8987e"), Color("#8a7a62"), Color("#6a5a48"), Color("#4a3e32")]
+	var cx: float = W2 / 2.0
+	match type:
+		"blessed", "hu":
+			if type == "hu":
+				grass = [Color("#ffd090"), Color("#f0a860"), Color("#d8803a"), Color("#a05a26")]
+			_island_hd(q, k, cx, H2 * 0.42, W2 * 0.44, H2 * 0.14, H2 * 0.5, grass, rock, 11 if type == "blessed" else 12)
+			var gy: float = H2 * 0.42
+			_tree_hd(q, k, cx - W2 * 0.26, gy - 0.5, type == "hu", 1)
+			_tree_hd(q, k, cx + W2 * 0.27, gy, type == "hu", 2)
+			_pagoda_hd(q, k, cx, gy, Color("#c23a2e") if type == "blessed" else Color("#e8e0d0"), 2)
+			P.call(cx + 4.0, gy - 1.0, 2.0, 0.75, Color("#7ae8ff"))
+			P.call(cx + 4.25, gy - 1.0, 0.75, 0.25, Color("#ffffff"))
+		"grotto":
+			_island_hd(q, k, cx - 2.0, H2 * 0.4, W2 * 0.36, H2 * 0.12, H2 * 0.48, grass, rock, 21)
+			_island_hd(q, k, W2 * 0.86, H2 * 0.22, W2 * 0.1, H2 * 0.05, H2 * 0.2, grass, rock, 22)
+			_island_hd(q, k, W2 * 0.12, H2 * 0.62, W2 * 0.09, H2 * 0.05, H2 * 0.18, grass, rock, 23)
+			var gy2: float = H2 * 0.4
+			_tree_hd(q, k, cx - 9.0, gy2 - 0.5, false, 3)
+			_tree_hd(q, k, cx + 7.0, gy2, false, 4)
+			_pagoda_hd(q, k, cx - 1.0, gy2, Color("#8a46b8"), 3)
+			# Wasserfall
+			for yy: int in range(int((gy2 + 0.5) * k), int((gy2 + 12.0) * k)):
+				for xx: int in range(int((cx + 8.75) * k), int((cx + 10.0) * k)):
+					var ph: int = (yy + xx * 3) % 6
+					q.p(xx, yy, 1, 1, Color("#e8f8ff") if ph < 2 else (Color("#a8e8ff") if ph < 4 else Color("#78c8f0")))
+			P.call(W2 * 0.86 - 1.0, H2 * 0.22 - 3.0, 2.0, 3.0, Color("#ffe27a"))
+			P.call(W2 * 0.86 - 0.5, H2 * 0.22 - 3.5, 1.0, 0.5, Color("#fff6c0"))
+		"court", "imperial":
+			var roof: Color = Color("#f0c040") if type == "court" else Color("#e0a020")
+			_island_hd(q, k, cx, H2 * 0.55, W2 * 0.46, H2 * 0.1, H2 * 0.4, [Color("#ffffff"), Color("#f0f4fc"), Color("#d4deec"), Color("#a8b8cc")], [Color("#e4ecf6"), Color("#c4d0de"), Color("#9eacc0"), Color("#76849a")], 31)
+			var gy3: float = H2 * 0.55
+			# Palastmauer mit Zinnen und Toren
+			P.call(cx - W2 * 0.4, gy3 - 3.0, W2 * 0.8, 3.0, Color("#c8382a"))
+			P.call(cx - W2 * 0.4, gy3 - 3.0, W2 * 0.8, 0.25, Color("#e05a40"))
+			P.call(cx - W2 * 0.4, gy3 - 0.5, W2 * 0.8, 0.5, Color("#8a2418"))
+			P.call(cx - W2 * 0.4, gy3 - 4.0, W2 * 0.8, 1.0, roof)
+			P.call(cx - W2 * 0.4, gy3 - 3.25, W2 * 0.8, 0.25, roof.darkened(0.35))
+			var nb: int = int(W2 * 0.8 / 2.0)
+			for b: int in range(nb):
+				P.call(cx - W2 * 0.4 + b * 2.0 + 0.5, gy3 - 4.5, 1.0, 0.5, roof.lightened(0.15))
+			_pagoda_hd(q, k, cx - W2 * 0.24, gy3 - 2.0, roof, 2, Color("#c8382a"))
+			_pagoda_hd(q, k, cx + W2 * 0.24, gy3 - 2.0, roof, 2, Color("#c8382a"))
+			if type == "court":
+				# Himmelsüberwachungsturm
+				var tx2: float = cx
+				for yy2: int in range(int((gy3 - 26.0) * k), int((gy3 - 2.0) * k)):
+					for xx2: int in range(int((tx2 - 2.0) * k), int((tx2 + 3.0) * k)):
+						var rel: float = (xx2 + 0.5) / k - (tx2 + 0.5)
+						var c2: Color = Color("#ffffff") if rel < -1.2 else (Color("#f0ece0") if rel < 0.8 else Color("#c8c0b0"))
+						if (yy2 / k) % 2 == 0 and (xx2 % k) == 0:
+							c2 = c2.darkened(0.06)
+						q.p(xx2, yy2, 1, 1, c2)
+				for kk: int in range(5):
+					var ry: float = gy3 - 6.0 - kk * 5.0
+					_hdb_roof(q, (tx2 + 0.5) * k, int(ry * k), 2.0 * k, 3.6 * k, k + 1, roof, true)
+				P.call(tx2 - 1.0, gy3 - 30.0, 3.0, 4.0, roof)
+				P.call(tx2 - 1.0, gy3 - 30.0, 1.0, 4.0, roof.lightened(0.2))
+				P.call(tx2, gy3 - 32.0, 1.0, 2.0, Color("#fff8c0"))
+				P.call(tx2 - 1.0, gy3 - 22.0, 3.0, 2.0, Color("#7ae8ff"))
+				P.call(tx2 - 0.75, gy3 - 21.75, 1.0, 0.75, Color("#ffffff"))
+			else:
+				_pagoda_hd(q, k, cx, gy3 - 2.0, roof, 3, Color("#c8382a"))
+		"langya":
+			_island_hd(q, k, cx, H2 * 0.45, W2 * 0.44, H2 * 0.13, H2 * 0.48, grass, rock, 41)
+			var gy4: float = H2 * 0.45
+			for kk2: int in range(3):
+				var sx: float = cx - 9.0 + kk2 * 7.0
+				var rc: Color = [Color("#d23a2a"), Color("#3a7ad8"), Color("#e8b020")][kk2]
+				P.call(sx - 1.0, gy4 - 3.0, 3.0, 3.0, Color("#e8d0a0"))
+				P.call(sx + 1.5, gy4 - 3.0, 0.5, 3.0, Color("#c8ac7c"))
+				P.call(sx, gy4 - 2.0, 1.0, 2.0, Color("#5a3a1a"))
+				_hdb_roof(q, (sx + 0.5) * k, int((gy4 - 4.75) * k), 1.6 * k, 2.8 * k, k + 1, rc, true)
+			P.call(cx - 1.0, gy4 - 9.0, 3.0, 3.0, Color("#ffd23a"))
+			P.call(cx - 1.0, gy4 - 9.0, 1.0, 1.0, Color("#fff4b0"))
+			P.call(cx, gy4 - 8.0, 1.0, 1.0, Color("#8a5a10"))
+			_tree_hd(q, k, cx + 10.0, gy4, false, 5)
+		"dream":
+			for y: int in range(H2 * k):
+				for x: int in range(W2 * k):
+					var fx: float = (x + 0.5) / k
+					var fy: float = (y + 0.5) / k
+					var dd: float = Vector2((fx - cx) / (W2 * 0.5), (fy - H2 * 0.55) / (H2 * 0.42)).length()
+					if dd > 1.0:
+						continue
+					var ang: float = atan2(fy - H2 * 0.55, fx - cx)
+					var band: float = sin(dd * 9.0 - ang * 2.0)
+					if band > 0.2 or dd < 0.25:
+						var c: Color = Color("#f0c8ff").lerp(Color("#8a5ad8"), dd)
+						if band > 0.8:
+							c = c.lightened(0.2)
+						c.a = 0.95 - dd * 0.45
+						q.p(x, y, 1, 1, c)
+			P.call(cx - 1.0, H2 * 0.55 - 1.0, 3.0, 3.0, Color("#ffffff"))
+		_:
+			# übrige Orte: grobes Bild vergrößern (Scale2x zweimal) – sie sind klein
+			return scale2x(scale2x(place_image(type)))
+	_hd_outline(q.img, Color(0.08, 0.07, 0.06, 0.9))
+	return q.img
+
+
+## Schwebende Insel in feinen Pixeln: gewölbte Grasdecke (Licht links oben), Grasnarbe,
+## Fels in Schichten nach unten spitz zulaufend, hängende Wurzeln.
+static func _island_hd(q: Px, k: int, cx: float, top: float, rx: float, ry: float, depth: float, grass: Array, rock: Array, sd: int) -> void:
+	var ky: int = int((top - ry) * k)
+	var kb: int = int((top + depth) * k) + 1
+	for y: int in range(ky, kb):
+		var fy: float = (y + 0.5) / k
+		if fy <= top:
+			for x: int in range(int((cx - rx) * k) - 2, int((cx + rx) * k) + 3):
+				var fx: float = (x + 0.5) / k
+				var dx: float = (fx - cx) / rx
+				var dy: float = (fy - top) / ry
+				var d2: float = dx * dx + dy * dy
+				if d2 > 1.0:
+					continue
+				var s: float = -dx * 0.6 - dy * 0.5 + (_hdvn(x, y, 3.0, sd) - 0.5) * 0.7
+				var ci: int = 0 if s > 0.75 else (1 if s > -0.1 else 2)
+				if d2 > 0.86 and dy < -0.3:
+					ci = 0 if dx < 0.0 else 2
+				var hh: float = _hdh(x, y, sd)
+				if hh < 0.06:
+					ci = maxi(0, ci - 1)
+				elif hh > 0.95:
+					ci = mini(3, ci + 1)
+				q.p(x, y, 1, 1, grass[ci])
+		else:
+			var kk: float = (fy - top) / depth
+			var jag: float = 0.85 + 0.25 * _hdvn(0.0, y, 2.5 * k / 4.0, sd + 3)
+			var hw: float = rx * pow(maxf(0.0, 1.0 - kk), 0.9) * jag
+			for x: int in range(int((cx - hw) * k) - 1, int((cx + hw) * k) + 2):
+				var fx2: float = (x + 0.5) / k
+				if absf(fx2 - cx) > hw:
+					continue
+				var rel: float = (fx2 - cx) / maxf(0.5, hw)
+				var ci2: int = 1 if rel < -0.35 else (2 if rel < 0.45 else 3)
+				if rel < -0.75:
+					ci2 = 0
+				# Schichten
+				var band: float = fmod(fy + _hdvn(x, 0.0, 6.0, sd + 4) * 0.8, 1.6)
+				if band < 0.22:
+					ci2 = mini(3, ci2 + 1)
+				if kk > 0.7:
+					ci2 = mini(3, ci2 + 1)
+				if _hdh(x, y, sd + 1) < 0.07:
+					ci2 = mini(3, ci2 + 1)
+				var c: Color = rock[ci2]
+				# Grasnarbe direkt unter der Decke
+				if fy - top < 0.75:
+					c = grass[3] if fy - top > 0.4 or _hdh(x, 0, sd + 2) < 0.4 else grass[2]
+				q.p(x, y, 1, 1, c)
+	# hängende Wurzeln
+	for r: int in range(5):
+		var wx: float = cx - rx * 0.6 + r * rx * 0.3
+		var ln: int = int((1.5 + _hdh(r, sd, 9) * 2.5) * k)
+		var y0: int = int((top + 0.7) * k)
+		for t: int in range(ln):
+			var xx: int = int(wx * k + sin(t * 0.5 + r) * 1.2)
+			q.p(xx, y0 + t, 1, 1, Color("#5a3a20") if t < ln - 2 else Color("#7a8a3a"))
+
+
+## Baum der Nahansicht auf einer Insel (Fußpunkt in Kacheln).
+static func _tree_hd(q: Px, k: int, x: float, y: float, pink: bool, v: int) -> void:
+	var e: Array
+	if pink:
+		if _pink_tree.is_empty():
+			_pink_tree = _hd_tree(["#ffc8dc", "#f08aac", "#b84a6a"], false, 77)
+		e = _pink_tree
+	else:
+		var trees: Array = _hd["tree"]
+		var pal: int = [0, 3, 0, 3, 0, 3][v % 6]
+		var vs: Array = trees[pal * 2 + 1]
+		e = vs[v % vs.size()]
+	var im: Image = e[0]
+	var foot: Vector2i = e[1]
+	q.img.blend_rect(im, Rect2i(Vector2i.ZERO, im.get_size()), Vector2i(roundi(x * k) - foot.x, roundi(y * k) - foot.y + 2))
+
+
+## Pagode mit floors Stockwerken in feinen Pixeln (Fußpunkt x, y in Kacheln).
+static func _pagoda_hd(q: Px, k: int, x: float, y: float, roof: Color, floors: int, wall: Color = Color("#e8d8b0")) -> void:
+	for f: int in range(floors):
+		var w: float = 9.0 - f * 2.0
+		var by: float = y - f * 4.0
+		var wx0: int = roundi((x - w / 2.0 + 1.0) * k)
+		var wy0: int = roundi((by - 2.0) * k)
+		var ww: int = roundi((w - 2.0) * k)
+		var wh: int = 2 * k
+		for yy: int in range(wy0, wy0 + wh):
+			for xx: int in range(wx0, wx0 + ww):
+				var c: Color = wall
+				if xx == wx0 or xx == wx0 + ww - 1 or (xx - wx0) % (2 * k) == 0:
+					c = Color("#c63a2a") if wall.r > 0.85 and wall.g > 0.8 else wall.darkened(0.25)
+				if yy == wy0:
+					c = c.darkened(0.35)
+				q.p(xx, yy, 1, 1, c)
+		# Fenster mit warmem Licht, unten eine Tür
+		for wi: int in range(int(w - 3.0)):
+			var fx: int = wx0 + k + wi * k
+			if fx + 2 >= wx0 + ww - 1:
+				break
+			if f == 0 and wi == int((w - 3.0) / 2.0):
+				q.p(fx, wy0 + 3, k - 1, wh - 3, Color("#3a2414"))
+			else:
+				q.p(fx, wy0 + 3, 2, 3, Color("#ffd27a"))
+				q.p(fx, wy0 + 3, 2, 1, Color("#fff0b4"))
+		_hdb_roof(q, x * k + k * 0.5, roundi((by - 4.0) * k) + 1, (w / 2.0 - 1.4) * k, (w / 2.0 + 0.4) * k, k + 1, roof, true)
+	q.p(roundi(x * k) + 1, roundi((y - floors * 4.0 - 2.0) * k), 2, 2 * k, Color("#ffd23a"))
+	q.p(roundi(x * k) + 1, roundi((y - floors * 4.0 - 2.0) * k), 1, 2 * k, Color("#fff4b0"))

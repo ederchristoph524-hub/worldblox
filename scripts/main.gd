@@ -16,6 +16,7 @@ var world_root: Node2D
 var far_spr: Sprite2D
 var near_spr: Sprite2D
 var terr_spr: Sprite2D
+var detail: Detail  ## Nahansicht: Gelände-Shader und hochaufgelöste Objekte (scripts/detail.gd)
 var ents: EntityLayer
 var clouds: CloudLayer
 var screen: ScreenLayer
@@ -74,6 +75,9 @@ var presim_ms0: int = 0
 func _ready() -> void:
 	t_boot = Time.get_ticks_msec()
 	randomize()
+	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with("--seed="):
+			seed(int(a.substr(7)))
 	sim = Sim.new()
 	add_child(sim)
 	powers = Powers.new(sim)
@@ -106,6 +110,11 @@ func _ready() -> void:
 			_dev_blanktest()
 		if a.begins_with("--blankshots="):
 			_dev_blankshots(a.substr(13))
+		if a.begins_with("--gfxshots="):
+			_dev_gfx(a.substr(11))
+		if a.begins_with("--hdsheet="):
+			Sprites.hd_sheet(a.substr(10), Sprites.hd_sheet_extra())
+			get_tree().quit()
 
 
 func _build_scene() -> void:
@@ -141,12 +150,15 @@ func _build_scene() -> void:
 	near_spr.centered = false
 	near_spr.texture = sim.world.near_tex
 	world_root.add_child(near_spr)
+	detail = Detail.new()
+	world_root.add_child(detail)
 	terr_spr = Sprite2D.new()
 	terr_spr.centered = false
 	terr_spr.texture = sim.world.terr_tex
 	world_root.add_child(terr_spr)
 	ents = EntityLayer.new()
 	ents.m = self
+	ents.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	world_root.add_child(ents)
 	clouds = CloudLayer.new()
 	clouds.m = self
@@ -419,7 +431,12 @@ func _process(delta: float) -> void:
 	world_root.scale = Vector2(z, z)
 	var lod: float = clampf((z - 2.0) / 0.9, 0.0, 1.0)
 	near_spr.modulate.a = lod
-	near_spr.visible = lod > 0.0
+	var vsz: Vector2 = get_viewport_rect().size
+	var wo: Vector2 = world_root.position
+	detail.tick(sim.world, Rect2(-wo / z, vsz / z), z)
+	# Nahansicht deckt alles: Fernbild und 1:1-Bild nicht mehr zeichnen
+	near_spr.visible = lod > 0.0 and detail.amt < 1.0
+	far_spr.visible = detail.amt < 1.0
 	terr_spr.visible = (show_terr and z < tz) or reg_view
 	terr_spr.modulate.a = maxf(clampf((tz - z) / 0.8, 0.0, 0.75), 0.6 if reg_view else 0.0)
 	ents.queue_redraw()
@@ -1397,11 +1414,22 @@ class EntityLayer:
 			var y: float = i / GuData.W
 			if x < vx0 or x > vx1 or y < vy0 or y > vy1:
 				continue
-			var fl: float = sin(tnow * 18.0 + i) * 0.5 + 0.5
 			var big: bool = GuData.is_tree(sim.world.feat[i])
-			draw_rect(Rect2(x - (2.0 if big else 0.0), y - (5.0 if big else 1.0), 5.0 if big else 1.0, 6.0 if big else 2.0), Color("#e0402a"))
-			draw_rect(Rect2(x - (1.0 if big else 0.0), y - (6.0 if big else 1.0) - fl, 3.0 if big else 1.0, 4.0 if big else 1.0), Color("#ff9a2a"))
-			draw_rect(Rect2(x, y - (4.0 if big else 0.0) - fl, 1.0, 1.0), Color("#ffe27a"))
+			# Flammenzungen in Viertelkacheln (Nahansicht), flackernd
+			var n: int = 4 if big else 2
+			var fw: float = 6.0 if big else 1.4
+			var fh0: float = 7.0 if big else 1.8
+			var bx: float = x + 0.5 - fw * 0.5
+			var by: float = y + 1.0
+			var cw: float = fw / n
+			for k: int in range(n):
+				var ph: float = tnow * 11.0 + i * 0.37 + k * 1.9
+				var mid: float = 1.0 - absf((k + 0.5) / n - 0.5) * 1.1
+				var fh: float = fh0 * mid * (0.6 + 0.4 * absf(sin(ph)))
+				var fx: float = bx + k * cw
+				draw_rect(Rect2(fx, by - fh, cw, fh), Color("#d8382a"))
+				draw_rect(Rect2(fx + cw * 0.2, by - fh * 0.78, cw * 0.6, fh * 0.7), Color("#ff8a2a"))
+				draw_rect(Rect2(fx + cw * 0.35, by - fh * 0.45, cw * 0.3, fh * 0.35), Color("#ffe27a"))
 			if randf() < 0.015:
 				sim.parts.append({"x": x + 0.5, "y": y - (6.0 if big else 1.0), "vx": randf() - 0.5, "vy": -3.0, "l": 1.4, "ml": 1.4, "c": Color(0.27, 0.25, 0.24, 0.55), "s": 1.0, "g": 0.0})
 		# Dorfwege (unter den Gebäuden)
@@ -1451,30 +1479,37 @@ class EntityLayer:
 		for b: Building in vis:
 			var v: Village = sim.villages[b.v]
 			var c: Clan = sim.clans[v.clan]
-			var tx: Dictionary = Sprites.clan_textures(c.col, v.race)
+			# Gebäude der Nahansicht: 4 Texel je Kachel, Fußpunkt (Meta „foot“) auf Mitte der Grundfläche-Unterkante
+			var tx: Dictionary = Sprites.clan_textures_hd(c.col, v.race)
 			var key: String = Sprites.building_key(b, v)
 			var tex: Texture2D = tx[key]
-			var tw: int = tex.get_width() - 1
-			var th: int = tex.get_height() - 1
-			var dx: float = b.x - floori((tw - b.w) / 2.0)
-			var dy: float = b.y + b.h - th
-			draw_texture(tex, Vector2(dx, dy))
+			var foot: Vector2 = tex.get_meta("foot")
+			var tsz: Vector2 = tex.get_size() / float(Detail.DS)
+			var dx: float = b.x + b.w * 0.5 - foot.x / Detail.DS
+			var dy: float = b.y + b.h - foot.y / Detail.DS
+			var tw: float = tsz.x
+			var th: float = tsz.y
+			draw_texture_rect(tex, Rect2(dx, dy, tsz.x, tsz.y), false)
 			if key == "fire":
-				var f: int = int(tnow * 8.0) % 3
-				var fx: float = dx + 1.0
-				var fy: float = dy + 1.0
-				draw_rect(Rect2(fx + 4, fy + 1, 3, 3), Color("#e0402a"))
-				draw_rect(Rect2(fx + 4 + (1 if f == 1 else 0), fy - 1 + (1 if f == 2 else 0), 2, 3), Color("#ff9a2a"))
-				draw_rect(Rect2(fx + 5, fy + 1 - (1 if f == 0 else 0), 1, 2), Color("#ffe27a"))
-				draw_rect(Rect2(fx + 4 + (2 if f == 0 else 0), fy - 2 + (1 if f == 1 else 0), 1, 1), Color("#ffb43a"))
+				# Flammen in Viertelkacheln über dem Holzstoß
+				var fx: float = b.x + b.w * 0.5
+				var fy: float = dy + 2.4
+				for k: int in range(5):
+					var ph: float = tnow * 9.0 + k * 1.7
+					var fh: float = 0.9 + 0.5 * absf(sin(ph))
+					var ox: float = (k - 2) * 0.32
+					draw_rect(Rect2(fx + ox - 0.16, fy - fh * (1.0 - absf(k - 2) * 0.25), 0.36, fh), Color("#e0402a") if k % 2 == 0 else Color("#ff7a2a"))
+				draw_rect(Rect2(fx - 0.4, fy - 0.9 - 0.25 * sin(tnow * 11.0), 0.8, 0.9), Color("#ffb43a"))
+				draw_rect(Rect2(fx - 0.2, fy - 0.6 - 0.2 * sin(tnow * 13.0), 0.4, 0.6), Color("#ffe27a"))
+				draw_circle(Vector2(fx, fy - 0.4), 2.4, Color(1.0, 0.6, 0.2, 0.08 + 0.03 * sin(tnow * 7.0)))
 				if randf() < 0.03:
-					sim.parts.append({"x": fx + 5.5, "y": fy - 1.0, "vx": (randf() - 0.5) * 0.6, "vy": -2.0, "l": 1.6, "ml": 1.6, "c": Color(0.55, 0.53, 0.5, 0.5), "s": 1.0, "g": 0.0})
+					sim.parts.append({"x": fx, "y": fy - 1.4, "vx": (randf() - 0.5) * 0.6, "vy": -2.0, "l": 1.6, "ml": 1.6, "c": Color(0.55, 0.53, 0.5, 0.5), "s": 0.5, "g": 0.0})
 			elif key == "pen" and z > 1.6:
 				Sprites.draw_pen_animals(sink, b.x, b.y, tnow, b.id)
 			if b.type == "forge" and randf() < 0.04:
-				sim.parts.append({"x": dx + 7.0, "y": dy + 0.0, "vx": (randf() - 0.5) * 0.6, "vy": -2.4, "l": 1.4, "ml": 1.4, "c": Color(0.59, 0.94, 0.78, 0.55), "s": 1.0, "g": 0.0})
+				sim.parts.append({"x": dx + 7.2, "y": dy + 0.2, "vx": (randf() - 0.5) * 0.6, "vy": -2.4, "l": 1.4, "ml": 1.4, "c": Color(0.59, 0.94, 0.78, 0.55), "s": 1.0, "g": 0.0})
 			if insp_open and m.sel_vil != null and b.v == m.sel_vil.id:
-				draw_rect(Rect2(dx - 0.5, dy - 0.5, tw + 1, th + 1), Color(1, 0.9, 0.47, 0.9), false, 1.5 / z)
+				draw_rect(Rect2(dx - 0.5, dy - 0.5, tw + 1.0, th + 1.0), Color(1, 0.9, 0.47, 0.9), false, 1.5 / z)
 		# Orte (Gesegnete Länder, Himmelshof, Traumreiche …)
 		for p: Place in sim.places:
 			if not p.alive:
@@ -1593,15 +1628,20 @@ class EntityLayer:
 	## Ort zeichnen: Schatten, Bild (schwebend mit Auf und Ab), belebte Effekte.
 	func _draw_place(p: Place, tnow: float, sel: bool) -> void:
 		var tex: Texture2D = Sprites.place_tex(p.type)
-		var tw: float = tex.get_width()
-		var th: float = tex.get_height()
+		var tw: float = tex.get_width() / 4.0
+		var th: float = tex.get_height() / 4.0
 		var fl: bool = p.type in Sprites.PLACE_FLOAT
 		var bob: float = sin(tnow * 1.3 + p.id) * 0.8 if fl else 0.0
 		var pos: Vector2 = Vector2(roundf(p.x - tw / 2.0), roundf(p.y - th + 2.0 - (8.0 if fl else 0.0) + bob))
 		if fl:
+			# weicher, ovaler Schatten am Boden (drei Lagen)
 			for k: int in range(3):
-				var sw: float = tw * (0.7 - k * 0.15)
-				draw_rect(Rect2(p.x - sw / 2.0, p.y - 1.0 + k * 0.3, sw, 2.0 - k * 0.5), Color(0.03, 0.12, 0.03, 0.18))
+				var sw: float = tw * (0.36 - k * 0.08)
+				var pts: PackedVector2Array = PackedVector2Array()
+				for a: int in range(20):
+					var an: float = a * TAU / 20.0
+					pts.append(Vector2(p.x + cos(an) * sw, p.y + sin(an) * sw * 0.18))
+				draw_colored_polygon(pts, Color(0.03, 0.12, 0.03, 0.12))
 		match p.type:
 			"dream":
 				var a: float = tnow * 0.8
@@ -1610,7 +1650,7 @@ class EntityLayer:
 			"court":
 				var pa: float = 0.25 + 0.15 * sin(tnow * 2.0)
 				draw_rect(Rect2(p.x - 1.0, pos.y - 26.0, 2.0, 26.0), Color(1.0, 0.95, 0.7, pa))
-		draw_texture(tex, pos)
+		draw_texture_rect(tex, Rect2(pos, Vector2(tw, th)), false)
 		if p.type == "dream":
 			var a2: float = -tnow * 1.3
 			draw_arc(Vector2(p.x, pos.y + th * 0.55), th * 0.3, a2, a2 + 2.0, 16, Color(1, 1, 1, 0.6), 0.8)
@@ -2627,4 +2667,100 @@ func _selftest() -> void:
 		sim.step(Sim.DT)
 	await _selftest_camera()
 	print("SELFTEST DONE ms ", Time.get_ticks_msec() - t0)
+	get_tree().quit()
+
+
+## Entwickler: -- --fresh --gfxshots=<ordner> – Nahaufnahmen (Dorf, Küste, Gebirge, Wald, Wüste, Regionswand)
+## bei z = 4, 10 und 24 ohne Oberfläche, danach ein Kameraschwenk mit Messung der Bildzeiten (GFXPERF).
+func _dev_gfx(dir: String) -> void:
+	while loading:
+		await get_tree().process_frame
+	while presim_on:
+		await get_tree().process_frame
+	for k: int in range(20):
+		await get_tree().process_frame
+	printerr("GFX start")
+	_set_ui_hidden(true)
+	show_names = false
+	var t: PackedByteArray = sim.world.tile
+	var f: PackedByteArray = sim.world.feat
+	var spots: Dictionary = {}
+	var best: Village = null
+	for v: Village in sim.villages:
+		if v.alive and (v.reg == 1 or v.reg == 4) and (best == null or v.pop > best.pop):
+			best = v
+	if best != null:
+		spots["dorf"] = Vector2(best.cx, best.cy + 3.0)
+	# Suche nach typischen Stellen über eine Bewertung in einem Fenster
+	var bestv: Dictionary = {}
+	for y: int in range(12, H - 12, 5):
+		for x: int in range(12, W - 12, 5):
+			var cnt: Dictionary = {"mount": 0, "snow": 0, "tree": 0, "sand": 0, "shal": 0, "grass": 0, "des": 0, "wall": 0, "deep": 0}
+			for dy: int in range(-8, 9, 4):
+				for dx: int in range(-8, 9, 4):
+					var i: int = (y + dy) * W + x + dx
+					match t[i]:
+						GuData.MOUNT: cnt["mount"] += 1
+						GuData.SAND: cnt["sand"] += 1
+						GuData.SHAL: cnt["shal"] += 1
+						GuData.GRASS: cnt["grass"] += 1
+						GuData.DES: cnt["des"] += 1
+						GuData.WALL: cnt["wall"] += 1
+						GuData.DEEP: cnt["deep"] += 1
+					if sim.world.hgt[i] > 0.9 and t[i] == GuData.MOUNT:
+						cnt["snow"] += 1
+					if GuData.is_tree(f[i]):
+						cnt["tree"] += 1
+			var sc: Dictionary = {
+				"gebirge": cnt["mount"] * 2 + cnt["snow"] * 3 + mini(cnt["grass"], 12),
+				"kueste": mini(cnt["sand"], 12) * 2 + mini(cnt["shal"], 20) + mini(cnt["grass"], 20) + mini(cnt["deep"], 10) - cnt["wall"] * 5,
+				"wald": cnt["tree"] * 3 + mini(cnt["grass"], 30) - cnt["wall"] * 5,
+				"wueste": cnt["des"] * 2 + mini(cnt["mount"] + cnt["sand"], 10) - cnt["wall"] * 5,
+				"wand": mini(cnt["wall"], 14) * 3 + mini(cnt["grass"], 20) + mini(cnt["shal"] + cnt["deep"], 10)}
+			for key: String in sc:
+				if not bestv.has(key) or int(sc[key]) > int(bestv[key]):
+					bestv[key] = sc[key]
+					spots[key] = Vector2(x, y)
+	printerr("GFX spots ", spots)
+	paused = true
+	for key: String in spots:
+		var c: Vector2 = spots[key]
+		for zz: float in [4.0, 10.0, 24.0]:
+			if zz == 24.0 and key != "dorf" and key != "kueste" and key != "gebirge":
+				continue
+			z = zz
+			zoom_goal = -1.0
+			cam = c
+			_clamp_cam()
+			await _wait(0.8)
+			await _shot(dir + "/%s_z%d.png" % [key, int(zz)])
+			printerr("GFX shot ", key, " ", zz)
+	# Kameraschwenk: Bildzeiten messen
+	paused = false
+	z = 6.0
+	var p0: Vector2 = Vector2(40, 60)
+	cam = p0
+	_clamp_cam()
+	await _wait(0.5)
+	var times: Array[float] = []
+	var dsum: float = 0.0
+	var dmax: float = 0.0
+	var b0: int = detail.built
+	var last: int = Time.get_ticks_usec()
+	for k: int in range(240):
+		cam = p0 + Vector2(k * 0.75, k * 0.6)
+		_clamp_cam()
+		await get_tree().process_frame
+		var now: int = Time.get_ticks_usec()
+		times.append((now - last) / 1000.0)
+		dsum += detail.last_ms
+		dmax = maxf(dmax, detail.last_ms)
+		last = now
+	print("GFXPERF detail cpu avg ms %.2f max %.2f chunks baked %d" % [dsum / 240.0, dmax, detail.built - b0])
+	times.sort()
+	var sum: float = 0.0
+	for v2: float in times:
+		sum += v2
+	print("GFXPERF pan z6 frames ", times.size(), " avg ms %.2f median %.2f p95 %.2f max %.2f" % [sum / times.size(), times[times.size() / 2], times[int(times.size() * 0.95)], times[times.size() - 1]])
+	print("GFXSHOTS DONE")
 	get_tree().quit()
