@@ -24,6 +24,7 @@ var terr_spr: Sprite2D
 var terr_ov: TerrOverlay  ## Herrschaftsgebiete der Ehrwürdigen, Kriegsgrenzen (über terr_spr)
 var legend: PowerLegend  ## Legende der Mächte oben links
 var infl_t: float = 0.0
+var boot: Boot = null  ## Startknoten (scripts/boot.gd): SubViewport, dreht im Hochformat am Handy
 var audio: Audio  ## prozeduraler Klang und Musik (scripts/audio.gd)
 var detail: Detail  ## Nahansicht: Gelände-Shader und hochaufgelöste Objekte (scripts/detail.gd)
 var ents: EntityLayer
@@ -276,16 +277,21 @@ func _build_scene() -> void:
 	hud.set_brush(powers.brush_idx)
 
 
+## Logische Basisgröße der Oberfläche (Querformat am Handy nach der Höhe, damit Knöpfe fingergroß bleiben).
+func ui_base(land: bool) -> Vector2:
+	var base: Vector2 = (Vector2(400, 560) if is_touch() else Vector2(400, 760)) if land else Vector2(400, 880)
+	return base / UI_SCALES[clampi(ui_scale, 0, 2)]
+
+
 func _on_resize() -> void:
-	# Desktop-Fenster im Querformat: etwas größere Oberfläche (Basis 760 statt 880 Pixel hoch)
-	var win: Window = get_window()
-	if win != null and win.content_scale_mode == Window.CONTENT_SCALE_MODE_CANVAS_ITEMS:
-		var land: bool = win.size.x > win.size.y * 1.1
-		# Handy quer: Oberfläche nach der Höhe skalieren, damit Knöpfe fingergroß bleiben
-		var base: Vector2 = (Vector2(400, 560) if is_touch() else Vector2(400, 760)) if land else Vector2(400, 880)
-		var want: Vector2i = Vector2i((base / UI_SCALES[clampi(ui_scale, 0, 2)]).round())
-		if win.content_scale_size != want:
-			win.content_scale_size = want
+	if boot != null:
+		boot.relayout()
+	else:
+		var win: Window = get_window()
+		if win != null and win.content_scale_mode == Window.CONTENT_SCALE_MODE_CANVAS_ITEMS:
+			var want: Vector2i = Vector2i(ui_base(win.size.x > win.size.y * 1.1).round())
+			if win.content_scale_size != want:
+				win.content_scale_size = want
 	var vs: Vector2 = get_viewport_rect().size
 	hud.position = Vector2.ZERO
 	hud.size = vs
@@ -296,7 +302,7 @@ func _on_resize() -> void:
 	min_z = minf(vs.x / W, vh / H) * 0.92
 	_clamp_cam()
 	hud.layout_floaters()
-	hud.show_rotate(is_touch() and vs.y > vs.x * 1.1)
+	hud.show_rotate(is_touch() and vs.y > vs.x * 1.1 and (boot == null or not boot.force_land))
 
 
 func view_h() -> float:
@@ -1630,6 +1636,10 @@ func _on_meta(m: String) -> void:
 			"music":
 				music_on = not music_on
 				_apply_audio()
+			"fland":
+				if boot != null:
+					boot.force_land = not boot.force_land
+				_on_resize()
 			"fs":
 				if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN:
 					DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
@@ -1711,6 +1721,8 @@ func _open_settings() -> void:
 	var mt: String = "[color=#9db09e]"
 	var s: String = _h("Settings")
 	s += _h3("Interface")
+	if is_touch():
+		s += "[url=set:fland]%s  [b]Always landscape[/b][/url]\n    %sHolding the phone upright turns the picture – the game always plays in landscape.[/color]\n" % [_switch(boot != null and boot.force_land), mt]
 	s += "[url=set:fs]%s  [b]Fullscreen[/b][/url]\n    %sOn phones this locks landscape (Android).[/color]\n\n" % [_switch(DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN), mt]
 	s += "[b]Interface size[/b]\n" + _choice("set:ui", ["Small", "Normal", "Large"], [0, 1, 2], ui_scale) + "\n" + mt + "Large is easier to tap on small phones.[/color]\n\n"
 	s += "[b]Label density[/b]\n" + _choice("set:lab", ["Few", "Normal", "Many"], [0, 1, 2], label_density) + "\n" + mt + "How early landmarks, village banners and name tags appear while zooming in.[/color]\n"
@@ -1747,6 +1759,8 @@ func _save_settings() -> void:
 	cf.load(SETTINGS_PATH)  # andere Schlüssel (z. B. vom Ton) bleiben erhalten
 	cf.set_value("ui", "scale", ui_scale)
 	cf.set_value("ui", "labels", label_density)
+	if boot != null:
+		cf.set_value("ui", "force_landscape", boot.force_land)
 	cf.set_value("display", "territories", show_terr)
 	cf.set_value("display", "names", show_names)
 	cf.save(SETTINGS_PATH)
