@@ -32,13 +32,13 @@ var log_entries: Array[Dictionary] = []
 var laws: Dictionary = {"war": true, "tide": true, "will": true, "trib": true, "immortal": true, "walls": true, "growth": true, "fire": true,
 	"hunger": true, "age": true, "rebel": true, "diplo": true, "expand": true, "animals": true, "grass": true, "trees": true, "disaster": true, "ages": true, "cult": true}
 ## Weitere Weltgesetze (WorldBox-Parität) für das Gesetze-Fenster: [Schlüssel, Name, Beschreibung].
-const LAWS_EXTRA: Array = [["hunger", "Hunger", "Dörfer ohne Nahrung verlieren Bewohner."], ["age", "Alter", "Sterbliche und Tiere sterben an Altersschwäche."],
-	["rebel", "Aufstände", "Dörfer mit geringer Loyalität sagen sich von ihrem Clan los."], ["diplo", "Diplomatie", "Clans planen und schließen Bündnisse."],
-	["expand", "Ausbreitung", "Volle Dörfer schicken Siedler aus – auch per Boot zu Inseln."], ["animals", "Tier-Spawn", "Wildtiere, wilde Gu, Bestien und Bestienkönige entstehen von selbst."],
-	["grass", "Grasausbreitung", "Erde und Asche ergrünen wieder."], ["trees", "Baumwachstum", "Wälder breiten sich aus."],
-	["disaster", "Katastrophen", "Von Zeit zu Zeit Erdbeben, Erdfeuer-Vulkane, Wirbel, Giftregen, Sternenfall, Seuchen und Dünenwanderung."],
-	["ages", "Zeitalter", "Die Welt wechselt alle %d Jahre das Zeitalter. Aus: das jetzige Zeitalter bleibt." % GuData.AGE_YEARS],
-	["cult", "Kultivierung", "Gu-Meister kultivieren und steigen von selbst auf. Aus: nur Gottkräfte lassen sie wachsen."]]
+const LAWS_EXTRA: Array = [["hunger", "Hunger", "Villages without food lose inhabitants."], ["age", "Old Age", "Mortals and animals die of old age."],
+	["rebel", "Rebellions", "Villages with low loyalty break away from their clan."], ["diplo", "Diplomacy", "Clans plan and forge alliances."],
+	["expand", "Expansion", "Full villages send out settlers – even by boat to islands."], ["animals", "Animal Spawn", "Wild animals, wild Gu, beasts and beast kings appear on their own."],
+	["grass", "Grass Spread", "Soil and ash turn green again."], ["trees", "Tree Growth", "Forests spread."],
+	["disaster", "Disasters", "From time to time: earthquakes, earth-fire volcanoes, whirlwinds, poison rain, starfall, plagues and shifting dunes."],
+	["ages", "Ages", "The world changes its age every %d years. Off: the current age remains." % GuData.AGE_YEARS],
+	["cult", "Cultivation", "Gu Masters cultivate and advance on their own. Off: only god powers make them grow."]]
 var weather: Dictionary = {}           # {type, t}
 var shake: float = 0.0
 var terr_dirty: bool = true
@@ -409,7 +409,7 @@ func give_igu(u: Unit, id: String) -> void:
 				if u.rank == 0:
 					awaken(u, true)
 				ascend(u, 6)
-				log_event(u.pname() + " verschmilzt mit dem Souveräner-Unsterblichen-Fötus-Gu und wird zum Gu-Unsterblichen.", "gold", true)
+				log_event(u.pname() + " fuses with the Sovereign Immortal Fetus Gu and becomes a Gu Immortal.", "gold", true)
 				pillar(u.x, u.y, GuData.ESS_COL[6])
 			else:
 				u.prog = minf(0.99, u.prog + 0.5)
@@ -426,7 +426,7 @@ func give_igu(u: Unit, id: String) -> void:
 				ascend(u, r)
 			u.luck = 1.0
 			u.life = maxf(u.life, uage(u) + GuData.LIFEB[u.rank])
-			log_event(u.pname() + " empfängt das Bestimmungs-Gu – sein Schicksal wird neu geschrieben: " + rank_title(u.rank) + ".", "gold", true)
+			log_event(u.pname() + " receives the Destiny Gu – their fate is rewritten: " + rank_title(u.rank) + ".", "gold", true)
 			pillar(u.x, u.y, GuData.PATH_COL[28], 1.2)
 			return
 	if u.igu.has(id):
@@ -649,11 +649,11 @@ func new_clan(r: int, sur: String, race: int = 0) -> Clan:
 			found2 = GuData.RACE_SUR[race].pick_random()
 		c.name = str(found2[0]) + "-" + GuData.RACE_CLAN[race]
 		c.glyph = found2[1]
-		c.kind = "Stamm" if GuData.RACE_CLAN[race].ends_with("stamm") else "Clan"
+		c.kind = "Stamm" if (GuData.RACE_CLAN[race].to_lower().ends_with("stamm") or GuData.RACE_CLAN[race].to_lower().ends_with("tribe")) else "Clan"
 		c.sur = found2[0]
 	elif r == 4:
 		var s: Array = GuData.SURN[4].pick_random()
-		c.name = s[0] + "-Sekte"
+		c.name = s[0] + " Sect"
 		c.glyph = s[1]
 		c.kind = "Sekte"
 	else:
@@ -674,7 +674,7 @@ func new_clan(r: int, sur: String, race: int = 0) -> Clan:
 		c.glyph = found[1]
 	for o: Clan in clans:
 		if o.alive and o.name == c.name:
-			c.name += " (Zweig)"
+			c.name += " (Branch)"
 			break
 	var used: Array[String] = []
 	for o: Clan in clans:
@@ -816,7 +816,7 @@ func remove_building(b: Building, quiet: bool = false) -> void:
 	var v: Village = villages[b.v]
 	recount(v)
 	if b.type == "hall" and v.alive:
-		abandon_village(v, "Die Ahnenhalle von " + v.name + " wurde zerstört.")
+		abandon_village(v, "The ancestral hall of " + v.name + " has been destroyed.")
 	terr_dirty = true
 
 
@@ -924,9 +924,9 @@ func found_village(u: Unit, clan_id: int) -> bool:
 	if c.cap < 0 or c.cap >= villages.size() or not villages[c.cap].alive or villages[c.cap].clan != c.id:
 		c.cap = v.id
 	if is_new:
-		log_event(("Die " if c.kind == "Sekte" else "") + c.name + " wird in " + v.name + " gegründet (" + GuData.REGN[v.reg] + ").", "jade", true)
+		log_event(("The " if c.kind == "Sekte" else "") + c.name + " is founded in " + v.name + " (" + GuData.REGN[v.reg] + ").", "jade", true)
 	elif randf() < 0.5:
-		log_event(c.name + " besiedelt " + v.name + ".", "jade")
+		log_event(c.name + " settles " + v.name + ".", "jade")
 	terr_dirty = true
 	return true
 
@@ -974,7 +974,7 @@ func pick_sur(v: Village) -> String:
 	if v.race >= 4:
 		return GuData.RACE_SUR[v.race].pick_random()[0]
 	if c.kind != "Sekte" and c.org == "":
-		return c.name.replace("Clan ", "").replace("Stamm ", "").replace(" (Zweig)", "")
+		return c.name.replace("Clan ", "").replace("Stamm ", "").replace(" (Branch)", "")
 	return rand_sur(v.reg)
 
 
@@ -1006,7 +1006,7 @@ func awaken(u: Unit, force: bool = false) -> void:
 	u.job = ""
 	set_stats(u, true)
 	if u.phys_x:
-		log_event(u.pname() + " wird mit einer der Zehn Extremkonstitutionen erweckt – ohne Unsterblichen-Hilfe stirbt sie mit 20.", "violet", true)
+		log_event(u.pname() + " awakens with one of the Ten Extreme Physiques – without an immortal's help, they will die at 20.", "violet", true)
 
 
 func gain_gu(u: Unit) -> String:
@@ -1076,13 +1076,13 @@ func rank_up(u: Unit) -> void:
 		u.luck = 0.0
 		if randf() < ch:
 			ascend(u, 6)
-			log_event(nm + " durchbricht zum Gu-Unsterblichen (Rang 6) – das Unsterblichen-Tor öffnet sich.", "gold", true)
+			log_event(nm + " breaks through to Gu Immortal (rank 6) – the immortal gate opens.", "gold", true)
 			pillar(u.x, u.y, GuData.ESS_COL[6])
 			bolt(u.x, u.y, 0.0, false)
 		else:
-			log_event(nm + " scheitert beim Aufstieg zum Gu-Unsterblichen und stirbt.", "red", true)
+			log_event(nm + " fails the ascension to Gu Immortal and dies.", "red", true)
 			bolt(u.x, u.y, 0.0, false)
-			u.dreason = "Aufstieg gescheitert"
+			u.dreason = "failed ascension"
 			u.hp = 0.0
 		return
 	if r == 8:
@@ -1092,8 +1092,8 @@ func rank_up(u: Unit) -> void:
 				return
 		if randf() < (0.18 + (0.4 if u.luck > 0.0 else 0.0)) * ven.ascend_mul():
 			ascend(u, 9)
-			u.title = ("Dämonen-Ehrwürdiger" if u.align == 1 else "Unsterblicher Ehrwürdiger") + " des " + GuData.PATH_NAME[u.path] + "-Pfades"
-			log_event(nm + " wird zum Rang-9-" + u.title + "! Die Welt erzittert.", "gold", true)
+			u.title = ("Demon Venerable" if u.align == 1 else "Immortal Venerable") + " of the " + GuData.PATH_NAME[u.path] + " Path"
+			log_event(nm + " becomes the rank 9 " + u.title + "! The world trembles.", "gold", true)
 			pillar(u.x, u.y, GuData.ESS_COL[9])
 			shake = 1.0
 			ven.register(u, {})
@@ -1103,9 +1103,9 @@ func rank_up(u: Unit) -> void:
 		return
 	ascend(u, r + 1)
 	if r + 1 >= 4 and r + 1 <= 5:
-		log_event(nm + " erreicht " + rank_title(r + 1) + ".", "info")
+		log_event(nm + " reaches " + rank_title(r + 1) + ".", "info")
 	if r + 1 >= 7:
-		log_event(nm + " erreicht " + rank_title(r + 1) + ".", "violet", true)
+		log_event(nm + " reaches " + rank_title(r + 1) + ".", "violet", true)
 
 
 func ascend(u: Unit, nr: int) -> void:
@@ -1117,7 +1117,7 @@ func ascend(u: Unit, nr: int) -> void:
 		u.next_trib = uage(u) + 10.0 + randf() * 12.0
 	gain_gu(u)
 	set_stats(u, true)
-	float_txt(u, "Rang %d" % nr, GuData.ESS_COL[nr])
+	float_txt(u, "Rank %d" % nr, GuData.ESS_COL[nr])
 	if nr < 6:
 		pillar(u.x, u.y, GuData.ESS_COL[nr], 0.6)
 
@@ -1128,7 +1128,7 @@ func tribulation(u: Unit) -> void:
 	if u.notrib:
 		return
 	if u.prot > sim_time:
-		float_txt(u, "Himmelsschutz", Color("#bfe8ff"))
+		float_txt(u, "Heavenly Protection", Color("#bfe8ff"))
 		ring(u.x, u.y - 2.0, 4.0, Color("#bfe8ff"), 0.8)
 		u.prog = minf(0.99, u.prog + 0.1)
 		return
@@ -1144,15 +1144,15 @@ func tribulation(u: Unit) -> void:
 		var dies: bool = randf() < ch
 		if dies and use_fortune(u):
 			dies = false
-			log_event(nm + " übersteht die Drangsal dank des Himmelstrotzenden-Glück-Gu.", "gold", true)
+			log_event(nm + " survives the tribulation thanks to the Heaven-Defying Luck Gu.", "gold", true)
 		if dies:
-			u.dreason = "Himmelsdrangsal"
+			u.dreason = "heavenly tribulation"
 			u.hp = 0.0
-			log_event(nm + " stirbt in einer Himmelsdrangsal.", "red", true)
+			log_event(nm + " dies in a heavenly tribulation.", "red", true)
 		else:
 			u.prog = minf(0.99, u.prog + 0.3)
 			if u.rank >= 7:
-				log_event(nm + " übersteht eine Erdkatastrophe und Himmelsdrangsal.", "violet"))
+				log_event(nm + " survives an earthly calamity and heavenly tribulation.", "violet"))
 
 
 func go_rogue(u: Unit) -> void:
@@ -1160,7 +1160,7 @@ func go_rogue(u: Unit) -> void:
 	u.vil = -1
 	u.clan = -1
 	u.job = ""
-	log_event(u.pname() + " (" + rank_title(u.rank) + ") wendet sich dem dämonischen Pfad zu und verlässt den Clan.", "war", u.rank >= 4)
+	log_event(u.pname() + " (" + rank_title(u.rank) + ") turns to the demonic path and leaves the clan.", "war", u.rank >= 4)
 
 
 # ---------------- Krieg ----------------
@@ -1177,7 +1177,7 @@ func declare_war(a: Clan, b: Clan, quiet: bool = false) -> void:
 	for u: Unit in units:
 		if u.k == "p" and (u.clan == a.id or u.clan == b.id) and u.rank == 0 and uage(u) >= 16.0 and uage(u) < 55.0:
 			u.militia = randf() < 0.45
-	log_event(a.name + " erklärt " + b.name + " die Fehde!", "war", not quiet)
+	log_event(a.name + " declares a feud on " + b.name + "!", "war", not quiet)
 
 
 func make_peace(a: Clan, b: Clan, quiet: bool = false) -> void:
@@ -1188,7 +1188,7 @@ func make_peace(a: Clan, b: Clan, quiet: bool = false) -> void:
 	a.calm = sim_time + 72.0
 	b.calm = sim_time + 72.0
 	if not quiet:
-		log_event(a.name + " und " + b.name + " schließen Frieden.", "jade", true)
+		log_event(a.name + " and " + b.name + " make peace.", "jade", true)
 	for u: Unit in units:
 		if u.k == "p" and (u.clan == a.id or u.clan == b.id) and clans[u.clan].war.is_empty():
 			u.militia = false
@@ -1200,7 +1200,7 @@ func make_ally(a: Clan, b: Clan) -> void:
 	make_peace(a, b, true)
 	a.ally[b.id] = true
 	b.ally[a.id] = true
-	log_event(a.name + " und " + b.name + " schmieden ein Bündnis.", "jade", true)
+	log_event(a.name + " and " + b.name + " forge an alliance.", "jade", true)
 	for e: int in a.war.keys():
 		declare_war(b, clans[e], true)
 	for e: int in b.war.keys():
@@ -1231,7 +1231,7 @@ func capture(v: Village, nc: Clan) -> void:
 		if u.k == "p" and u.vil == v.id:
 			u.clan = nc.id
 			u.militia = false
-	log_event(nc.name + " erobert " + v.name + " von " + oc.name + ".", "war", true)
+	log_event(nc.name + " conquers " + v.name + " from " + oc.name + ".", "war", true)
 	terr_dirty = true
 
 
@@ -1313,7 +1313,7 @@ func hurt(t: Unit, dmg: float, src: Unit) -> void:
 	if t.hp > 0.0 and (t.igf & F_HEAL) != 0 and t.hp < t.mhp * 0.3 and sim_time >= t.heal_cd:
 		t.hp = t.mhp
 		t.heal_cd = sim_time + 12.0
-		float_txt(t, "Vollständig geheilt", GuData.PATH_COL[10])
+		float_txt(t, "Fully healed", GuData.PATH_COL[10])
 		spark(t.x, t.y - 2.0, GuData.PATH_COL[10], 10, 5.0)
 	if src != null and src != t:
 		t.aggro = src
@@ -1348,14 +1348,14 @@ func on_kill(s: Unit, t: Unit) -> void:
 	elif s.beh == GuData.B_PRED or s.beh == GuData.B_KING:
 		s.hungry = 0.0
 	if t.k == "p" and t.dreason == "":
-		t.dreason = "getötet von " + s.pname() if s.k == "p" else "gerissen von " + s.pname()
+		t.dreason = "killed by " + s.pname() if s.k == "p" else "mauled by " + s.pname()
 
 
 ## Beute: Unsterbliche, Dämonische und Diebe nehmen dem Besiegten Unsterbliche Gu, Gu und Lebenszeit ab.
 func loot(s: Unit, t: Unit) -> void:
 	if (s.igf & F_STEAL) != 0:
 		s.life += 10.0
-		float_txt(s, "+10 Jahre", GuData.PATH_COL[41])
+		float_txt(s, "+10 years", GuData.PATH_COL[41])
 	if (s.igf & F_THIEF) != 0 and t.gus.size() > 0:
 		var g: String = t.gus[randi() % t.gus.size()]
 		if not s.gus.has(g):
@@ -1376,7 +1376,7 @@ func loot(s: Unit, t: Unit) -> void:
 	var id2: String = cands[randi() % cands.size()]
 	t.igu.remove_at(t.igu.find(id2))
 	give_igu(s, id2)
-	log_event(s.pname() + " erbeutet " + Lore.igu_name(id2) + " von " + t.pname() + ".", "violet", true)
+	log_event(s.pname() + " seizes " + Lore.igu_name(id2) + " from " + t.pname() + ".", "violet", true)
 
 
 ## Verbraucht ein Himmelstrotzendes-Glück-Gu (true, wenn vorhanden).
@@ -1483,7 +1483,7 @@ func monthly() -> void:
 		var c: Clan = clans[v.clan]
 		if v.pop == 0:
 			if randf() < 0.08:
-				abandon_village(v, v.name + " liegt verlassen.")
+				abandon_village(v, v.name + " lies abandoned.")
 			continue
 		v.food += v.farms * 0.55 * float(ad["grow"]) + 0.25 - v.pop * 0.07
 		if v.food < 0.0:
@@ -1491,7 +1491,7 @@ func monthly() -> void:
 			if laws["hunger"] and randf() < 0.05:
 				for u: Unit in units:
 					if u.k == "p" and u.vil == v.id and u.rank == 0 and u.hp > 0.0:
-						u.dreason = "Hunger"
+						u.dreason = "starvation"
 						u.hp = 0.0
 						break
 		v.food = minf(v.food, 60.0 + v.pop * 3.0)
@@ -1541,7 +1541,7 @@ func monthly() -> void:
 					any = true
 					break
 			if not any:
-				kill_clan(c, "ist untergegangen.")
+				kill_clan(c, "has perished.")
 			continue
 		c.wt = -1
 		# Hauptstadt: bleibt, solange sie dem Clan gehört; sonst das größte Dorf
@@ -1551,7 +1551,7 @@ func monthly() -> void:
 				if v.pop > big.pop:
 					big = v
 			if c.cap >= 0 and vs.size() > 1:
-				log_event(c.name + " erhebt " + big.name + " zur neuen Hauptstadt.", "info")
+				log_event(c.name + " makes " + big.name + " its new capital.", "info")
 			c.cap = big.id
 		var capv: Village = villages[c.cap]
 		c.exh = minf(100.0, c.exh + 1.2 + 0.4 * c.war.size()) if not c.war.is_empty() else maxf(0.0, c.exh - 2.5)
@@ -1593,7 +1593,7 @@ func monthly() -> void:
 				continue
 			if (sim_time - c.war_start > 36.0 and randf() < 0.012) or (not laws["war"] and randf() < 0.2) or randf() < 0.0005 * (c.exh + o2.exh):
 				if c.exh > 60.0 and randf() < 0.5:
-					log_event(c.name + " ist kriegsmüde und bittet " + o2.name + " um Frieden.", "jade")
+					log_event(c.name + " is weary of war and asks " + o2.name + " for peace.", "jade")
 				make_peace(c, o2)
 		if laws["diplo"] and randf() < 0.0015:
 			var cands2: Array[Clan] = []
@@ -1664,7 +1664,7 @@ func colonize(v: Village) -> void:
 			u.fxm = true
 			n += 1
 	if sea and n > 0 and randf() < 0.5:
-		log_event("Siedler von " + v.name + " stechen in See.", "jade")
+		log_event("Settlers from " + v.name + " set sail.", "jade")
 
 
 func person_month(u: Unit) -> void:
@@ -1675,13 +1675,13 @@ func person_month(u: Unit) -> void:
 			u.hp = 0.0
 		return
 	if a > u.life and (laws["age"] or u.rank == 0 and a > u.life * 3.0):
-		u.dreason = "Alter"
+		u.dreason = "old age"
 		u.hp = 0.0
 		return
 	if u.phys_x and u.rank < 6 and a > 20.0:
 		u.dreason = "Extremkonstitution"
 		u.hp = 0.0
-		log_event(u.pname() + " stirbt an der Extremkonstitution.", "red")
+		log_event(u.pname() + " dies of the extreme physique.", "red")
 		return
 	if not u.awk and a >= 14.0:
 		u.awk = true
@@ -1795,7 +1795,7 @@ func yearly() -> void:
 		age_off += 1
 	var y: int = age_year()
 	if laws["ages"] and (y - 1) % GuData.AGE_YEARS == 0 and y > 1:
-		log_event("Das " + str(age_data()["n"]) + " beginnt.", "violet", true)
+		log_event("The " + str(age_data()["n"]) + " begins.", "violet", true)
 	if laws["tide"] and randf() < 0.06:
 		var vs: Array[Village] = []
 		for v: Village in villages:
@@ -1829,7 +1829,7 @@ func wild_beast_king() -> void:
 	if p.x < 0.0 or nearest_village(p.x, p.y, 30.0) != null:
 		return
 	spawn_beast(p.x, p.y, s)
-	log_event("Bestie gesichtet: %s in %s." % [str(S["n"]), GuData.REGN_DAT[rg]], "war", int(S.get("tier", 0)) >= 5)
+	log_event("Beast sighted: %s in %s." % [str(S["n"]), GuData.REGN_DAT[rg]], "war", int(S.get("tier", 0)) >= 5)
 
 
 func strongest(n: int) -> Array[Unit]:
@@ -1870,23 +1870,23 @@ func beast_tide(v: Village, at: Vector2) -> void:
 	var kw: Unit = mk_animal(p.x, p.y, "kingwolf")
 	kw.tide = true
 	kw.tide_v = v.id
-	log_event("Wolfsflut! Ein Donnerkronen-Wolf führt %d %s gegen %s (%s)." % [n, "Blitzwölfe" if ws == "lightning_wolf" else "Wölfe", v.name, clans[v.clan].name], "war", true)
+	log_event("Wolf tide! A Thunder Crown Wolf leads %d %s against %s (%s)." % [n, "lightning wolves" if ws == "lightning_wolf" else "wolves", v.name, clans[v.clan].name], "war", true)
 
 
 func heavens_will(u: Unit) -> void:
 	var nm: String = u.pname()
 	if (u.igf & F_FATE) != 0:
 		ring(u.x, u.y - 2.0, 6.0, GuData.PATH_COL[28], 1.0)
-		float_txt(u, "Schicksals-Gu", GuData.PATH_COL[28])
-		log_event("Der Himmelswille verschont " + nm + " – den Hüter des Schicksals-Gu.", "violet", true)
+		float_txt(u, "Fate Gu", GuData.PATH_COL[28])
+		log_event("Heaven's Will spares " + nm + " – the guardian of the Fate Gu.", "violet", true)
 		return
 	if u.prot > sim_time:
 		bolt(u.x + 3.0, u.y - 2.0, 0.0, false)
 		ring(u.x, u.y - 2.0, 6.0, Color("#bfe8ff"), 1.0)
-		float_txt(u, "Himmelsschutz", Color("#bfe8ff"))
-		log_event("Der Himmelswille prallt am Himmelsschutz von " + nm + " ab.", "violet", true)
+		float_txt(u, "Heavenly Protection", Color("#bfe8ff"))
+		log_event("Heaven's Will rebounds off the heavenly protection of " + nm + ".", "violet", true)
 		return
-	log_event("Der Himmelswille richtet sich gegen " + nm + ".", "violet", true)
+	log_event("Heaven's Will turns against " + nm + ".", "violet", true)
 	for k: int in range(9):
 		later(k * 0.18, func() -> void:
 			if u.hp > 0.0:
@@ -1900,14 +1900,14 @@ func heavens_will(u: Unit) -> void:
 		var dies: bool = randf() < ch
 		if dies and use_fortune(u):
 			dies = false
-			log_event(nm + " trotzt dem Himmelswillen dank des Himmelstrotzenden-Glück-Gu.", "gold", true)
+			log_event(nm + " defies Heaven's Will thanks to the Heaven-Defying Luck Gu.", "gold", true)
 		if dies:
-			u.dreason = "Himmelswille"
+			u.dreason = "Heaven's Will"
 			u.hp = 0.0
-			log_event(nm + " wird vom Himmelswillen ausgelöscht.", "red", true)
+			log_event(nm + " is erased by Heaven's Will.", "red", true)
 		else:
 			u.hp = maxf(1.0, u.hp * 0.25)
-			log_event(nm + " trotzt dem Himmelswillen.", "gold", true))
+			log_event(nm + " defies Heaven's Will.", "gold", true))
 
 
 func update_leaders() -> void:
@@ -1940,7 +1940,7 @@ func update_leaders() -> void:
 		var prev: Unit = old.get(c3.id, null)
 		var nl: Unit = c3.lead
 		if c3.alive and nl != null and prev != null and prev != nl and prev.hp <= 0.0 and nl.rank >= 3:
-			log_event(nl.pname() + " (" + rank_title(nl.rank) + ") wird neues Clan-Oberhaupt von " + c3.name + ".", "jade", nl.rank >= 6)
+			log_event(nl.pname() + " (" + rank_title(nl.rank) + ") becomes the new clan leader of " + c3.name + ".", "jade", nl.rank >= 6)
 
 
 # ---------------- Denken ----------------
@@ -2325,7 +2325,7 @@ func catch_igu_think(u: Unit) -> bool:
 		pillar(g.x, g.y, GuData.PATH_COL[g.path], 0.8)
 		spark(g.x, g.y, Color("#ffe8a0"), 16, 6.0)
 		float_txt(u, "+" + nm, Color("#ffe27a"))
-		log_event(u.pname() + " fängt das Unsterbliche Gu " + nm + ".", "violet", true)
+		log_event(u.pname() + " captures the Immortal Gu " + nm + ".", "violet", true)
 		give_igu(u, g.gname)
 	else:
 		go_to(u, g.x, g.y)
@@ -2580,14 +2580,14 @@ func on_death(u: Unit) -> void:
 	ven.on_death(u)
 	if u.k == "a" and u.rank >= 6 and not presim and randf() < 0.35:
 		var g: Unit = spawn_wild_igu(u.x, u.y)
-		log_event("Aus dem Leib von " + u.pname() + " entweicht das Unsterbliche Gu " + g.pname() + ".", "violet", true)
+		log_event("From the body of " + u.pname() + " escapes the Immortal Gu " + g.pname() + ".", "violet", true)
 	if u.k == "p":
 		if not u.caught:
 			puff(u.x, u.y - 1.0, Color("#7a2020"), 3)
-		if u.rank >= 4 and not (u.dreason in ["Himmelswille", "Aufstieg gescheitert", "Himmelsdrangsal"]):
-			log_event("%s (%s) ist gestorben – %s." % [u.pname(), rank_title(u.rank), u.dreason if u.dreason != "" else "im Kampf"], "red" if u.rank >= 6 else "info", u.rank >= 6)
+		if u.rank >= 4 and not (u.dreason in ["Heaven's Will", "Himmelswille", "failed ascension", "heavenly tribulation"]):
+			log_event("%s (%s) has died – %s." % [u.pname(), rank_title(u.rank), u.dreason if u.dreason != "" else "in battle"], "red" if u.rank >= 6 else "info", u.rank >= 6)
 		if u.rank == 9:
-			log_event("Der " + u.title + " ist gefallen. Eine Ära endet.", "red", true)
+			log_event("The " + u.title + " has fallen. An era ends.", "red", true)
 
 
 func plant_for(i: int) -> int:
@@ -2759,8 +2759,8 @@ func _landmark(nm: String) -> Vector2:
 
 ## Kanonische Mächte der Gu-Weltkarte an ihren Orten.
 func seed_canon() -> void:
-	var spots: Array = [["heavenly_court", "Himmlischer Hof"], ["immortal_crane_sect", "Unsterblicher-Kranich-Sekte"], ["spirit_affinity_house", "Geistaffinitätshaus"],
-		["gu_yue_clan", "Gu-Yue-Dorf"], ["shang_clan", "Shang-Clan-Stadt"], ["bai_clan", "Bai-Gu-Berg"], ["western_desert_families", "Große Oase"],
+	var spots: Array = [["heavenly_court", "Heavenly Court"], ["immortal_crane_sect", "Immortal Crane Sect"], ["spirit_affinity_house", "Spirit Affinity House"],
+		["gu_yue_clan", "Gu Yue Village"], ["shang_clan", "Shang Clan City"], ["bai_clan", "Bai Gu Mountain"], ["western_desert_families", "Great Oasis"],
 		["huang_jin_tribes", ""], ["hei_tribe", ""], ["eastern_sea_clans", ""]]
 	for e: Array in spots:
 		var o: Dictionary = Lore.org(e[0])
@@ -2780,7 +2780,7 @@ func seed_canon() -> void:
 		for b: Clan in central:
 			if a != b:
 				a.ally[b.id] = true
-	for e2: Array in [["langya", "Lang-Ya-Gesegnetes-Land"], ["imperial", "Kaiserhof-Gesegnetes-Land"]]:
+	for e2: Array in [["langya", "Lang Ya Blessed Land"], ["imperial", "Imperial Court Blessed Land"]]:
 		var lp: Vector2 = _landmark(e2[1])
 		if lp.x >= 0.0 and place_ok(e2[0], lp.x, lp.y) == "":
 			add_place(e2[0], lp.x, lp.y, true)
@@ -2834,7 +2834,7 @@ func presim_chunk(budget_ms: int, target_years: float) -> float:
 		step(0.1)
 	if sim_time >= total:
 		presim = false
-		log_event("Die Welt erwacht. Jahr %d." % year(), "jade")
+		log_event("The world awakens. Year %d." % year(), "jade")
 		return 1.0
 	return sim_time / total
 
@@ -2952,7 +2952,7 @@ func deserialize(d: Dictionary) -> bool:
 func try_revive(u: Unit) -> bool:
 	if cheats.keep_alive(u):
 		return true
-	if u.k != "p" or u.dreason == "göttliche Auslöschung" or (u.igf & (F_REVIVE | F_REZ)) == 0:
+	if u.k != "p" or u.dreason in ["göttliche Auslöschung", "divine annihilation"] or (u.igf & (F_REVIVE | F_REZ)) == 0:
 		return false
 	var rez: bool = (u.igf & F_REVIVE) == 0
 	var want: String = "rez" if rez else "revive"
@@ -2970,7 +2970,7 @@ func try_revive(u: Unit) -> bool:
 	if rez:
 		set_stats(u, true)
 		u.hp = u.mhp * 0.5
-		log_event(nm + " steht durch die Auferstehung von den Toten wieder auf.", "violet", true)
+		log_event(nm + " rises from the dead through resurrection.", "violet", true)
 		pillar(u.x, u.y, GuData.PATH_COL[32], 0.9)
 		return true
 	u.birth = sim_time - 15.0 * 12.0
@@ -2990,7 +2990,7 @@ func try_revive(u: Unit) -> bool:
 		u.col_clan = u.clan
 		u.vil = -1
 	set_stats(u, true)
-	log_event(nm + " stirbt – doch die Frühling-Herbst-Zikade dreht die Zeit zurück: " + nm + " erwacht als 15-Jähriger, mit allen Erinnerungen.", "violet", true)
+	log_event(nm + " dies – but the Spring Autumn Cicada turns back time: " + nm + " awakens as a 15-year-old, with all memories intact.", "violet", true)
 	pillar(u.x, u.y, GuData.PATH_COL[10], 1.2)
 	ring(u.x, u.y, 8.0, GuData.PATH_COL[10], 1.0)
 	return true
@@ -3046,7 +3046,7 @@ func killer_move(u: Unit, x: float, y: float) -> void:
 	ring(x, y, r * 0.5, Color.WHITE, 0.5)
 	if u.rank >= 8:
 		shake = minf(1.2, shake + 0.35)
-		log_event(u.pname() + " entfesselt den " + nm + ".", "violet")
+		log_event(u.pname() + " unleashes " + nm + ".", "violet")
 
 
 ## „Fingerschnipsen“: ein Unsterblicher gegen Sterbliche – jeder Schlag ist ein kleiner Mordzug, der alle
@@ -3102,7 +3102,7 @@ func capitulate(c: Clan, o: Clan) -> void:
 			bd = d
 			best = v
 	var tr: int = top_rank(o)
-	log_event("%s beugt sich der Übermacht von %s (%s)%s." % [c.name, o.name, rank_title(tr), (" und tritt " + best.name + " ab") if best != null and n > 1 else ""], "war", true)
+	log_event("%s yields to the overwhelming might of %s (%s)%s." % [c.name, o.name, rank_title(tr), (" and cedes " + best.name) if best != null and n > 1 else ""], "war", true)
 	if best != null and n > 1:
 		capture(best, o)
 	make_peace(c, o, true)
@@ -3150,7 +3150,7 @@ func spawn_immortal(x: float, y: float, rank: int) -> Unit:
 	if randf() < 0.15 + 0.2 * (rank - 6):
 		give_igu(u, Lore.igu_random())
 	pillar(x, y, GuData.ESS_COL[rank])
-	log_event("Ein wandernder %s erscheint: %s (%s-Pfad)." % [rank_title(rank), u.pname(), GuData.PATH_NAME[u.path]], "violet", true)
+	log_event("A wandering %s appears: %s (%s Path)." % [rank_title(rank), u.pname(), GuData.PATH_NAME[u.path]], "violet", true)
 	return u
 
 
@@ -3158,7 +3158,7 @@ func spawn_immortal(x: float, y: float, rank: int) -> Unit:
 func spawn_venerable(vd: Dictionary, x: float, y: float) -> String:
 	var key: String = vd["fig"]
 	if cheats.is_on("uniq") and fig_alive(key) != null:
-		return str(vd["t"]) + " lebt bereits."
+		return str(vd["t"]) + " is already alive."
 	if not cheats.room():
 		return cheats.full_msg()
 	var dup: String = cheats.fig_suffix(key)   # weitere Exemplare: „Riesensonne II“
@@ -3178,7 +3178,7 @@ func spawn_venerable(vd: Dictionary, x: float, y: float) -> String:
 	u.life = uage(u) + (float(vd["life"]) * (0.8 + randf() * 0.5) if vd.has("life") else 3000.0 + randf() * 2000.0)
 	give_igu(u, vd["igu"])
 	u.hp = u.mhp
-	log_event(("Die " if key == "star_constellation" else "Der ") + u.title + " steigt herab! Die Welt erzittert.", "gold", true)
+	log_event("The " + u.title + " descends! The world trembles.", "gold", true)
 	pillar(x, y, GuData.ESS_COL[9], 1.6)
 	ring(x, y, 16.0, Color(str(vd["col"])), 1.2)
 	shake = 1.0
@@ -3191,9 +3191,9 @@ func spawn_custom_venerable(p: int, al: int, x: float, y: float) -> String:
 	p = clampi(p, 0, GuData.PATH_NAME.size() - 1)
 	var key: String = "ven9_%d" % p
 	var pn: String = GuData.PATH_NAME[p]
-	var title: String = pn + ("-Dämonen-Ehrwürdiger" if al == 1 else "-Unsterblicher-Ehrwürdiger")
+	var title: String = pn + (" Demon Venerable" if al == 1 else " Immortal Venerable")
 	if cheats.is_on("uniq") and fig_alive(key) != null:
-		return "Der " + title + " lebt bereits."
+		return "The " + title + " is already alive."
 	if not cheats.room():
 		return cheats.full_msg()
 	var dup: String = cheats.fig_suffix(key)
@@ -3218,7 +3218,7 @@ func spawn_custom_venerable(p: int, al: int, x: float, y: float) -> String:
 	if not own.is_empty():
 		give_igu(u, own.pick_random())
 	u.hp = u.mhp
-	log_event("%s, der %s, steigt herab – Höchster Großmeister des %s-Pfades! Die Welt erzittert." % [u.given, title, pn], "gold", true)
+	log_event("%s, the %s, descends – Supreme Grandmaster of the %s Path! The world trembles." % [u.given, title, pn], "gold", true)
 	pillar(x, y, GuData.ESS_COL[9], 1.6)
 	ring(x, y, 16.0, GuData.PATH_COL[p], 1.2)
 	shake = 1.0
@@ -3240,7 +3240,7 @@ func era_text() -> String:
 func spawn_figure(fd: Dictionary, x: float, y: float) -> String:
 	var nm: String = (str(fd["sur"]) + " " + str(fd["given"])).strip_edges()
 	if cheats.is_on("uniq") and fig_alive(fd["id"]) != null:
-		return nm + " lebt bereits."
+		return nm + " is already alive."
 	if not cheats.room():
 		return cheats.full_msg()
 	var dup: String = cheats.fig_suffix(str(fd["id"]))
@@ -3273,7 +3273,7 @@ func spawn_figure(fd: Dictionary, x: float, y: float) -> String:
 	set_stats(u, true)
 	u.hp = u.mhp
 	pillar(x, y, GuData.ESS_COL[rank], 0.9)
-	log_event(u.pname() + " betritt die Welt (" + rank_title(rank) + (", " + oc.name if oc != null else "") + ").", "gold", true)
+	log_event(u.pname() + " enters the world (" + rank_title(rank) + (", " + oc.name if oc != null else "") + ").", "gold", true)
 	return ""
 
 
@@ -3284,13 +3284,13 @@ func found_org(o: Dictionary, x: float, y: float, quiet: bool = false) -> String
 	var nm: String = o["n"]
 	var canon: bool = cheats.is_on("uniq")
 	if canon and org_clan(o["id"]) != null:
-		return nm + " existiert bereits."
+		return nm + " already exists."
 	if not world.in_map(int(x), int(y)):
 		return ""
 	var reg: int = region_at(x, y)
 	var oreg: int = int(o.get("reg", -1))
 	if canon and oreg >= 0 and reg != oreg:
-		return nm + " gehört in " + GuData.REGN_IN[oreg] + "."
+		return nm + " belongs in " + GuData.REGN_DAT[oreg] + "."
 	var tx: int = int(x)
 	var ty: int = int(y)
 	if not site_ok(tx, ty, -1):
@@ -3298,7 +3298,7 @@ func found_org(o: Dictionary, x: float, y: float, quiet: bool = false) -> String
 		if s.x < 0.0:
 			s = find_site(x, y, 2.0, 22.0, reg)
 		if s.x < 0.0:
-			return "Hier ist kein Platz für " + nm + "."
+			return "There is no room here for " + nm + "."
 		tx = int(s.x)
 		ty = int(s.y)
 	var race: int = int(o.get("race", 0))
@@ -3320,13 +3320,13 @@ func found_org(o: Dictionary, x: float, y: float, quiet: bool = false) -> String
 	if not found_village(lead, c.id):
 		lead.hp = 0.0
 		c.alive = false
-		return "Hier ist kein Platz für " + nm + "."
+		return "There is no room here for " + nm + "."
 	var v: Village = villages[lead.vil]
 	var k: String = o["k"]
 	if k == "Clan" and c.sur != "":
-		v.name = c.sur.replace(" ", "-") + "-Dorf"
+		v.name = c.sur.replace(" ", "-") + " Village"
 	elif k == "Stamm" and c.sur != "":
-		v.name = c.sur.replace(" ", "-") + "-Lager"
+		v.name = c.sur.replace(" ", "-") + " Camp"
 	v.food = 30.0
 	v.wood = 30.0
 	v.stones = 25.0
@@ -3367,7 +3367,7 @@ func found_org(o: Dictionary, x: float, y: float, quiet: bool = false) -> String
 				oc.ally[c.id] = true
 				c.ally[oc.id] = true
 				n += 1
-	log_event(("Die " if k in ["Sekte", "Allianz"] else ("Der " if k == "Clan" or k == "Stamm" or k == "Hof" else "")) + nm + " wird in " + v.name + " gegründet (" + GuData.REGN[reg] + ").", "jade", not quiet)
+	log_event(("The " if k in ["Sekte", "Allianz", "Clan", "Stamm", "Hof"] else "") + nm + " is founded in " + v.name + " (" + GuData.REGN[reg] + ").", "jade", not quiet)
 	terr_dirty = true
 	return ""
 
@@ -3394,9 +3394,9 @@ func rd_war() -> String:
 			var c2: Clan = good.pop_back()
 			c2.align = 1
 			bad.append(c2)
-			log_event(c2.name + " wendet sich dem dämonischen Pfad zu.", "war")
+			log_event(c2.name + " turns to the demonic path.", "war")
 	if bad.is_empty() or good.is_empty():
-		return "Es gibt nicht genug Clans für einen solchen Krieg."
+		return "There are not enough clans for such a war."
 	for a: Clan in good:
 		for b: Clan in bad:
 			a.ally.erase(b.id)
@@ -3407,7 +3407,7 @@ func rd_war() -> String:
 			if a2 != b2:
 				a2.war.erase(b2.id)
 				a2.ally[b2.id] = true
-	log_event("Krieg zwischen rechtschaffenem und dämonischem Pfad! %d rechtschaffene gegen %d dämonische Mächte." % [good.size(), bad.size()], "war", true)
+	log_event("War between the righteous and demonic paths! %d righteous against %d demonic powers." % [good.size(), bad.size()], "war", true)
 	return ""
 
 
@@ -3418,7 +3418,7 @@ func ow_demon(x: float, y: float) -> Unit:
 	awaken(u, true)
 	u.ow = true
 	u.apt = "A"
-	u.title = "Fremdweltdämon"
+	u.title = "Otherworldly Demon"
 	ascend(u, 2)
 	ascend(u, 3)
 	for k: int in range(3):
@@ -3427,7 +3427,7 @@ func ow_demon(x: float, y: float) -> Unit:
 			u.gus.append(g)
 	set_stats(u, true)
 	pillar(x, y, Color("#c04aff"), 1.0)
-	log_event("Ein Fremdweltdämon erscheint: " + u.pname() + " – eine fremde Seele, die das Schicksal nicht kennt. Alle Mächte jagen ihn.", "war", true)
+	log_event("An Otherworldly Demon appears: " + u.pname() + " – a foreign soul unknown to fate. All powers hunt him.", "war", true)
 	return u
 
 
@@ -3445,13 +3445,13 @@ func earthly_calamity(u: Unit) -> void:
 		if dies and use_fortune(u):
 			dies = false
 		if dies:
-			u.dreason = "Irdische Kalamität"
+			u.dreason = "earthly calamity"
 			u.hp = 0.0
-			log_event(nm + " stirbt in einer Irdischen Kalamität.", "red", true)
+			log_event(nm + " dies in an earthly calamity.", "red", true)
 		else:
 			u.prog = minf(0.99, u.prog + 0.25)
-			float_txt(u, "+Dao-Male", Color("#e8c070"))
-			log_event(nm + " übersteht eine Irdische Kalamität und gewinnt Dao-Male.", "violet"))
+			float_txt(u, "+Dao marks", Color("#e8c070"))
+			log_event(nm + " survives an earthly calamity and gains Dao marks.", "violet"))
 
 
 # ---------------- Orte ----------------
@@ -3500,18 +3500,18 @@ func place_ok(type: String, x: float, y: float) -> String:
 		return ""
 	var canon: bool = cheats.is_on("uniq")
 	if canon and D.get("uniq", false) and find_place(type) != null:
-		return nm + " existiert bereits."
+		return nm + " already exists."
 	var t: int = world.tile[int(y) * W + int(x)]
 	if type == "palace":
 		if t != GuData.DEEP and t != GuData.SHAL:
-			return "Der Drachenpalast muss im Meer stehen."
+			return "The Dragon Palace must stand in the sea."
 	elif not GuData.is_land(t) or t == GuData.WALL:
-		return nm + " braucht festen Boden."
+		return nm + " needs solid ground."
 	if canon and type == "court" and region_at(x, y) != 4:
-		return "Der Himmelshof gehört in den Zentralkontinent."
+		return "Heavenly Court belongs in the Central Continent."
 	for p: Place in places:
 		if p.alive and Vector2(p.x - x, p.y - y).length() < (12.0 if canon else 4.0):
-			return "Zu nah an " + p.name + "."
+			return "Too close to " + p.name + "."
 	return ""
 
 
@@ -3533,7 +3533,7 @@ func add_place(type: String, x: float, y: float, quiet: bool = false) -> Place:
 	pillar(x, y, Color("#fff1c0"), 0.9)
 	ring(x, y, Sprites.place_size(type) * 0.6, Color("#fff1c0"), 0.8)
 	if not quiet:
-		log_event(p.name + " erscheint in " + GuData.REGN_DAT[region_at(x, y)] + ".", "violet", true)
+		log_event(p.name + " appears in " + GuData.REGN_DAT[region_at(x, y)] + ".", "violet", true)
 	if type == "court" and org_clan("heavenly_court") == null and not presim:
 		found_org(Lore.org("heavenly_court"), x, y + 16.0, true)
 	return p
@@ -3564,7 +3564,7 @@ func place_month() -> void:
 		var p: Place = places[i]
 		if p.until > 0.0 and sim_time >= p.until:
 			p.alive = false
-			log_event(p.name + " verblasst.", "violet")
+			log_event(p.name + " fades away.", "violet")
 		else:
 			p.t += 1.0
 			_place_tick(p)
@@ -3580,7 +3580,7 @@ func _place_tick(p: Place) -> void:
 			var minr: int = 8 if p.type == "grotto" else 6
 			if p.owner >= 0 and unit_by_id(p.owner) == null:
 				p.owner = -1
-				p.name = str(Lore.PLACE[p.type]["n"]) + " (herrenlos)"
+				p.name = str(Lore.PLACE[p.type]["n"]) + " (ownerless)"
 			if p.type == "hu" and not p.used:
 				_lure(p, 5, 5)
 				for u: Unit in near_units(p.x, p.y, 5.0):
@@ -3588,15 +3588,15 @@ func _place_tick(p: Place) -> void:
 						ascend(u, 6)
 						p.owner = u.id
 						p.used = true
-						log_event(u.pname() + " übernimmt das " + p.name + " und wird zum Gu-Unsterblichen!", "gold", true)
+						log_event(u.pname() + " takes over " + p.name + " and becomes a Gu Immortal!", "gold", true)
 						pillar(u.x, u.y, GuData.ESS_COL[6])
 						break
 			elif p.owner < 0:
 				for u2: Unit in near_units(p.x, p.y, r):
 					if u2.k == "p" and u2.rank >= minr:
 						p.owner = u2.id
-						p.name = u2.given + ("-Grottenhimmel" if p.type == "grotto" else "-Gesegnetes-Land")
-						log_event(u2.pname() + " nimmt das " + str(Lore.PLACE[p.type]["n"]) + " in Besitz: " + p.name + ".", "violet", true)
+						p.name = u2.given + (" Grotto-Heaven" if p.type == "grotto" else " Blessed Land")
+						log_event(u2.pname() + " takes possession of the " + str(Lore.PLACE[p.type]["n"]) + ": " + p.name + ".", "violet", true)
 						break
 			_boost(p, 3.0 if p.type == "grotto" else 2.0, 6, false)
 			if p.type == "grotto":
@@ -3605,7 +3605,7 @@ func _place_tick(p: Place) -> void:
 						v.stones += 1.0
 			if randf() < (0.03 if p.type == "grotto" else 0.012) and count_sp("wildimm") < 8:
 				var g: Unit = spawn_wild_igu(p.x + (randf() - 0.5) * 10.0, p.y + 3.0 + randf() * 4.0)
-				log_event("Im " + p.name + " entsteht das Unsterbliche Gu " + g.pname() + ".", "violet", true)
+				log_event("In " + p.name + " the Immortal Gu " + g.pname() + ".", "violet", true)
 		"court":
 			_boost(p, 2.0, 6, true)
 			if randf() < 0.4:
@@ -3614,7 +3614,7 @@ func _place_tick(p: Place) -> void:
 						bolt(u.x, u.y, 600.0 + u.mhp * 0.3, false)
 						ring(u.x, u.y, 5.0, Color("#fff1c0"), 0.6)
 						if randf() < 0.3:
-							log_event("Der Himmelsüberwachungsturm straft " + u.pname() + ".", "violet")
+							log_event("The Heaven Surveillance Tower punishes " + u.pname() + ".", "violet")
 						break
 			if randf() < 0.02 and count_sp("wildimm") < 8:
 				spawn_wild_igu(p.x + (randf() - 0.5) * 12.0, p.y + 4.0 + randf() * 6.0)
@@ -3623,7 +3623,7 @@ func _place_tick(p: Place) -> void:
 				if u.k == "p" and u.rank >= 1 and randf() < 0.05:
 					var g2: String = gain_gu(u)
 					if g2 != "":
-						float_txt(u, "Tausch: " + g2, Color("#e8c070"))
+						float_txt(u, "Swap: " + g2, Color("#e8c070"))
 			for v: Village in villages:
 				if v.alive and Vector2(v.cx - p.x, v.cy - p.y).length() < r:
 					v.stones += 0.5
@@ -3643,14 +3643,14 @@ func _place_tick(p: Place) -> void:
 					var a: Clan = clans[cs[0]]
 					var b: Clan = clans[cs[1]]
 					if not a.ally.has(b.id):
-						log_event("Streit um das " + p.name + "!", "war")
+						log_event("Strife over " + p.name + "!", "war")
 						declare_war(a, b)
 			if int(p.t) % 18 == 0 and not near.is_empty():
 				var w: Unit = near.pick_random()
 				stage_up(w)
 				stage_up(w)
 				gain_gu(w)
-				log_event(w.pname() + " birgt einen Schatz im " + p.name + ".", "gold", true)
+				log_event(w.pname() + " recovers a treasure in " + p.name + ".", "gold", true)
 		"dream":
 			_lure(p, 1, 8)
 			for u: Unit in near_units(p.x, p.y, r):
@@ -3664,7 +3664,7 @@ func _place_tick(p: Place) -> void:
 						u.prog = 0.0
 						stage_up(u)
 				elif not safe and randf() < 0.07:
-					u.dreason = "Seelenschaden im Traumreich"
+					u.dreason = "soul damage in the dream realm"
 					u.hp = 0.0
 		"inherit":
 			_lure(p, 2, 6)
@@ -3672,9 +3672,9 @@ func _place_tick(p: Place) -> void:
 				if u.k != "p" or u.rank < 1:
 					continue
 				if randf() < 0.25:
-					u.dreason = "Falle im " + p.name
+					u.dreason = "trap in " + p.name
 					u.hp = 0.0
-					log_event(u.pname() + " tappt im " + p.name + " in eine tödliche Falle.", "red")
+					log_event(u.pname() + " walks into a deadly trap in " + p.name + ".", "red")
 				else:
 					if u.rank < 5:
 						ascend(u, u.rank + 1)
@@ -3682,7 +3682,7 @@ func _place_tick(p: Place) -> void:
 						gain_gu(u)
 					else:
 						give_igu(u, Lore.igu_random())
-					log_event(u.pname() + " öffnet das " + p.name + " und erhält sein Vermächtnis.", "gold", true)
+					log_event(u.pname() + " opens " + p.name + " and receives its legacy.", "gold", true)
 					pillar(p.x, p.y, Color("#ffe27a"), 0.8)
 					p.alive = false
 				break
@@ -3693,7 +3693,7 @@ func _place_tick(p: Place) -> void:
 					u.notrib = true
 					u.hx = p.x
 					u.hy = p.y
-					log_event(u.pname() + " verleibt sich das Himmelsfragment ein – keine Drangsal trifft ihn mehr, doch er bleibt für immer daran gebunden.", "violet", true)
+					log_event(u.pname() + " absorbs the heaven fragment – no tribulation strikes them any more, but they remain bound to it forever.", "violet", true)
 					pillar(p.x, p.y, Color("#cfe0ff"), 1.0)
 					p.alive = false
 					break
@@ -3712,7 +3712,7 @@ func _place_tick(p: Place) -> void:
 							if j == 0:
 								awaken(dm, true)
 								ascend(dm, 2)
-						log_event("Drachenmenschen verlassen den Drachenpalast.", "info")
+						log_event("Dragon humans leave the Dragon Palace.", "info")
 						break
 		"mushroom":
 			if (p.t <= 1.0 or int(p.t) % 12 == 0) and count_race(8) < 30:
@@ -3730,7 +3730,7 @@ func _place_tick(p: Place) -> void:
 			if not p.used and p.t >= 24.0:
 				spawn_wild_igu(p.x, p.y - 1.0, "sovereign_immortal_fetus")
 				p.used = true
-				log_event("Auf dem Yi-Tian-Berg erscheint das Souveräner-Unsterblichen-Fötus-Gu!", "gold", true)
+				log_event("The Sovereign Immortal Fetus Gu appears on Yi Tian Mountain!", "gold", true)
 		"crazed":
 			_lure(p, 7, 9)
 			for u: Unit in near_units(p.x, p.y, r):
@@ -3971,7 +3971,7 @@ func volcano(x: float, y: float) -> void:
 	volcs.append({"x": cx + 0.5, "y": cy + 0.5, "t": 6.0 + randf() * 3.0})
 	shake = minf(1.2, shake + 0.8)
 	ring(cx + 0.5, cy + 0.5, 10.0, Color("#ff7a2e"), 1.0)
-	log_event("Ein Erdfeuer-Vulkan bricht in " + GuData.REGN_DAT[region_at(x, y)] + " aus!", "war", true)
+	log_event("An earth-fire volcano erupts in " + GuData.REGN_DAT[region_at(x, y)] + "!", "war", true)
 
 
 func _volc_tick(vo: Dictionary) -> void:
@@ -4021,7 +4021,7 @@ func tornado(x: float, y: float, quiet: bool = false) -> void:
 		storms.pop_front()
 	storms.append({"x": x, "y": y, "a": randf() * TAU, "t": 4.0 + randf() * 2.0})
 	if not quiet:
-		log_event("Ein Windpfad-Wirbel fegt über " + GuData.REGN_IN[region_at(x, y)] + ".", "war", true)
+		log_event("A Wind Path whirlwind sweeps across " + GuData.REGN_IN[region_at(x, y)] + ".", "war", true)
 
 
 func acid_rain(x: float, y: float, quiet: bool = false) -> void:
@@ -4029,7 +4029,7 @@ func acid_rain(x: float, y: float, quiet: bool = false) -> void:
 		acids.pop_front()
 	acids.append({"x": x, "y": y, "a": randf() * TAU, "t": 4.0})
 	if not quiet:
-		log_event("Giftregen des Gift-Pfades zieht über " + GuData.REGN_IN[region_at(x, y)] + ".", "war", true)
+		log_event("Poison rain of the Poison Path drifts across " + GuData.REGN_IN[region_at(x, y)] + ".", "war", true)
 
 
 func add_mine(i: int) -> void:
@@ -4172,7 +4172,7 @@ func _acid(x: float, y: float, dt: float) -> void:
 			continue
 		hurt(u, (2.5 + u.mhp * 0.06) * dt * (0.15 if u.rank >= 3 else 1.0), null)
 		if u.hp <= 0.0 and u.k == "p" and u.dreason == "":
-			u.dreason = "Giftregen"
+			u.dreason = "poison rain"
 
 
 # ---------------- Verzehrender Gu-Schwarm, Biom-Samen ----------------
@@ -4182,7 +4182,7 @@ func goo_swarm(x: float, y: float) -> void:
 	var i0: int = clampi(int(y), 0, H - 1) * W + clampi(int(x), 0, W - 1)
 	for k: int in range(5):
 		goo.append({"i": clampi(i0 + randi_range(-2, 2) + randi_range(-2, 2) * W, 0, N - 1), "e": 4})
-	log_event("Ein Verzehrender Gu-Schwarm schlüpft in " + GuData.REGN_DAT[region_at(x, y)] + " und frisst das Land.", "war", true)
+	log_event("A devouring Gu swarm hatches in " + GuData.REGN_DAT[region_at(x, y)] + " and consumes the land.", "war", true)
 
 
 func _goo_tick() -> void:
@@ -4208,7 +4208,7 @@ func _goo_tick() -> void:
 		if randf() < 0.35:
 			for u: Unit in near_units(x + 0.5, y + 0.5, 1.6):
 				if u.beh != GuData.B_IGU:
-					u.dreason = "vom Gu-Schwarm verzehrt"
+					u.dreason = "devoured by a Gu swarm"
 					hurt(u, 30.0 + u.mhp * 0.08, null)
 		for q: int in range(2):
 			parts.append({"x": x + randf(), "y": y + randf() - 0.5, "vx": (randf() - 0.5) * 3.0, "vy": (randf() - 0.5) * 3.0, "l": 0.35, "ml": 0.35, "c": Color("#3a1a4a") if q == 0 else Color("#8a5aa8"), "s": 0.6, "g": 0.0})
@@ -4292,7 +4292,7 @@ func nature_tick() -> void:
 	while k >= 0:
 		_volc_tick(volcs[k])
 		if float(volcs[k]["t"]) <= 0.0:
-			log_event("Der Erdfeuer-Vulkan kommt zur Ruhe.", "info")
+			log_event("The earth-fire volcano falls quiet.", "info")
 			volcs.remove_at(k)
 		k -= 1
 	if not goo.is_empty():
@@ -4357,13 +4357,13 @@ func ladder_move(x: float, y: float, tier: int) -> void:
 		0:
 			boom(x, y, 3.5, 90.0, {"burn": 0.25, "c": Color("#fff27a")})
 		1:
-			fx.append({"k": "txt", "x": x, "y": y - 6.0, "t": "Rang-6-Mordzug", "c": GuData.ESS_COL[6], "l": 1.6, "ml": 1.6})
+			fx.append({"k": "txt", "x": x, "y": y - 6.0, "t": "Rank 6 killer move", "c": GuData.ESS_COL[6], "l": 1.6, "ml": 1.6})
 			pillar(x, y, GuData.ESS_COL[6], 0.6)
 			later(0.35, func() -> void:
 				boom(x, y, 8.0, 700.0, {"ash": true, "burn": 0.35, "c": GuData.ESS_COL[6]})
 				shockwave(x, y, 8.0, 15.0, 35.0))
 		2:
-			fx.append({"k": "txt", "x": x, "y": y - 8.0, "t": "Rang-8-Mordzug", "c": GuData.ESS_COL[8], "l": 2.0, "ml": 2.0})
+			fx.append({"k": "txt", "x": x, "y": y - 8.0, "t": "Rank 8 killer move", "c": GuData.ESS_COL[8], "l": 2.0, "ml": 2.0})
 			pillar(x, y, GuData.ESS_COL[8], 1.2)
 			ring(x, y, 18.0, GuData.ESS_COL[8], 0.6)
 			later(0.6, func() -> void:
@@ -4372,9 +4372,9 @@ func ladder_move(x: float, y: float, tier: int) -> void:
 				flash(0.5)
 				mushroom(x, y, 1.0)
 				shake = 1.2
-				log_event("Ein Rang-8-Mordzug verwüstet " + GuData.REGN_IN[region_at(x, y)] + ".", "red", true))
+				log_event("A rank 8 killer move devastates " + GuData.REGN_IN[region_at(x, y)] + ".", "red", true))
 		3:
-			fx.append({"k": "txt", "x": x, "y": y - 10.0, "t": "Ehrwürdigen-Mordzug", "c": GuData.ESS_COL[9], "l": 2.4, "ml": 2.4})
+			fx.append({"k": "txt", "x": x, "y": y - 10.0, "t": "Venerable killer move", "c": GuData.ESS_COL[9], "l": 2.4, "ml": 2.4})
 			pillar(x, y, GuData.ESS_COL[9], 2.0)
 			for k: int in range(3):
 				ring(x, y, 34.0 - k * 9.0, GuData.ESS_COL[9], 0.9)
@@ -4384,7 +4384,7 @@ func ladder_move(x: float, y: float, tier: int) -> void:
 				flash(1.0)
 				mushroom(x, y, 2.0)
 				shake = 1.2
-				log_event("Ein Ehrwürdigen-Mordzug löscht einen Teil " + ["der Nordebenen", "der Südgrenze", "der Westwüste", "des Ostmeers", "des Zentralkontinents"][region_at(x, y)] + " aus.", "red", true))
+				log_event("A Venerable killer move wipes out part of " + ["the Northern Plains", "the Southern Border", "the Western Desert", "the Eastern Sea", "the Central Continent"][region_at(x, y)] + ".", "red", true))
 
 
 ## Raum-Pfad: Leere-Mordzug (Antimaterie) – alles im Umkreis wird vom Raum verschlungen, zurück bleibt Meer.
@@ -4397,7 +4397,7 @@ func void_move(x: float, y: float) -> void:
 	ring(x, y, r * 1.5, Color("#7c4dff"), 0.6)
 	later(0.6, func() -> void:
 		for u: Unit in near_units(x, y, r):
-			u.dreason = "vom Raum verschlungen"
+			u.dreason = "swallowed by space"
 			u.hp = 0.0
 		for ty: int in range(floori(y - r), ceili(y + r) + 1):
 			for tx: int in range(floori(x - r), ceili(x + r) + 1):
@@ -4421,7 +4421,7 @@ func void_move(x: float, y: float) -> void:
 		spark(x, y, Color("#b39dff"), 40, 14.0)
 		flash(0.35)
 		shake = 1.0
-		log_event("Ein Leere-Mordzug des Raum-Pfades reißt ein Loch in " + GuData.REGN_IN[region_at(x, y)] + ".", "red", true))
+		log_event("A void killer move of the Space Path tears a hole in " + GuData.REGN_IN[region_at(x, y)] + ".", "red", true))
 
 
 ## Feuerregen-Mordzug (Napalm): eine Reihe von Feuereinschlägen, die alles in Brand setzt.
@@ -4451,13 +4451,13 @@ func fate_coin() -> int:
 	var n: int = live.size() / 2
 	for k: int in range(n):
 		var u2: Unit = live[k]
-		u2.dreason = "Schicksals-Münze"
+		u2.dreason = "Fate Coin"
 		u2.hp = 0.0
 		if k < 150:
 			spark(u2.x, u2.y - 2.0, Color("#ffd24a"), 3, 3.0)
 	flash(0.6)
 	shake = 0.6
-	log_event("Die Schicksals-Münze fällt: Das Schicksals-Gu entscheidet über jedes Leben – %d von %d Wesen sterben." % [n, live.size()], "red", true)
+	log_event("The Fate Coin falls: the Fate Gu decides every life – %d of %d beings die." % [n, live.size()], "red", true)
 	return n
 
 
@@ -4518,7 +4518,7 @@ func _make_undead(u: Unit) -> void:
 	u.tgt = null
 	u.life = uage(u) + 4.0 + randf() * 4.0
 	set_stats(u, true)
-	float_txt(u, "Wandelnde Leiche", Color("#86e04a"))
+	float_txt(u, "Walking Corpse", Color("#86e04a"))
 	puff(u.x, u.y - 1.0, Color("#86e04a"), 4)
 
 
@@ -4532,7 +4532,7 @@ func raise_undead(u: Unit) -> void:
 
 ## Ein Angesteckter stirbt und erhebt sich als Leiche. true = lebt (untot) weiter.
 func rise_dead(u: Unit) -> bool:
-	if u.k != "p" or u.undead or u.zin <= 0.0 or u.rank >= 6 or u.dreason in ["göttliche Auslöschung", "Schicksals-Münze", "vom Raum verschlungen"]:
+	if u.k != "p" or u.undead or u.zin <= 0.0 or u.rank >= 6 or u.dreason in ["göttliche Auslöschung", "divine annihilation", "Fate Coin", "swallowed by space"]:
 		return false
 	u.dreason = ""
 	_make_undead(u)
@@ -4595,9 +4595,9 @@ func add_plan(c: Clan, k: String, o: Clan, months: float) -> void:
 	c.plans.append({"k": k, "o": o.id, "t": sim_time + months, "s": sim_time})
 	if not presim:
 		if k == "war":
-			log_event(c.name + " schmiedet Kriegspläne gegen " + o.name + ".", "war")
+			log_event(c.name + " draws up war plans against " + o.name + ".", "war")
 		else:
-			log_event(c.name + " sendet Gesandte zu " + o.name + " – ein Bündnis wird vorbereitet.", "jade")
+			log_event(c.name + " sends envoys to " + o.name + " – an alliance is being prepared.", "jade")
 
 
 func run_plans(c: Clan) -> void:
@@ -4622,9 +4622,9 @@ func run_plans(c: Clan) -> void:
 
 
 const REBEL_MSG: PackedStringArray = [
-	"Die Ältesten von %s klagen, die Ursteine flössen nur noch in die Hauptstadt: Das Dorf sagt sich von %s los und wird zu %s.",
-	"Verrat in %s! Die Gu-Meister schwören %s ab und gründen %s – das Clan-Oberhaupt schwört Rache.",
-	"Fern vom Clan-Oberhaupt und müde vom Krieg fällt %s von %s ab. Fortan herrscht dort %s.",
+	"The elders of %s complain that primeval stones flow only to the capital: the village breaks away from %s and becomes %s.",
+	"Betrayal in %s! The Gu Masters renounce %s and found %s – the clan leader swears revenge.",
+	"Far from the clan leader and weary of war, %s breaks away from %s. Henceforth %s rules there.",
 ]
 
 
@@ -4645,7 +4645,7 @@ func rebel(v: Village) -> Clan:
 			u.militia = false
 	var msg: String
 	if nc.align == 1 and c.align == 0:
-		msg = "In %s flüstert man vom dämonischen Pfad: Das Dorf verlässt %s und nennt sich %s." % [v.name, c.name, nc.name]
+		msg = "In %s, whispers of the demonic path spread: the village leaves %s and calls itself %s." % [v.name, c.name, nc.name]
 	else:
 		msg = REBEL_MSG[randi() % REBEL_MSG.size()] % [v.name, c.name, nc.name]
 	log_event(msg, "war", true)
@@ -4772,7 +4772,7 @@ func random_disaster() -> void:
 				p = Vector2(clampf(vv.cx + randf_range(-15, 15), 1, W - 2), clampf(vv.cy + randf_range(-15, 15), 1, H - 2))
 			if p.x >= 0.0:
 				quake(p.x, p.y)
-				log_event("Katastrophe: Ein Erdbeben erschüttert " + GuData.REGN_IN[region_at(p.x, p.y)] + ".", "war", true)
+				log_event("Disaster: an earthquake shakes " + GuData.REGN_IN[region_at(p.x, p.y)] + ".", "war", true)
 		"volcano":
 			var p2: Vector2 = random_tile(func(i: int) -> bool: return (world.tile[i] == GuData.HILL or world.tile[i] == GuData.MOUNT) and i % W > 8 and i % W < W - 8 and i / W > 8 and i / W < H - 8, 200)
 			if p2.x >= 0.0 and nearest_village(p2.x, p2.y, 16.0) == null:
@@ -4790,7 +4790,7 @@ func random_disaster() -> void:
 			if p5.x >= 0.0:
 				fx.append({"k": "met", "x": p5.x, "y": p5.y, "l": 0.7, "ml": 0.7, "big": false})
 				later(0.7, func() -> void: boom(p5.x, p5.y, 9.0, 400.0, {"ash": true, "burn": 0.4, "c": Color("#ff9a3a")}))
-				log_event("Katastrophe: Ein Sternenfall schlägt in " + GuData.REGN_DAT[region_at(p5.x, p5.y)] + " ein.", "war", true)
+				log_event("Disaster: a starfall strikes " + GuData.REGN_DAT[region_at(p5.x, p5.y)] + ".", "war", true)
 		"plague":
 			var ps: Array[Unit] = []
 			for u: Unit in units:
@@ -4801,7 +4801,7 @@ func random_disaster() -> void:
 				for o: Unit in near_units(pu.x, pu.y, 5.0):
 					if o.k == "p":
 						o.sick = 22.0 + randf() * 10.0
-				log_event("Katastrophe: Eine Seuche bricht in " + (villages[pu.vil].name if pu.vil >= 0 else "der Wildnis") + " aus.", "war", true)
+				log_event("Disaster: a plague breaks out in " + (villages[pu.vil].name if pu.vil >= 0 else "the wilderness") + ".", "war", true)
 		"dunes":
 			dune_migration()
 
@@ -4825,7 +4825,7 @@ func dune_migration() -> void:
 				set_tile(i, GuData.DES)
 				if GuData.is_tree(world.feat[i]) and randf() < 0.6:
 					world.feat[i] = GuData.F_SHRUB
-	log_event("Katastrophe: Die Unpassierbaren Dünen wandern und begraben eine Oase der Westwüste.", "war", true)
+	log_event("Disaster: the Impassable Dunes shift and bury an oasis of the Western Desert.", "war", true)
 
 
 # =====================================================================
@@ -4869,7 +4869,7 @@ func sync_village_regions() -> void:
 func set_age(k: int) -> void:
 	k = clampi(k, 0, GuData.AGES.size() - 1)
 	age_off = year() - 1 - k * GuData.AGE_YEARS
-	log_event("Der Himmel wendet das Zeitalter: Das " + str(age_data()["n"]) + " beginnt.", "violet", true)
+	log_event("Heaven turns the age: the " + str(age_data()["n"]) + " begins.", "violet", true)
 
 
 ## Geländewechsel ohne Höhenänderung (für die Welt-Aktionen; die Bilder werden danach ganz neu gezeichnet).
@@ -4901,7 +4901,7 @@ func _sb_finish() -> void:
 		var tx: int = clampi(int(u.x), 0, W - 1)
 		var ty: int = clampi(int(u.y), 0, H - 1)
 		if not passable(u, tx, ty) and world.tile[ty * W + tx] != GuData.WALL:
-			u.dreason = "in den Fluten ertrunken" if GuData.is_water(world.tile[ty * W + tx]) else "auf dem Trockenen gestrandet"
+			u.dreason = "drowned in the floods" if GuData.is_water(world.tile[ty * W + tx]) else "stranded on dry land"
 			u.hp = 0.0
 	for v: Village in villages:
 		if v.alive:
@@ -4921,7 +4921,7 @@ func wipe_life() -> int:
 		u.held = false
 		u.tgt = null
 		u.aggro = null
-		u.dreason = "göttliche Auslöschung"
+		u.dreason = "divine annihilation"
 		unit_died.emit(u)
 	units.clear()
 	possessed = null
@@ -4949,7 +4949,7 @@ func wipe_life() -> int:
 	terr_dirty = true
 	flash(0.5)
 	shake = 0.5
-	log_event("Der Himmel löscht alles Leben aus: %d Wesen, alle Dörfer und Clans verschwinden. Die Welt ist leer." % n, "red", true)
+	log_event("Heaven wipes out all life: %d beings, all villages and clans vanish. The world is empty." % n, "red", true)
 	return n
 
 
@@ -4973,7 +4973,7 @@ func flatten_world() -> int:
 			_sb_set(i, nt)
 			n += 1
 	_sb_finish()
-	log_event("Die Welt wird eingeebnet: Gebirge, Hügel, Wüsten und Schnee weichen flachem Land.", "gold", true)
+	log_event("The world is levelled: mountains, hills, deserts and snow give way to flat land.", "gold", true)
 	return n
 
 
@@ -5073,7 +5073,7 @@ func shift_sea(dir: int) -> int:
 				_sb_set(i2, land_for(i2))
 	_sb_finish()
 	if dir < 0:
-		log_event("Die Meere steigen und verschlingen die Küsten (%d Kacheln)." % n, "war", true)
+		log_event("The seas rise and swallow the coasts (%d tiles)." % n, "war", true)
 	else:
-		log_event("Die Kontinente heben sich aus dem Meer: %d Kacheln verändern sich." % n, "jade", true)
+		log_event("The continents rise from the sea: %d tiles change." % n, "jade", true)
 	return n

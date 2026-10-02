@@ -110,7 +110,7 @@ func pname() -> String:
 	if gname != "":
 		if sp == "wildimm":
 			return Lore.igu_name(gname)
-		return "Wilder " + gname
+		return "Wild " + gname
 	return str(GuData.SPEC[sp]["n"])
 
 

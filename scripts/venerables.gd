@@ -13,9 +13,9 @@ var H: int:
 		return GuData.H
 ## Siegel neuer Blutlinien je Pfad (Index = Pfad-Id).
 const PATH_GLYPH: String = "力月火水风雷木土血魂宙智骨金冰雪云光暗影星宇情魅运律幻禁天人气奴变炼阵毒剑刀兵梦虚盗食丹画信音杀"
-const EPITHET: PackedStringArray = ["kaiser", "ahn", "fürst", "weiser", "herr", "souverän"]
-const UNITE_MSG: PackedStringArray = ["Die Stämme der Nordebenen unterwerfen sich %s.", "Die Clans der Südgrenze beugen sich %s.",
-	"Die Oasenclans der Westwüste huldigen %s.", "Die Inselclans des Ostmeers erkennen %s als Herrn an.", "Die Sekten des Zentralkontinents unterwerfen sich %s."]
+const EPITHET: PackedStringArray = [" Emperor", " Ancestor", " Lord", " Sage", " Master", " Sovereign"]
+const UNITE_MSG: PackedStringArray = ["The tribes of the Northern Plains submit to %s.", "The clans of the Southern Border bow to %s.",
+	"The oasis clans of the Western Desert pay homage to %s.", "The island clans of the Eastern Sea acknowledge %s as their lord.", "The sects of the Central Continent submit to %s."]
 const R_MIN: float = 30.0
 const R_MAX: float = 110.0
 
@@ -136,7 +136,7 @@ func era_text() -> String:
 	var u: Unit = sim.unit_by_id(supreme)
 	if u == null:
 		return ""
-	return "Ära des %s-Pfades – %s" % [GuData.PATH_NAME[clampi(u.path, 0, GuData.PATH_NAME.size() - 1)], u.pname()]
+	return "Era of the %s Path – %s" % [GuData.PATH_NAME[clampi(u.path, 0, GuData.PATH_NAME.size() - 1)], u.pname()]
 
 
 ## Einflussgebiete aller lebenden Ehrwürdigen (für die Gebietsanzeige).
@@ -191,21 +191,21 @@ func register(u: Unit, vd: Dictionary) -> void:
 		"goal": goal, "sx": -1.0, "sy": -1.0, "ph": "roam" if goal < 0 else "travel", "clan": -1, "lin": str(vd.get("lin", "")),
 		"court": str(vd.get("court", "")), "vas": [], "t": sim.sim_time + 6.0, "seat_t": sim.sim_time, "tgt": -1, "act": "",
 		"doing": "", "united": false, "done": false, "abs": 0, "desc": 0, "feast": sim.sim_time + 60.0 + randf() * 36.0,
-		"att": "Höchster Großmeister des %s-Pfades" % GuData.PATH_NAME[clampi(u.path, 0, GuData.PATH_NAME.size() - 1)]}
+		"att": "Supreme Grandmaster of the %s Path" % GuData.PATH_NAME[clampi(u.path, 0, GuData.PATH_NAME.size() - 1)]}
 	st[u.id] = s
 	var nm: String = u.pname()
 	if goal < 0:
-		s["doing"] = "Zieht umher und sucht die Stärksten"
-		sim.log_event("%s zieht los, um die stärksten Wesen der Welt herauszufordern." % nm, "gold", true)
+		s["doing"] = "Roams in search of the strongest"
+		sim.log_event("%s sets out to challenge the strongest beings in the world." % nm, "gold", true)
 		return
 	var p: Vector2 = _pick_seat(goal, str(vd.get("seat", "")), u, vd.is_empty())
 	s["sx"] = p.x
 	s["sy"] = p.y
 	if goal != here:
-		s["doing"] = "Zieht in " + GuData.REGN_IN[goal]
-		sim.log_event("%s zieht in %s, um dort %s Sitz zu errichten." % [nm, GuData.REGN_IN[goal], "ihren" if u.fig == "star_constellation" else "seinen"], "gold", true)
+		s["doing"] = "Heads into " + GuData.REGN_IN[goal]
+		sim.log_event("%s heads into %s to establish %s seat there." % [nm, GuData.REGN_IN[goal], "her" if u.fig == "star_constellation" else "his"], "gold", true)
 	else:
-		s["doing"] = "Errichtet den Sitz"
+		s["doing"] = "Establishing the seat"
 
 
 func _region_exists(r: int) -> bool:
@@ -328,8 +328,8 @@ func establish(u: Unit, s: Dictionary) -> void:
 	var lin: String = str(s["lin"])
 	var ag: String = str(s["ag"])
 	if ag == "order":
-		s["doing"] = "Plant in der Abgeschiedenheit"
-		sim.log_event("%s zieht sich in %s zurück und beginnt, die Welt zu ordnen." % [nm, GuData.REGN_IN[goal]], "gold", true)
+		s["doing"] = "Plotting in seclusion"
+		sim.log_event("%s withdraws into %s and begins to order the world." % [nm, GuData.REGN_IN[goal]], "gold", true)
 		return
 	var c: Clan = null
 	if lin != "":
@@ -340,10 +340,10 @@ func establish(u: Unit, s: Dictionary) -> void:
 			if capv != null and capv.reg == goal and Vector2(capv.cx - float(s["sx"]), capv.cy - float(s["sy"])).length() < 60.0:
 				sim.join_village(u, capv)
 				_move_seat(u, s, capv)
-				sim.log_event("%s nimmt Sitz in %s und erhebt %s zu %s Blutlinie." % [nm, capv.name, c.name, "ihrer" if u.fig == "star_constellation" else "seiner"], "gold", true)
+				sim.log_event("%s takes up residence in %s and raises %s as %s bloodline." % [nm, capv.name, c.name, "her" if u.fig == "star_constellation" else "his"], "gold", true)
 			elif _found_here(u, s, c):
 				c.cap = u.vil
-				sim.log_event("%s verlegt den Sitz von %s nach %s (%s)." % [nm, c.name, sim.villages[u.vil].name, GuData.REGN[goal]], "gold", true)
+				sim.log_event("%s moves the seat of %s to %s (%s)." % [nm, c.name, sim.villages[u.vil].name, GuData.REGN[goal]], "gold", true)
 			else:
 				c = null
 		elif not o.is_empty() and (int(o.get("reg", -1)) < 0 or int(o["reg"]) == goal):
@@ -354,15 +354,15 @@ func establish(u: Unit, s: Dictionary) -> void:
 					if v != null:
 						sim.join_village(u, v)
 						_move_seat(u, s, v)
-					sim.log_event("%s gründet %s – %s Blutlinie herrscht nun über %s." % [nm, c.name, "ihre" if u.fig == "star_constellation" else "seine", GuData.REGN_IN[goal]], "gold", true)
+					sim.log_event("%s founds %s – %s bloodline now rules over %s." % [nm, c.name, "her" if u.fig == "star_constellation" else "his", GuData.REGN_IN[goal]], "gold", true)
 	if c == null:
 		c = _own_lineage(u, s)
 	if c != null:
 		s["clan"] = c.id
 		c.align = u.align
-		s["doing"] = "Herrscht über " + GuData.REGN_IN[goal]
+		s["doing"] = "Rules over " + GuData.REGN_IN[goal]
 	else:
-		s["doing"] = "Herrscht allein über " + GuData.REGN_IN[goal]
+		s["doing"] = "Rules alone over " + GuData.REGN_IN[goal]
 	sim.terr_dirty = true
 
 
@@ -421,10 +421,10 @@ func _own_lineage(u: Unit, s: Dictionary) -> Clan:
 			ok = true
 	if not ok:
 		c.alive = false
-		sim.log_event("%s findet keinen Platz für eine Blutlinie und herrscht allein." % u.pname(), "violet")
+		sim.log_event("%s finds no place for a bloodline and rules alone." % u.pname(), "violet")
 		return null
 	var v2: Village = sim.villages[u.vil]
-	v2.name = base.replace(" ", "-") + "-" + ("Lager" if goal == 0 else ("Palast" if goal == 4 else "Sitz"))
+	v2.name = base.replace(" ", "-") + " " + ("Camp" if goal == 0 else ("Palace" if goal == 4 else "Seat"))
 	for k: int in range(5):
 		var m: Unit = sim.mk_person(v2.cx + (randf() - 0.5) * 6.0, v2.cy + 2.0 + (randf() - 0.5) * 4.0, u.race, 18.0 + randf() * 30.0, c.sur)
 		sim.join_village(m, v2)
@@ -435,7 +435,7 @@ func _own_lineage(u: Unit, s: Dictionary) -> Clan:
 			_set_path(m, u.path)
 		for r: int in range(2, [5, 4, 3, 3, 2][k] + 1):
 			sim.ascend(m, r)
-	sim.log_event("%s begründet %s in %s (%s) – eine neue Blutlinie des %s-Pfades." % [u.pname(), c.name, v2.name, GuData.REGN[goal], GuData.PATH_NAME[pi]], "gold", true)
+	sim.log_event("%s establishes %s in %s (%s) – a new bloodline of the %s Path." % [u.pname(), c.name, v2.name, GuData.REGN[goal], GuData.PATH_NAME[pi]], "gold", true)
 	return c
 
 
@@ -529,33 +529,33 @@ func yearly() -> void:
 func on_death(u: Unit) -> void:
 	if u.k == "a":
 		if u.gname == "fate_gu" and not u.caught:
-			_fate_shatter("Das Schicksals-Gu zerbricht!")
+			_fate_shatter("The Fate Gu shatters!")
 		return
 	if u.igu.has("fate_gu"):
 		var g: Unit = sim.spawn_wild_igu(u.x, u.y, "fate_gu")
 		g.hp = g.mhp
-		sim.log_event("Das Schicksals-Gu entgleitet dem toten " + u.pname() + " und sucht einen neuen Hüter.", "violet", true)
+		sim.log_event("The Fate Gu slips from the dead " + u.pname() + " and seeks a new guardian.", "violet", true)
 	if not st.has(u.id):
 		return
 	var s: Dictionary = st[u.id]
 	var vas: Array = s["vas"]
 	var c: Clan = _clan(int(s["clan"]))
 	if not vas.is_empty():
-		sim.log_event("Mit %s endet die Ära des %s-Pfades – %d Vasallen sagen sich los." % [u.pname(), GuData.PATH_NAME[clampi(u.path, 0, GuData.PATH_NAME.size() - 1)], vas.size()], "red", true)
+		sim.log_event("With %s, the Era of the %s Path ends – %d vassals break away." % [u.pname(), GuData.PATH_NAME[clampi(u.path, 0, GuData.PATH_NAME.size() - 1)], vas.size()], "red", true)
 		for id: Variant in vas:
 			var o: Clan = _clan(int(id))
 			if o != null and c != null:
 				o.ally.erase(c.id)
 				c.ally.erase(o.id)
 	if str(s["ag"]) == "inherit":
-		sim.log_event("Der Rote Lotus ist gefallen – sein Erbe ruht auf dem Qing-Mao-Berg.", "red", true)
+		sim.log_event("Red Lotus has fallen – his inheritance rests on Qing Mao Mountain.", "red", true)
 	st.erase(u.id)
 
 
 func _fate_shatter(msg: String) -> void:
 	fate_broken = true
 	fate_on = false
-	sim.log_event(msg + " Die Fesseln des Schicksals sind gesprengt – eine Ära des Chaos beginnt, und Rang 9 steht wieder offen.", "gold", true)
+	sim.log_event(msg + " The shackles of fate are broken – an era of chaos begins, and rank 9 is open once more.", "gold", true)
 	sim.flash(0.6)
 	sim.shake = 0.8
 
@@ -601,7 +601,7 @@ func agenda(u: Unit, s: Dictionary) -> void:
 	if c == null and ag != "order" and int(s["clan"]) >= 0:
 		s["clan"] = -1
 		s["ph"] = "travel"   # Blutlinie untergegangen: neu gründen
-		s["doing"] = "Gründet die Blutlinie neu"
+		s["doing"] = "Refounding the bloodline"
 		return
 	if c != null:
 		_subjugate(u, s, c)
@@ -669,13 +669,13 @@ func _subjugate(u: Unit, s: Dictionary, c: Clan) -> void:
 				if v.alive and v.clan == o.id:
 					absorb_village(v, c)
 			s["abs"] = int(s["abs"]) + 1
-			sim.log_event(("%s wird von %s unterworfen und geht in %s auf." if u.align == 1 else "%s unterwirft sich %s und geht in %s auf.") % [o.name, nm, c.name], "jade", true)
+			sim.log_event(("%s is subjugated by %s and absorbed into %s." if u.align == 1 else "%s submits to %s and is absorbed into %s.") % [o.name, nm, c.name], "jade", true)
 		else:
 			sim.make_peace(c, o, true)
 			c.ally[o.id] = true
 			o.ally[c.id] = true
 			vas.append(o.id)
-			sim.log_event("%s beugt sich %s und wird Vasall von %s." % [o.name, nm, c.name], "jade", true)
+			sim.log_event("%s bows to %s and becomes a vassal of %s." % [o.name, nm, c.name], "jade", true)
 	sim.terr_dirty = true
 
 
@@ -703,7 +703,7 @@ func _descendants(u: Unit, s: Dictionary, n: int, lucky: bool) -> int:
 			sim.ascend(kid, r)
 	s["desc"] = int(s["desc"]) + n
 	if lucky:
-		sim.log_event("%s zeugt neue Nachkommen (%s): %d Kinder erwachen mit goldenen Augen und Großem Glück." % [u.pname(), c.name, n], "gold", int(s["desc"]) <= n)
+		sim.log_event("%s sires new descendants (%s): %d children awaken with golden eyes and great fortune." % [u.pname(), c.name, n], "gold", int(s["desc"]) <= n)
 	return n
 
 
@@ -721,7 +721,7 @@ func _court(u: Unit, s: Dictionary) -> void:
 		oc = sim.org_clan(cid)
 		if oc == null:
 			return
-		sim.log_event("%s ruft %s ins Leben – %s Nachkommen sollen ewig leben." % [u.pname(), oc.name, "ihre" if u.fig == "star_constellation" else "seine"], "gold", true)
+		sim.log_event("%s brings %s into being – %s descendants shall live forever." % [u.pname(), oc.name, "her" if u.fig == "star_constellation" else "his"], "gold", true)
 	s["done"] = true
 	if c != null and oc != c and not (s["vas"] as Array).has(oc.id):
 		sim.make_peace(c, oc, true)
@@ -732,13 +732,13 @@ func _court(u: Unit, s: Dictionary) -> void:
 
 ## Sternbild: hütet das Schicksals-Gu und bekämpft dämonische Ehrwürdige.
 func _fate_guard(u: Unit, s: Dictionary) -> void:
-	s["doing"] = "Hütet " + ("das Schicksals-Gu" if fate_on else "den Himmelshof")
+	s["doing"] = "Guarding " + ("the Fate Gu" if fate_on else "Heavenly Court")
 	if fate_on and not u.igu.has("fate_gu"):
 		for o: Unit in sim.units:
 			if o.hp > 0.0 and ((o.k == "a" and o.gname == "fate_gu") or (o.k == "p" and o.igu.has("fate_gu"))):
 				s["tgt"] = o.id
 				s["act"] = "duel" if o.k == "p" and o.rank >= 9 and o.align == 1 else "catch"
-				s["doing"] = "Holt das Schicksals-Gu in ihre Obhut"
+				s["doing"] = "Taking the Fate Gu into her care"
 				return
 	var c: Clan = _clan(int(s["clan"]))
 	for uid: int in st.keys():
@@ -752,7 +752,7 @@ func _fate_guard(u: Unit, s: Dictionary) -> void:
 		if o2 != null and Vector2(o2.x - float(s["sx"]), o2.y - float(s["sy"])).length() < radius(s):
 			s["tgt"] = uid
 			s["act"] = "duel"
-			s["doing"] = "Stellt " + o2.pname()
+			s["doing"] = "Confronting " + o2.pname()
 			return
 	for m: Unit in sim.units:
 		if m.k == "p" and m.hp > 0.0 and c != null and m.clan == c.id and m.rank >= 1 and m.rank < 9:
@@ -762,7 +762,7 @@ func _fate_guard(u: Unit, s: Dictionary) -> void:
 ## Urursprung: Menschen herrschen über die Variant-Menschen.
 func _humans(u: Unit, s: Dictionary) -> void:
 	var c: Clan = _clan(int(s["clan"]))
-	s["doing"] = "Erhebt die Menschheit über die Variant-Menschen"
+	s["doing"] = "Raising humanity above the variant humans"
 	var R: float = radius(s) * 1.4
 	var vs: Array[Village] = []
 	for v: Village in sim.villages:
@@ -773,7 +773,7 @@ func _humans(u: Unit, s: Dictionary) -> void:
 	var v2: Village = vs.pick_random()
 	if c != null and randf() < 0.5:
 		absorb_village(v2, c)
-		sim.log_event("Die %s von %s unterwerfen sich %s und dienen nun der Menschheit." % [GuData.RACE_PL[v2.race], v2.name, u.pname()], "jade", true)
+		sim.log_event("The %s of %s submit to %s and now serve humanity." % [GuData.RACE_PL[v2.race], v2.name, u.pname()], "jade", true)
 	else:
 		var n: int = 0
 		for o: Unit in sim.units:
@@ -782,12 +782,12 @@ func _humans(u: Unit, s: Dictionary) -> void:
 				o.hp = 0.0
 				n += 1
 		v2.food *= 0.5
-		sim.log_event("Die %s von %s weichen vor der Macht der Menschen zurück." % [GuData.RACE_PL[v2.race], v2.name], "war")
+		sim.log_event("The %s of %s retreat before the might of humanity." % [GuData.RACE_PL[v2.race], v2.name], "war")
 
 
 ## Grenzenlos: In seinem Reich herrscht Ordnung – Fehden enden.
 func _order(u: Unit, s: Dictionary) -> void:
-	s["doing"] = "Ordnet die Welt nach seinen Regeln"
+	s["doing"] = "Ordering the world by his rules"
 	var R: float = radius(s)
 	var done: Dictionary = {}
 	var n: int = 0
@@ -802,30 +802,30 @@ func _order(u: Unit, s: Dictionary) -> void:
 		c.plans.clear()
 		c.calm = sim.sim_time + 24.0
 	if n > 0:
-		sim.log_event("Im Reich von %s herrschen Regel und Ordnung: %d Fehden enden auf einen Schlag." % [u.pname(), n], "jade", true)
+		sim.log_event("Rule and order reign in the realm of %s: %d feuds end at a stroke." % [u.pname(), n], "jade", true)
 
 
 ## Roter Lotus: hinterlässt ein wahres Erbe auf dem Qing-Mao-Berg.
 func _inherit(u: Unit, s: Dictionary) -> void:
-	s["doing"] = "Bereitet sein wahres Erbe vor" if not bool(s["done"]) else "Wacht über sein Erbe"
+	s["doing"] = "Preparing his true inheritance" if not bool(s["done"]) else "Watching over his inheritance"
 	if bool(s["done"]) or sim.sim_time - float(s["seat_t"]) < 60.0:
 		return
-	var p: Vector2 = sim._landmark("Qing-Mao-Berg")
+	var p: Vector2 = sim._landmark("Qing Mao Mountain")
 	if p.x < 0.0:
 		p = Vector2(float(s["sx"]) + 6.0, float(s["sy"]) - 8.0)
 	for k: int in range(12):
 		var q: Vector2 = p + Vector2((randf() - 0.5) * 10.0, (randf() - 0.5) * 10.0) * float(k)
 		if sim.place_ok("inherit", q.x, q.y) == "":
 			var pl: Place = sim.add_place("inherit", q.x, q.y, true)
-			pl.name = "Erbe des Roten Lotus"
+			pl.name = "Red Lotus True Inheritance"
 			s["done"] = true
-			sim.log_event("%s hinterlässt auf dem Qing-Mao-Berg ein wahres Erbe – es wartet auf einen würdigen Nachfahren." % u.pname(), "gold", true)
+			sim.log_event("%s leaves a true inheritance on Qing Mao Mountain – it awaits a worthy descendant." % u.pname(), "gold", true)
 			return
 
 
 ## Ursprungslotus: Wälder breiten sich um seinen Sitz aus.
 func _forest(u: Unit, s: Dictionary) -> void:
-	s["doing"] = "Lässt Wälder wachsen"
+	s["doing"] = "Growing forests"
 	var R: float = radius(s)
 	var n: int = 0
 	for k: int in range(400):
@@ -847,12 +847,12 @@ func _forest(u: Unit, s: Dictionary) -> void:
 			n += 1
 	if n > 0 and not bool(s["done"]):
 		s["done"] = true
-		sim.log_event("Um den Sitz von %s sprießen Wälder – der Holzpfad blüht." % u.pname(), "jade", true)
+		sim.log_event("Forests sprout around the seat of %s – the Wood Path flourishes." % u.pname(), "jade", true)
 
 
 ## Himmelsdieb: stiehlt anderen Unsterblichen ihre Unsterblichen Gu.
 func _steal(u: Unit, s: Dictionary) -> void:
-	s["doing"] = "Späht nach fremden Unsterblichen Gu"
+	s["doing"] = "Scouting for others' Immortal Gu"
 	if randf() > 0.35:
 		return
 	var c: int = int(s["clan"])
@@ -865,7 +865,7 @@ func _steal(u: Unit, s: Dictionary) -> void:
 	var t: Unit = cands.pick_random()
 	s["tgt"] = t.id
 	s["act"] = "steal"
-	s["doing"] = "Will " + t.pname() + " bestehlen"
+	s["doing"] = "Plans to rob " + t.pname()
 
 
 ## Geisterseele: Menschenfarmen wachsen schnell …
@@ -881,7 +881,7 @@ func _farm_month(u: Unit, s: Dictionary) -> void:
 
 ## … bis er ihre Seelen verschlingt.
 func _feast(u: Unit, s: Dictionary) -> void:
-	s["doing"] = "Mästet seine Menschenfarmen"
+	s["doing"] = "Fattening his human farms"
 	if sim.sim_time < float(s["feast"]):
 		return
 	s["feast"] = sim.sim_time + 72.0 + randf() * 48.0
@@ -893,7 +893,7 @@ func _feast(u: Unit, s: Dictionary) -> void:
 			continue
 		var v: Village = sim.villages[o.vil]
 		if v.reg == int(s["goal"]) and Vector2(v.cx - float(s["sx"]), v.cy - float(s["sy"])).length() < R and randf() < 0.4:
-			o.dreason = "Seele verschlungen"
+			o.dreason = "soul devoured"
 			o.hp = 0.0
 			n += 1
 			if n % 6 == 0:
@@ -906,12 +906,12 @@ func _feast(u: Unit, s: Dictionary) -> void:
 	sim.ring(u.x, u.y, 18.0, GuData.PATH_COL[9], 1.2)
 	sim.pillar(u.x, u.y, GuData.PATH_COL[9], 1.2)
 	sim.shake = 0.6
-	sim.log_event("%s verschlingt die Seelen von %d Menschen aus seinen Menschenfarmen und wird noch mächtiger!" % [u.pname(), n], "red", true)
+	sim.log_event("%s devours the souls of %d humans from his human farms and grows even mightier!" % [u.pname(), n], "red", true)
 
 
 ## Paradieserde: segnet Land und Dörfer, heilt Kranke.
 func _bless(u: Unit, s: Dictionary) -> void:
-	s["doing"] = "Segnet das Land"
+	s["doing"] = "Blessing the land"
 	var R: float = radius(s)
 	var sx: float = float(s["sx"])
 	var sy: float = float(s["sy"])
@@ -945,23 +945,23 @@ func _bless(u: Unit, s: Dictionary) -> void:
 			sim.world.mark_area(x, y)
 			n += 1
 	if nv > 0 and randf() < 0.35:
-		sim.log_event("%s segnet das Land: %d Dörfer ernten reichlich, Kranke genesen, Blumen blühen." % [u.pname(), nv], "jade", true)
+		sim.log_event("%s blesses the land: %d villages reap abundant harvests, the sick recover, flowers bloom." % [u.pname(), nv], "jade", true)
 
 
 ## Fang Yuan: veredelt Unsterbliche Gu und zerstört das Schicksals-Gu.
 func _refine(u: Unit, s: Dictionary) -> void:
-	s["doing"] = "Veredelt Unsterbliche Gu"
+	s["doing"] = "Refining Immortal Gu"
 	if fate_on:
 		for o: Unit in sim.units:
 			if o.hp > 0.0 and o != u and ((o.k == "a" and o.gname == "fate_gu") or (o.k == "p" and o.igu.has("fate_gu"))):
 				s["tgt"] = o.id
 				s["act"] = "fate"
-				s["doing"] = "Jagt das Schicksals-Gu"
+				s["doing"] = "Hunting the Fate Gu"
 				return
 	if u.igu.has("fate_gu"):
 		u.igu.remove_at(u.igu.find("fate_gu"))
 		sim.apply_igu(u)
-		_fate_shatter(u.pname() + " zerschmettert das Schicksals-Gu!")
+		_fate_shatter(u.pname() + " smashes the Fate Gu!")
 		return
 	if randf() < 0.5:
 		var id: String = Lore.igu_random()
@@ -974,12 +974,12 @@ func _refine(u: Unit, s: Dictionary) -> void:
 					break
 		sim.give_igu(to, id)
 		sim.spark(u.x, u.y - 2.0, GuData.PATH_COL[33], 12, 6.0)
-		sim.log_event("%s veredelt das Unsterbliche Gu %s%s." % [u.pname(), Lore.igu_name(id), "" if to == u else " für " + to.pname()], "violet", true)
+		sim.log_event("%s refines the Immortal Gu %s%s." % [u.pname(), Lore.igu_name(id), "" if to == u else " for " + to.pname()], "violet", true)
 
 
 ## Rücksichtsloser Wilder: jagt die stärksten Wesen der Welt.
 func _hunt(u: Unit, s: Dictionary) -> void:
-	s["doing"] = "Zieht umher"
+	s["doing"] = "Roaming"
 	var best: Unit = null
 	var bp: float = 0.0
 	for o: Unit in sim.units:
@@ -993,7 +993,7 @@ func _hunt(u: Unit, s: Dictionary) -> void:
 	if best != null:
 		s["tgt"] = best.id
 		s["act"] = "duel"
-		s["doing"] = "Jagt " + best.pname()
+		s["doing"] = "Hunting " + best.pname()
 
 
 ## Ziel erreicht: Aktion ausführen.
@@ -1010,9 +1010,9 @@ func _act(u: Unit, s: Dictionary, o: Unit) -> void:
 			o.tgt = u
 			if str(s["ag"]) == "hunt":
 				u.hp = minf(u.mhp, u.hp + u.mhp * 0.4)
-				sim.float_txt(u, "Verwandlung!", GuData.PATH_COL[32])
+				sim.float_txt(u, "Transformation!", GuData.PATH_COL[32])
 				sim.ring(u.x, u.y, 8.0, GuData.PATH_COL[0], 0.8)
-			sim.log_event("%s stellt %s zum Kampf!" % [nm, o.pname()], "war", true)
+			sim.log_event("%s confronts %s in battle!" % [nm, o.pname()], "war", true)
 		"steal":
 			if o.k != "p" or o.igu.is_empty():
 				return
@@ -1023,7 +1023,7 @@ func _act(u: Unit, s: Dictionary, o: Unit) -> void:
 			sim.give_igu(u, id)
 			sim.spark(o.x, o.y - 2.0, GuData.PATH_COL[41], 14, 6.0)
 			sim.float_txt(u, "+" + Lore.igu_name(id), Color("#ffe27a"))
-			sim.log_event("%s stiehlt %s aus der Blende von %s!" % [nm, Lore.igu_name(id), o.pname()], "violet", true)
+			sim.log_event("%s steals %s from the aperture of %s!" % [nm, Lore.igu_name(id), o.pname()], "violet", true)
 		"fate":
 			if o.k == "a" and o.gname == "fate_gu":
 				o.caught = true
@@ -1035,7 +1035,7 @@ func _act(u: Unit, s: Dictionary, o: Unit) -> void:
 			else:
 				return
 			sim.pillar(o.x, o.y, GuData.PATH_COL[28], 1.4)
-			_fate_shatter(nm + " zerschmettert das Schicksals-Gu!")
+			_fate_shatter(nm + " smashes the Fate Gu!")
 		"catch":
 			if o.k == "a" and o.gname == "fate_gu":
 				o.caught = true
@@ -1048,7 +1048,7 @@ func _act(u: Unit, s: Dictionary, o: Unit) -> void:
 				return
 			sim.give_igu(u, "fate_gu")
 			sim.pillar(o.x, o.y, GuData.PATH_COL[28], 1.0)
-			sim.log_event("%s nimmt das Schicksals-Gu in ihre Obhut." % nm, "gold", true)
+			sim.log_event("%s takes the Fate Gu into her care." % nm, "gold", true)
 
 
 # ---------------- Inspektor ----------------
@@ -1060,18 +1060,18 @@ func unit_lines(u: Unit) -> String:
 	var pn: String = GuData.PATH_NAME[clampi(u.path, 0, GuData.PATH_NAME.size() - 1)]
 	var out: String = "\n[color=#ffd24a]%s[/color]" % str(s["att"])
 	if u.id == supreme:
-		out += "\n[color=#ffd24a]Der Höchste – Ära des %s-Pfades[/color] [color=#9db09e](Kultivierung +80 %%)[/color]" % pn
+		out += "\n[color=#ffd24a]The Supreme – Era of the %s Path[/color] [color=#9db09e](cultivation +80 %%)[/color]" % pn
 	else:
-		out += "\n[color=#e8c070]Pfad-Blüte: %s-Pfad[/color] [color=#9db09e](Kultivierung +50 %%)[/color]" % pn
+		out += "\n[color=#e8c070]Path flourishing: %s Path[/color] [color=#9db09e](cultivation +50 %%)[/color]" % pn
 	if str(s["ph"]) == "rule":
-		out += "\n[color=#9db09e]Herrschaft[/color]  %s · Umkreis %d · %d Vasallen" % [GuData.REGN[clampi(int(s["goal"]), 0, 4)], int(radius(s)), (s["vas"] as Array).size()]
-	out += "\n[color=#9db09e]Ziel[/color]  " + str(s["doing"])
+		out += "\n[color=#9db09e]Dominion[/color]  %s · radius %d · %d vassals" % [GuData.REGN[clampi(int(s["goal"]), 0, 4)], int(radius(s)), (s["vas"] as Array).size()]
+	out += "\n[color=#9db09e]Goal[/color]  " + str(s["doing"])
 	var vd: Dictionary = _vd(s)
 	if not vd.is_empty():
 		out += "\n[color=#9db09e]Agenda[/color]  " + str(vd["agenda"])
 	var c: Clan = _clan(int(s["clan"]))
 	if c != null:
-		out += "\n[color=#9db09e]Blutlinie[/color]  [color=#%s]■[/color] %s · %d Mitglieder%s" % [c.col.to_html(false), c.name, lineage_size(s), (" · %d Nachkommen gezeugt" % int(s["desc"])) if int(s["desc"]) > 0 else ""]
+		out += "\n[color=#9db09e]Bloodline[/color]  [color=#%s]■[/color] %s · %d members%s" % [c.col.to_html(false), c.name, lineage_size(s), (" · %d descendants sired" % int(s["desc"])) if int(s["desc"]) > 0 else ""]
 	return out
 
 
@@ -1082,7 +1082,7 @@ func village_line(clan_id: int) -> String:
 	var u: Unit = sim.unit_by_id(int(o["uid"]))
 	if u == null:
 		return ""
-	return "[color=#9db09e]%s[/color]  [color=#ffd24a]%s[/color]\n" % ["Blutlinie von" if str(o["k"]) == "lin" else "Vasall von", u.pname()]
+	return "[color=#9db09e]%s[/color]  [color=#ffd24a]%s[/color]\n" % ["Bloodline of" if str(o["k"]) == "lin" else "Vassal of", u.pname()]
 
 
 # ---------------- Speichern ----------------

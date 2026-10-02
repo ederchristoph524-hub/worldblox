@@ -24,27 +24,27 @@ var wdist: PackedByteArray
 ## Benannte Orte der kanonischen Gu-Weltkarte (Modus "gu"); kind: siedlung (Bauland), berg, fluss, ort, gebiet.
 ## x/y in Bezugskoordinaten 0..256 (MapGu.REF); landmarks enthält sie in Kacheln der aktuellen Kartengröße.
 const LANDMARKS: Array = [
-	{"name": "Himmlischer Hof", "x": 124, "y": 126, "region": 4, "kind": "siedlung"},
-	{"name": "Unsterblicher-Kranich-Sekte", "x": 158, "y": 136, "region": 4, "kind": "siedlung"},
-	{"name": "Geistaffinitätshaus", "x": 100, "y": 142, "region": 4, "kind": "siedlung"},
-	{"name": "Gu-Yue-Dorf", "x": 78, "y": 214, "region": 1, "kind": "siedlung"},
-	{"name": "Qing-Mao-Berg", "x": 80, "y": 205, "region": 1, "kind": "berg"},
-	{"name": "Shang-Clan-Stadt", "x": 140, "y": 238, "region": 1, "kind": "siedlung"},
-	{"name": "Bai-Gu-Berg", "x": 176, "y": 230, "region": 1, "kind": "berg"},
-	{"name": "Roter Drachenfluss", "x": 66, "y": 222, "region": 1, "kind": "fluss"},
-	{"name": "Gelber Drachenfluss", "x": 126, "y": 214, "region": 1, "kind": "fluss"},
-	{"name": "Jadedrachenfluss", "x": 190, "y": 216, "region": 1, "kind": "fluss"},
-	{"name": "Kaiserhof-Gesegnetes-Land", "x": 154, "y": 30, "region": 0, "kind": "siedlung"},
-	{"name": "Lang-Ya-Gesegnetes-Land", "x": 104, "y": 26, "region": 0, "kind": "ort"},
-	{"name": "Große Oase", "x": 36, "y": 112, "region": 2, "kind": "siedlung"},
-	{"name": "Unpassierbare Dünen", "x": 30, "y": 168, "region": 2, "kind": "gebiet"},
+	{"name": "Heavenly Court", "x": 124, "y": 126, "region": 4, "kind": "siedlung"},
+	{"name": "Immortal Crane Sect", "x": 158, "y": 136, "region": 4, "kind": "siedlung"},
+	{"name": "Spirit Affinity House", "x": 100, "y": 142, "region": 4, "kind": "siedlung"},
+	{"name": "Gu Yue Village", "x": 78, "y": 214, "region": 1, "kind": "siedlung"},
+	{"name": "Qing Mao Mountain", "x": 80, "y": 205, "region": 1, "kind": "berg"},
+	{"name": "Shang Clan City", "x": 140, "y": 238, "region": 1, "kind": "siedlung"},
+	{"name": "Bai Gu Mountain", "x": 176, "y": 230, "region": 1, "kind": "berg"},
+	{"name": "Red Dragon River", "x": 66, "y": 222, "region": 1, "kind": "fluss"},
+	{"name": "Yellow Dragon River", "x": 126, "y": 214, "region": 1, "kind": "fluss"},
+	{"name": "Jade Dragon River", "x": 190, "y": 216, "region": 1, "kind": "fluss"},
+	{"name": "Imperial Court Blessed Land", "x": 154, "y": 30, "region": 0, "kind": "siedlung"},
+	{"name": "Lang Ya Blessed Land", "x": 104, "y": 26, "region": 0, "kind": "ort"},
+	{"name": "Great Oasis", "x": 36, "y": 112, "region": 2, "kind": "siedlung"},
+	{"name": "Impassable Dunes", "x": 30, "y": 168, "region": 2, "kind": "gebiet"},
 ]
 
 ## Lage der Orte auf der alten 256er-Gu-Karte (Spielstände bis v5, Kacheln)
-const LANDMARKS_V5: Dictionary = {"Himmlischer Hof": [124, 130], "Unsterblicher-Kranich-Sekte": [154, 134], "Geistaffinitätshaus": [110, 140],
-	"Gu-Yue-Dorf": [78, 213], "Qing-Mao-Berg": [80, 205], "Shang-Clan-Stadt": [142, 233], "Bai-Gu-Berg": [176, 230], "Roter Drachenfluss": [62, 214],
-	"Gelber Drachenfluss": [124, 208], "Jadedrachenfluss": [190, 212], "Kaiserhof-Gesegnetes-Land": [150, 52], "Lang-Ya-Gesegnetes-Land": [86, 58],
-	"Große Oase": [50, 104], "Unpassierbare Dünen": [34, 166]}
+const LANDMARKS_V5: Dictionary = {"Heavenly Court": [124, 130], "Immortal Crane Sect": [154, 134], "Spirit Affinity House": [110, 140],
+	"Gu Yue Village": [78, 213], "Qing Mao Mountain": [80, 205], "Shang Clan City": [142, 233], "Bai Gu Mountain": [176, 230], "Red Dragon River": [62, 214],
+	"Yellow Dragon River": [124, 208], "Jade Dragon River": [190, 212], "Imperial Court Blessed Land": [150, 52], "Lang Ya Blessed Land": [86, 58],
+	"Great Oasis": [50, 104], "Impassable Dunes": [34, 166]}
 
 ## Leere Startwelten zum freien Bauen (ohne Regionswände, ohne benannte Orte, kaum Pflanzen).
 const BLANK_MODES: PackedStringArray = ["ocean", "flat", "island", "continents"]
@@ -73,7 +73,7 @@ var dver: PackedInt32Array
 var water_dirty: bool = false
 ## Kartenebene der Gebietsanzeige: 0 Clan-Gebiete, 1 Dorf-Gebiete, 2 Regionen, 3 Einflusssphären (Mächte).
 var layer: int = 0
-const LAYER_NAME: PackedStringArray = ["Clan-Gebiete", "Dorf-Gebiete", "Regionen", "Einflusssphären"]
+const LAYER_NAME: PackedStringArray = ["Clan Territories", "Village Territories", "Regions", "Spheres of Influence"]
 ## Breite der verblassenden Einflusszone jenseits des Dorfgebiets (Kacheln)
 const INF_R: int = 12
 ## Beschriftungspunkte nach dem letzten update_territory: Clan-Id -> Vector3(x, y, Kacheln);
