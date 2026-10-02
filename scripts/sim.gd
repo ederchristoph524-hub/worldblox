@@ -182,7 +182,7 @@ func flash(l: float) -> void:
 	fx.append({"k": "flash", "l": l, "ml": l})
 
 
-func bolt(x: float, y: float, dmg: float, ign: bool) -> void:
+func bolt(x: float, y: float, dmg: float, ign: bool, src: Unit = null) -> void:
 	var pts: PackedVector2Array = PackedVector2Array()
 	var px: float = x + (randf() - 0.5) * 8.0
 	var py: float = y - 70.0
@@ -196,7 +196,8 @@ func bolt(x: float, y: float, dmg: float, ign: bool) -> void:
 	var i: int = clampi(int(y), 0, H - 1) * W + clampi(int(x), 0, W - 1)
 	if dmg > 0.0:
 		for o: Unit in near_units(x, y, 3.0):
-			hurt(o, dmg, null)
+			if src == null or (o != src and hostile(src, o)):
+				hurt(o, dmg, src)
 		if ign:
 			ignite(i, 1.0)
 	elif ign and randf() < 0.4:
@@ -301,7 +302,7 @@ func mk_person(x: float, y: float, race: int, p_age: float = 0.0, sur: String = 
 
 func set_stats(u: Unit, full: bool) -> void:
 	var m: float = GuData.RACE_HP[u.race] * u.ig_hp
-	var f: float = 1.0 + 0.15 * u.stage
+	var f: float = 1.0 + 0.1 * u.stage
 	var bl: float = 1.3 if u.bless > 0 else (0.65 if u.bless < 0 else 1.0)
 	var ratio: float = u.hp / u.mhp if u.mhp > 1.0 else 1.0
 	u.mhp = GuData.HP[u.rank] * m * f * bl
@@ -492,8 +493,59 @@ func spawn_beast(x: float, y: float, s: String) -> Unit:
 	return u
 
 
+# ---------------- Machtmodell (Ränge wie in Reverend Insanity) ----------------
+# Macht-Stufe je Rang (Index = Rang bzw. Bestien-Stufe). Schaden zwischen zwei Wesen wird mit
+# might(Angreifer) / might(Ziel) multipliziert: sterbliche Ränge ×3,5 je Rang, der Sprung zu Rang 6
+# ×1000 (Unsterblichenessenz gegen Uressenz), Rang 7 ×2,8, Rang 8 ×2,5 und Rang 9 ×500 über Rang 8.
+const MIGHT: PackedFloat32Array = [1.0, 3.5, 12.0, 42.0, 150.0, 520.0, 520000.0, 1.46e6, 3.64e6, 1.82e9]
+## Faktor je Kleinstufe (Anfang → Mitte → Ober → Spitze) – sterblich bzw. unsterblich (Dao-Male)
+const STAGE_MIGHT: PackedFloat32Array = [1.13, 1.15]
+const APT_MIGHT: Dictionary = {"X": 1.25, "A": 1.12, "B": 1.05, "C": 1.0, "D": 0.93}
+## Gu-Meister fliehen vor Gegnern mit mehr als FLEE_P-facher Kampfkraft (≈ besiegt allein ein Dutzend wie sie)
+const FLEE_P: float = 150.0
+var arena: bool = false   ## Entwickler-Arena (--ranktest): niemand flieht, Unterwerfung aus
+
+
+## Ab Rang 6 (bzw. Bestien-Stufe 6) zählt ein Wesen als Unsterblicher: Sterbliche können es praktisch nicht verletzen.
+func is_imm(u: Unit) -> bool:
+	return u.rank >= 6 and u.beh != GuData.B_IGU and u.beh != GuData.B_GU
+
+
+## Quasi-Rang-9: Rang 8 Spitzenstufe mit mehreren Unsterblichen Gu (oder Herzog Long).
+func quasi9(u: Unit) -> bool:
+	return u.k == "p" and u.rank == 8 and u.stage >= 3 and (u.fig == "duke_long" or u.igu.size() >= 3)
+
+
+## Macht-Stufe eines Wesens: Rang × Kleinstufe × Begabung (× Quasi-Rang-9).
+func might(u: Unit) -> float:
+	var r: int = clampi(u.rank, 0, 9)
+	var m: float = MIGHT[r]
+	if u.k == "p" and r > 0:
+		m *= pow(STAGE_MIGHT[1 if r >= 6 else 0], u.stage) * float(APT_MIGHT.get(u.apt, 1.0))
+		if quasi9(u):
+			m *= 5.0
+	return m
+
+
+## Schadensfaktor von s gegen t. Sterbliche ohne Unsterbliche Gu richten gegen Unsterbliche fast nichts aus,
+## gegen einen Ehrwürdigen richtet niemand unter Rang 9 etwas aus; Ehrwürdige untereinander nur ein Viertel.
+func dmg_mul(s: Unit, t: Unit) -> float:
+	var f: float = clampf(might(s) / might(t), 1e-6, 1e5)
+	if is_imm(t) and not is_imm(s) and not s.igu.is_empty():
+		f *= 10.0   # Unsterbliches Gu in sterblicher Hand
+	if t.rank >= 9 and t.k == "p":
+		if s.rank < 9:
+			f = minf(f, 1e-4 if quasi9(s) else 1e-5)
+		elif s.k == "p":
+			f *= 0.5   # Ehrwürdige untereinander: zäh und langwierig
+	return f
+
+
+## Kampfkraft (für Rangliste, Flucht, Wahl der Beute): Angriff × Leben × Macht² – ein Verhältnis von
+## power(a) / power(b) ≈ n² heißt, a besiegt etwa n Gegner wie b.
 func power(u: Unit) -> float:
-	return (u.atk + 1.0) * (u.mhp + 1.0)
+	var m: float = might(u)
+	return (u.atk + 1.0) * (u.mhp + 1.0) * m * m
 
 
 func passable(u: Unit, tx: int, ty: int) -> bool:
@@ -970,7 +1022,7 @@ func gain_gu(u: Unit) -> String:
 
 
 func cultivate(u: Unit) -> void:
-	if u.rank >= 9 or not laws["cult"]:
+	if (u.rank >= 9 and u.stage >= 3) or not laws["cult"]:
 		return
 	var v: Village = villages[u.vil] if u.vil >= 0 else null
 	var am: float = APTM.get(u.apt, 1.0)
@@ -999,7 +1051,7 @@ func cultivate(u: Unit) -> void:
 
 
 func stage_up(u: Unit) -> void:
-	if u.rank >= 9:
+	if u.rank >= 9 and u.stage >= 3:
 		return
 	if u.stage < 3:
 		u.stage += 1
@@ -1252,8 +1304,8 @@ func fire_step() -> void:
 func hurt(t: Unit, dmg: float, src: Unit) -> void:
 	if t.hp <= 0.0:
 		return
-	if t.rank >= 9 and src != null and src.rank >= 9 and t.k == "p":
-		dmg *= 0.25   # Ehrwürdige töten einander nur selten
+	if src != null and src != t:
+		dmg *= dmg_mul(src, t)
 	t.hp -= dmg
 	t.flash = 0.12
 	if t.hp > 0.0 and (t.igf & F_HEAL) != 0 and t.hp < t.mhp * 0.3 and sim_time >= t.heal_cd:
@@ -1275,7 +1327,8 @@ func hurt(t: Unit, dmg: float, src: Unit) -> void:
 func on_kill(s: Unit, t: Unit) -> void:
 	if s.k == "p":
 		if s.rank >= 1:
-			s.prog += 0.03 * (1 + t.rank) * (3.0 if (s.rogue or s.align == 1) else 1.0)
+			# Nur würdige Gegner bringen Fortschritt – wer Ameisen zertritt, wächst nicht
+			s.prog += 0.03 * (1 + t.rank) * (3.0 if (s.rogue or s.align == 1) else 1.0) * minf(1.0, might(t) / might(s))
 			if s.prog >= 1.0:
 				s.prog = 0.0
 				stage_up(s)
@@ -1470,7 +1523,8 @@ func monthly() -> void:
 			person_month(u)
 		else:
 			animal_month(u)
-	ven.month()
+	if not arena:
+		ven.month()
 	for c: Clan in clans:
 		if not c.alive:
 			continue
@@ -1527,6 +1581,13 @@ func monthly() -> void:
 			var o2: Clan = clans[e]
 			if not o2.alive:
 				c.war.erase(e)
+				continue
+			# Die Seite mit dem höheren Spitzenrang beherrscht den Krieg: gegen einen Unsterblichen (und erst recht
+			# einen Ehrwürdigen) gibt der Schwächere bald auf, statt sich abschlachten zu lassen.
+			var tc: int = top_rank(c)
+			var to: int = top_rank(o2)
+			if not arena and to >= 6 and to > tc and randf() < (0.3 if to >= 9 else (0.12 if tc < 6 else 0.06)):
+				capitulate(c, o2)
 				continue
 			if (sim_time - c.war_start > 36.0 and randf() < 0.012) or (not laws["war"] and randf() < 0.2) or randf() < 0.0005 * (c.exh + o2.exh):
 				if c.exh > 60.0 and randf() < 0.5:
@@ -1773,7 +1834,10 @@ func strongest(n: int) -> Array[Unit]:
 	for u: Unit in units:
 		if u.k == "p" and u.hp > 0.0 and u.rank > 0:
 			arr.append(u)
-	arr.sort_custom(func(a: Unit, b: Unit) -> bool: return a.rank * 4 + a.stage + a.prog > b.rank * 4 + b.stage + b.prog)
+	var pw: Dictionary = {}
+	for u: Unit in arr:
+		pw[u] = power(u) * (1.0 + 0.1 * u.prog)
+	arr.sort_custom(func(a: Unit, b: Unit) -> bool: return float(pw[a]) > float(pw[b]))
 	return arr.slice(0, n)
 
 
@@ -1982,21 +2046,36 @@ func think_p(u: Unit) -> void:
 	if u.undead:
 		undead_think(u)
 		return
-	if u.rank >= 9 and ven.think(u):
+	if u.rank >= 9 and not arena and ven.think(u):
 		return
 	var v: Village = villages[u.vil] if u.vil >= 0 else null
 	var a: float = uage(u)
 	var c: Clan = clans[u.clan] if u.clan >= 0 else null
-	var sight: float = 22.0 if u.rank >= 6 else 10.0 + u.rank * 1.2
+	var sight: float = (22.0 if u.rank >= 6 else 10.0 + u.rank * 1.2) if not arena else 40.0
+	var imm: bool = u.rank >= 6
+	if not arena and u.tgt != null and u.tgt.hp > 0.0 and ((not imm and is_imm(u.tgt) and u.igu.is_empty()) or (u.rank > 0 and power(u.tgt) > power(u) * FLEE_P)):
+		# Sinnloser Kampf (z. B. Sterblicher gegen Unsterblichen): abbrechen und fliehen
+		var ft: Unit = u.tgt
+		u.tgt = null
+		flee(u, ft, v)
+		return
 	if u.tgt == null or randf() < 0.25:
-		var e: Unit = nearest(u, sight, func(o: Unit) -> bool: return hostile(u, o))
+		# Unsterbliche verschwenden keine Zeit mit Ameisen: Zivilisten (Rang 0 ohne Miliz) greifen sie nicht an
+		var e: Unit = nearest(u, sight, func(o: Unit) -> bool: return hostile(u, o) and not (imm and o.k == "p" and o.rank == 0 and not o.militia and not o.rogue))
 		if e != null:
-			if a < 14.0 or (u.rank == 0 and not u.militia and u.job != "hunt" and power(e) > power(u) * 1.5):
-				flee(u, e, v)
-				return
-			if u.rank > 0 and u.rank < 6 and power(e) > power(u) * 12.0 and e.k == "p":
-				flee(u, e, v)
-				return
+			if not arena:
+				if a < 14.0 or (u.rank == 0 and not u.militia and u.job != "hunt" and power(e) > power(u) * 1.5):
+					flee(u, e, v)
+					return
+				# Furcht: ein feindlicher Unsterblicher (bzw. ein weit Stärkerer) in Sicht – Sterbliche ohne Unsterbliche Gu fliehen
+				var fe: Unit = e
+				if not imm and not is_imm(e) and u.igu.is_empty():
+					var ie: Unit = nearest(u, sight + 6.0, func(o: Unit) -> bool: return is_imm(o) and hostile(o, u))
+					if ie != null:
+						fe = ie
+				if (not imm and is_imm(fe) and u.igu.is_empty()) or (u.rank > 0 and power(fe) > power(u) * FLEE_P):
+					flee(u, fe, v)
+					return
 			u.tgt = e
 			u.st = "idle"
 			return
@@ -2017,7 +2096,8 @@ func think_p(u: Unit) -> void:
 			if rich != null:
 				u.tgt = rich
 				return
-		var prey: Unit = nearest(u, 24.0, func(o: Unit) -> bool: return o.k == "p" and not o.rogue and power(o) < power(u) * 1.3)
+		# Dämonische Unsterbliche jagen nur Gu-Meister ab Rang 3 (Gu und Unsterbliche Gu als Beute), keine Ameisen
+		var prey: Unit = nearest(u, 24.0, func(o: Unit) -> bool: return o.k == "p" and not o.rogue and power(o) < power(u) * 1.3 and (u.rank < 6 or o.rank >= 3))
 		if prey != null:
 			u.tgt = prey
 			return
@@ -2031,6 +2111,9 @@ func think_p(u: Unit) -> void:
 		wander(u, 20.0)
 		return
 	if v == null:
+		if arena:
+			wander(u, 3.0)
+			return
 		lone_think(u, a)
 		return
 	if a < 14.0:
@@ -2039,7 +2122,8 @@ func think_p(u: Unit) -> void:
 		return
 	if c != null and not c.war.is_empty() and (u.rank > 0 or u.militia) and c.wt >= 0:
 		var ev: Village = villages[c.wt]
-		if ev.alive and c.war.has(ev.clan):
+		# Sterbliche ziehen nicht gegen einen Clan, den ein Unsterblicher schützt, solange der eigene keinen hat
+		if ev.alive and c.war.has(ev.clan) and (imm or arena or top_rank(clans[ev.clan]) < 6 or top_rank(c) >= 6):
 			go_to(u, ev.cx + randf() * 8.0 - 4.0, ev.cy + randf() * 8.0 - 4.0)
 			u.st = "idle"
 			return
@@ -2296,13 +2380,16 @@ func move_unit(u: Unit, dt: float) -> void:
 func attack(u: Unit, e: Unit) -> void:
 	u.cd = (1.1 if u.rank >= 6 else 0.9) if u.k == "p" else (1.6 if u.rank >= 6 else 0.85)
 	u.face = 1 if e.x > u.x else -1
+	if u.k == "p" and u.rank >= 6 and not is_imm(e):
+		finger_snap(u, e)
+		return
 	if u.k == "p" and u.rank >= 6 and u.km_cd <= 0.0 and u.path >= 0 and randf() < 0.3:
 		u.km_cd = 9.0 + randf() * 8.0
 		u.cd = 1.4
 		killer_move(u, e.x, e.y)
 		return
 	if (u.igf & F_BOLT) != 0 and randf() < 0.3:
-		bolt(e.x, e.y, u.atk * 0.6, false)
+		bolt(e.x, e.y, u.atk * 0.6, false, u)
 	if u.undead and e.k == "p" and not e.undead and e.rank < 6 and e.zin < 0.0 and randf() < 0.45:
 		e.zin = sim_time + 1.0 + randf() * 2.0
 		e.fxm = true
@@ -2955,6 +3042,65 @@ func killer_move(u: Unit, x: float, y: float) -> void:
 		log_event(u.pname() + " entfesselt den " + nm + ".", "violet")
 
 
+## „Fingerschnipsen“: ein Unsterblicher gegen Sterbliche – jeder Schlag ist ein kleiner Mordzug, der alle
+## feindlichen Kämpfer (Gu-Meister, Miliz, Bestien) im Umkreis auslöscht. Zivilisten bleiben verschont.
+func finger_snap(u: Unit, e: Unit) -> void:
+	var p: int = clampi(u.path, 0, GuData.PATH_NAME.size() - 1)
+	var c: Color = GuData.PATH_COL[p]
+	var r: float = snap_r(u)
+	u.cd = 1.0 if u.rank < 9 else 0.7
+	fx.append({"k": "km", "x": e.x, "y": e.y, "r": r, "c": c, "p": p, "l": 0.8, "ml": 0.8})
+	ring(u.x, u.y - 2.0, 2.5, GuData.ESS_COL[clampi(u.rank, 0, 9)], 0.4)
+	var n: int = 0
+	for o: Unit in near_units(e.x, e.y, r):
+		if o == u or not hostile(u, o) or is_imm(o):
+			continue
+		if o != e and o.k == "p" and o.rank == 0 and not o.militia and not o.rogue:
+			continue
+		hurt(o, u.atk * 2.0, u)
+		n += 1
+	if n >= 6 and u.km_cd <= 0.0:
+		u.km_cd = 6.0
+		fx.append({"k": "txt", "x": u.x, "y": u.y - 7.0, "t": Lore.km_name(p), "c": c.lightened(0.3), "l": 1.6, "ml": 1.6})
+		shake = minf(1.0, shake + 0.08 * (u.rank - 5))
+	spark(e.x, e.y, c, 10 + n * 2, 7.0)
+
+
+## Reichweite des Fingerschnipsens: Rang 6 sechs Kacheln, Rang 9 zwölf.
+func snap_r(u: Unit) -> float:
+	return 6.0 + (u.rank - 6) * 1.5 + (3.0 if u.rank >= 9 else 0.0)
+
+
+## Höchster Rang eines Clans (Clan-Oberhaupt).
+func top_rank(c: Clan) -> int:
+	if c == null or c.lead == null or c.lead.hp <= 0.0 or c.lead.clan != c.id:
+		return 0
+	return c.lead.rank
+
+
+## Der schwächere Clan unterwirft sich der Übermacht: das Dorf, das dem Sieger am nächsten liegt, geht über, dann Frieden.
+func capitulate(c: Clan, o: Clan) -> void:
+	var oc: Village = villages[o.cap] if o.cap >= 0 and o.cap < villages.size() else null
+	var best: Village = null
+	var bd: float = 1e9
+	var n: int = 0
+	for v: Village in villages:
+		if not v.alive or v.clan != c.id:
+			continue
+		n += 1
+		var d: float = Vector2(v.cx - oc.cx, v.cy - oc.cy).length() if oc != null else randf()
+		if v.id == c.cap:
+			d += 60.0
+		if d < bd:
+			bd = d
+			best = v
+	var tr: int = top_rank(o)
+	log_event("%s beugt sich der Übermacht von %s (%s)%s." % [c.name, o.name, rank_title(tr), (" und tritt " + best.name + " ab") if best != null and n > 1 else ""], "war", true)
+	if best != null and n > 1:
+		capture(best, o)
+	make_peace(c, o, true)
+
+
 # ---------------- Gu-Meister, Unsterbliche, Ehrwürdige, Figuren ----------------
 
 func _race_for_region(rg: int) -> int:
@@ -2976,6 +3122,8 @@ func spawn_gm(x: float, y: float, rank: int) -> Unit:
 	awaken(u, true)
 	for r: int in range(2, rank + 1):
 		ascend(u, r)
+	u.stage = [0, 0, 0, 1, 1, 2, 3].pick_random()
+	set_stats(u, true)
 	u.life = maxf(u.life, uage(u) + 25.0 + GuData.LIFEB[rank])
 	pillar(x, y, GuData.ESS_COL[rank], 0.6)
 	return u
@@ -2988,6 +3136,8 @@ func spawn_immortal(x: float, y: float, rank: int) -> Unit:
 	awaken(u, true)
 	for r: int in range(2, rank + 1):
 		ascend(u, r)
+	u.stage = [0, 0, 1, 1, 2, 3].pick_random()
+	set_stats(u, true)
 	u.life = uage(u) + GuData.LIFEB[rank] * 0.8 + randf() * 200.0
 	u.next_trib = uage(u) + 8.0 + randf() * 10.0
 	if randf() < 0.15 + 0.2 * (rank - 6):
@@ -3100,8 +3250,11 @@ func spawn_figure(fd: Dictionary, x: float, y: float) -> String:
 	u.life = maxf(u.life, uage(u) + 40.0 + GuData.LIFEB[rank])
 	if rank >= 6:
 		u.next_trib = uage(u) + 10.0 + randf() * 10.0
+	# Figuren der Handlung stehen meist weit oben in ihrem Rang (Herzog Long: Rang 8 Spitze = Quasi-Rang 9)
+	u.stage = 3 if u.fig == "duke_long" else 1 + randi() % 3
 	for id: Variant in fd["igu"]:
 		give_igu(u, str(id))
+	set_stats(u, true)
 	u.hp = u.mhp
 	pillar(x, y, GuData.ESS_COL[rank], 0.9)
 	log_event(u.pname() + " betritt die Welt (" + rank_title(rank) + (", " + oc.name if oc != null else "") + ").", "gold", true)

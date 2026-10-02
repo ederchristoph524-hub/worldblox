@@ -71,9 +71,12 @@ const TNAME: PackedStringArray = ["Tiefes Meer", "Seichtes Wasser", "Strand", "G
 const FNAME: PackedStringArray = ["", "Baum", "Bambus", "Palme", "Kiefer", "Fels", "Urstein-Ader", "Geisterquelle", "Strauch", "Grasbüschel", "Blume", "Straße"]
 const DEFH: PackedFloat32Array = [0.2, 0.34, 0.38, 0.5, 0.5, 0.5, 0.67, 0.84, 0.5, 0.5, 0.5, 0.5, 0.6]
 
-const ESS_NAME: PackedStringArray = ["", "Grüne Kupfer-Uressenz", "Rote Stahl-Uressenz", "Weiße Silber-Uressenz", "Gelbe Gold-Uressenz", "Purpurne Kristall-Uressenz", "Grüne-Traube-Unsterblichenessenz", "Rote-Dattel-Unsterblichenessenz", "Weiße-Litschi-Unsterblichenessenz", "Unsterblichenessenz (Rang 9)"]
-const ESS_COL: Array[Color] = [Color.WHITE, Color("#43b38f"), Color("#d24a35"), Color("#e6eaf0"), Color("#f0c040"), Color("#a768e2"), Color("#92de5c"), Color("#c0284a"), Color("#fff1d8"), Color("#ffd24a")]
-const STAGE: PackedStringArray = ["Anfangsstufe", "Mittlere Stufe", "Obere Stufe", "Gipfelstufe"]
+## Essenzen wie in Reverend Insanity: Uressenz der Sterblichen (Rang 1–5), Unsterblichenessenz ab Rang 6
+## (Reihenfolge 7 Rote Dattel / 8 Weiße Litschi wie in der Enzyklopädie, docs „Weltenbau und Kultivierungssystem“).
+const ESS_NAME: PackedStringArray = ["", "Grüne Kupfer-Uressenz", "Rote Stahl-Uressenz", "Weiße Silber-Uressenz", "Gelbe Gold-Uressenz", "Purpurne Kristall-Uressenz", "Grüne-Traube-Unsterblichenessenz", "Rote-Dattel-Unsterblichenessenz", "Weiße-Litschi-Unsterblichenessenz", "Gelbe-Aprikosen-Unsterblichenessenz"]
+const ESS_COL: Array[Color] = [Color.WHITE, Color("#4fae8c"), Color("#c8473a"), Color("#dfe6ee"), Color("#f2c23a"), Color("#a65ee8"), Color("#8ed850"), Color("#b5263e"), Color("#f7f0e4"), Color("#ffb43a")]
+## Kleinstufen: sterblich die vier Zustände der Öffnungswand, unsterblich als Maß der Dao-Male
+const STAGE: PackedStringArray = ["Anfangsstufe", "Mittelstufe", "Oberstufe", "Spitzenstufe"]
 const HP: PackedFloat32Array = [10, 22, 38, 64, 105, 170, 700, 1700, 4200, 16000]
 const ATK: PackedFloat32Array = [2, 4, 7, 12, 20, 34, 160, 420, 1050, 4200]
 const RNG: PackedFloat32Array = [2.2, 6, 6.8, 7.6, 8.4, 9.6, 14, 16, 18, 22]
@@ -254,6 +257,23 @@ static func rank_title(r: int) -> String:
 	if r <= 8:
 		return "Rang %d Gu-Unsterblicher" % r
 	return "Rang 9 Ehrwürdiger"
+
+
+## „Rang 5 Spitzenstufe“ (Rang und Kleinstufe)
+static func rank_stage(r: int, st: int) -> String:
+	if r <= 0:
+		return "Sterblicher"
+	return "Rang %d %s" % [r, STAGE[clampi(st, 0, 3)]]
+
+
+## „Rang 5 Spitzenstufe · Gu-Meister“, „Rang 7 Oberstufe · Gu-Unsterblicher“, „Rang 9 … · Ehrwürdiger“
+static func rank_stage_title(r: int, st: int, quasi: bool = false) -> String:
+	if r <= 0:
+		return "Sterblicher"
+	var k: String = "Gu-Meister" if r <= 5 else ("Gu-Unsterblicher" if r <= 8 else "Ehrwürdiger")
+	if quasi:
+		k = "Quasi-Rang 9"
+	return rank_stage(r, st) + " · " + k
 
 
 static func is_tree(f: int) -> bool:

@@ -115,6 +115,10 @@ func _ready() -> void:
 			_dev_sandbox()
 		if a == "--ventest":
 			_dev_ventest()
+		if a == "--ranktest" or a == "--ranktest=arena" or a == "--ranktest=health":
+			RankTest.run(self, a != "--ranktest=health", a != "--ranktest=arena")
+		if a.begins_with("--rankshots="):
+			RankTest.shots(self, a.substr(12))
 		if a.begins_with("--sheets="):
 			_dev_sheets(a.substr(9))
 		if a == "--blanktest":
@@ -1015,7 +1019,7 @@ func _open_unit() -> void:
 	if u.k == "p":
 		var c: Clan = sim.clans[u.clan] if u.clan >= 0 else null
 		var v: Village = sim.villages[u.vil] if u.vil >= 0 else null
-		sub = (u.title if (u.rank == 9 or u.ow) and u.title != "" else GuData.rank_title(u.rank)) + ((" · " + GuData.STAGE[u.stage]) if (u.rank > 0 and u.rank < 9) else "")
+		sub = ((u.title + " · " + GuData.rank_stage(u.rank, u.stage)) if (u.rank == 9 or u.ow) and u.title != "" else GuData.rank_stage_title(u.rank, u.stage, sim.quasi9(u)))
 		sub += "\n" + ("Dämonischer Einzelgänger" if u.rogue else ((c.name + ((" · " + v.name) if v != null else "")) if c != null else "ohne Clan"))
 	else:
 		var tn: String = GuData.TIER_NAME.get(u.rank, "Wildtier")
@@ -1062,8 +1066,10 @@ func _unit_body(u: Unit) -> String:
 			s += mt + "Gesinnung[/color]  " + ("[color=#ff8a7a]dämonisch[/color]" if (u.align == 1 or u.rogue) else "[color=#9fe0b0]rechtschaffen[/color]") + "\n"
 			s += mt + "Begabung[/color]  " + ("Extremkonstitution" if u.apt == "X" else u.apt + "-Grad") + "\n"
 			s += mt + "Essenz[/color]  " + _swatch(GuData.ESS_COL[u.rank]) + GuData.ESS_NAME[u.rank] + "\n"
-			if u.rank < 9:
+			s += mt + "Kleinstufe[/color]  " + _swatch(GuData.ESS_COL[u.rank]) + GuData.STAGE[u.stage] + ("  [color=#9db09e](Dao-Male)[/color]" if u.rank >= 6 else "") + "\n"
+			if u.rank < 9 or u.stage < 3:
 				s += mt + "Fortschritt[/color]  " + _bar_txt(u.prog, GuData.ESS_COL[u.rank]) + "\n"
+			s += mt + "Macht[/color]  " + _might_txt(u) + "\n"
 		else:
 			var jobs: Dictionary = {"wood": "Holzfäller", "mine": "Urstein-Bergmann", "farm": "Bauer", "gather": "Sammler", "hunt": "Jäger"}
 			s += mt + "Öffnung[/color]  " + ("nicht erweckt" if u.awk else "noch nicht geprüft") + "\n"
@@ -1111,6 +1117,16 @@ func _unit_body(u: Unit) -> String:
 			s += "\n[color=#9db09e]" + str(S["d"]) + "[/color]"
 	s += powers.unit_lines(u)
 	return s
+
+
+## Macht im Verhältnis zu einem Gu-Meister der Rang-Anfangsstufe darunter (Machtmodell Sim.might).
+func _might_txt(u: Unit) -> String:
+	var mg: float = sim.might(u)
+	if u.rank >= 9:
+		return "[color=#ffd24a]Absoluter Herrscher[/color] – nichts unter Rang 9 kann ihn verletzen"
+	if u.rank >= 6:
+		return "[color=#d8f0a0]Unsterblicher[/color] – Sterbliche sind für ihn Ameisen (×%s gegen Rang 5)" % String.num(snappedf(mg / Sim.MIGHT[5], 1.0))
+	return "×%s gegen einen Sterblichen" % String.num(snappedf(mg, 0.1))
 
 
 func _open_village() -> void:
@@ -1321,8 +1337,12 @@ func _open_rank() -> void:
 	var k: int = 1
 	for u: Unit in top:
 		var c: Clan = sim.clans[u.clan] if u.clan >= 0 else null
-		s += "[color=#9db09e]%d.[/color] %s[url=u%d][b]%s[/b][/url]\n    [color=#9db09e]%s · %s-Pfad · %s[/color]\n" % [k, _swatch(GuData.ESS_COL[u.rank]), u.id, u.pname(), u.title if u.rank == 9 else GuData.rank_title(u.rank) + " · " + GuData.STAGE[u.stage], GuData.PATH_NAME[u.path], "Dämonischer Einzelgänger" if u.rogue else (c.name if c != null else "ohne Clan")]
+		s += "[color=#9db09e]%d.[/color] %s[url=u%d][b]%s[/b][/url]\n    [color=#9db09e]%s · %s-Pfad · %s[/color]\n" % [k, _swatch(GuData.ESS_COL[u.rank]), u.id, u.pname(), (u.title + " · " + GuData.STAGE[u.stage]) if u.rank == 9 and u.title != "" else GuData.rank_stage_title(u.rank, u.stage, sim.quasi9(u)), GuData.PATH_NAME[u.path], "Dämonischer Einzelgänger" if u.rogue else (c.name if c != null else "ohne Clan")]
 		k += 1
+	s += "\n" + _h3("Essenzen der Ränge")
+	for r: int in range(1, 10):
+		s += "%s[color=#9db09e]%d[/color] %s%s" % [_swatch(GuData.ESS_COL[r]), r, GuData.ESS_NAME[r], "\n"]
+	s += "[color=#9db09e]Je Rang vier Kleinstufen: %s. Ein Rang-6-Unsterblicher löscht Heere von Rang-5-Meistern mit einem Fingerschnipsen aus; gegen einen Ehrwürdigen (Rang 9) richtet niemand darunter etwas aus.[/color]" % ", ".join(GuData.STAGE)
 	hud.open_modal(s)
 
 
@@ -1691,6 +1711,16 @@ class EntityLayer:
 		Sprites.outline_col = Color(Sprites.OUTLINE, clampf((z * GuMain.PS - 0.6) / 1.0, 0.0, 0.92))
 		# Übersicht großer Karten (eine Figur kleiner als etwa ein Bildschirmpixel): gewöhnliche Wesen nur als Farbtupfen
 		var dots: bool = z * GuMain.PS < 0.33
+		# Ränge: Himmelsverdunkelung der Ehrwürdigen und Glanz der Unsterblichen unter allen Wesen
+		var pipz: bool = z * GuMain.PS > 0.55
+		var v9: bool = false
+		for u: Unit in sim.units:
+			if u.k == "p" and u.rank >= 6 and u.hp > 0.0 and u.x > vx0 - 50.0 and u.x < vx1 + 50.0 and u.y > vy0 - 50.0 and u.y < vy1 + 50.0:
+				if u.rank >= 9 and not v9:
+					# Präsenz eines Ehrwürdigen: das ganze Bild dunkelt leicht ein
+					v9 = true
+					draw_rect(Rect2(vx0, vy0, vx1 - vx0, vy1 - vy0), Color(0.08, 0.04, 0.1, 0.1 + 0.03 * sin(tnow * 1.1)))
+				_draw_imm_aura(u, tnow)
 		for u: Unit in sim.units:
 			if u.x < vx0 or u.x > vx1 or u.y < vy0 or u.y > vy1:
 				continue
@@ -1704,7 +1734,13 @@ class EntityLayer:
 				var cl: Color = sim.clans[u.clan].col if u.clan >= 0 else (Color("#3a2a3a") if u.rogue else Color("#8e8676"))
 				if u.fig != "" or u.ow:
 					cl = m.unit_col(u)
+				if u.rank > 0 and u.rank < 6:
+					# Essenz-Schein am Boden: wächst mit dem Rang
+					var ec0: Color = GuData.ESS_COL[u.rank]
+					draw_circle(Vector2(u.x, u.y - 0.2), 0.45 + u.rank * 0.22 + u.stage * 0.05, Color(ec0, 0.10 + 0.03 * u.rank))
 				Sprites.draw_person(sink, u.x, u.y, GuMain.PS, u.race, u.rank, cl, u.face, sim.uage(u) >= 14.0, u.moving, u.anim, u.flash > 0.0, u.st == "work", u.rogue, u.sick > 0.0, u.luck > 0.0, ol, tnow, u.ow)
+				if pipz and u.rank > 0:
+					_draw_pips(u)
 			else:
 				Sprites.draw_animal(sink, u.x, u.y, GuMain.PS, u.sp, u.face, u.moving or u.fly, u.anim, u.flash > 0.0, u.tide, u.id, ol, u.path)
 		var su: Unit = m.sel_unit
@@ -1774,6 +1810,45 @@ class EntityLayer:
 				"km":
 					_draw_km(e, t)
 			fi -= 1
+
+	## Unsterbliche: pulsierender Glanz in der Unsterblichenessenz, Größe nach Rang. Rang 9: der Himmel verdunkelt
+	## sich weit um den Ehrwürdigen, darüber ein gelber Aprikosen-Schein und kreisende Ringe.
+	func _draw_imm_aura(u: Unit, tnow: float) -> void:
+		var ec: Color = GuData.ESS_COL[clampi(u.rank, 0, 9)]
+		var c: Vector2 = Vector2(u.x, u.y - 2.0)
+		var pul: float = 0.5 + 0.5 * sin(tnow * 2.2 + u.id)
+		if u.rank >= 9:
+			for k: int in range(7):
+				draw_circle(c, 46.0 - k * 6.0, Color(0.05, 0.02, 0.09, 0.07))
+			for k: int in range(4):
+				draw_circle(c, 9.0 - k * 1.8, Color(ec, 0.07 + 0.03 * pul))
+			var a0: float = tnow * 0.35
+			var lw: float = maxf(0.35, 1.6 / m.z)
+			draw_arc(c, 14.0 + 1.5 * pul, a0, a0 + TAU * 0.7, 48, Color(ec, 0.55), lw)
+			draw_arc(c, 22.0, -a0 * 0.7, -a0 * 0.7 + TAU * 0.45, 48, Color(ec, 0.3), lw)
+			draw_arc(c, 34.0, a0 * 0.4, a0 * 0.4 + TAU * 0.3, 64, Color(ec, 0.18), lw)
+			return
+		var r: float = 2.2 + (u.rank - 6) * 1.1 + (1.2 if sim_quasi(u) else 0.0)
+		for k: int in range(3):
+			draw_circle(c, r * (1.0 - k * 0.28) * (0.92 + 0.08 * pul), Color(ec, 0.07 + 0.02 * k))
+		draw_arc(c, r * (1.05 + 0.1 * pul), 0.0, TAU, 32, Color(ec, 0.35 * (1.0 - pul) + 0.1), maxf(0.25, 1.0 / m.z))
+
+	func sim_quasi(u: Unit) -> bool:
+		return m.sim.quasi9(u)
+
+	## Kleinstufen-Punkte über dem Kopf: 1–4 Punkte in der Essenzfarbe (Spitzenstufe heller).
+	func _draw_pips(u: Unit) -> void:
+		var sc: float = GuMain.PS * (2.1 if u.rank >= 9 else (1.45 if u.rank >= 6 else 1.0)) * (1.0 if m.sim.uage(u) >= 14.0 else 0.72)
+		var ec: Color = GuData.ESS_COL[clampi(u.rank, 0, 9)]
+		var n: int = u.stage + 1
+		var w: float = 0.62 * sc
+		var gap: float = 0.32 * sc
+		var x0: float = u.x - (n * w + (n - 1) * gap) * 0.5
+		var y0: float = u.y - (12.4 if u.rank >= 9 else 11.4) * sc
+		for k: int in range(n):
+			var px: float = x0 + k * (w + gap)
+			draw_rect(Rect2(px - 0.12 * sc, y0 - 0.12 * sc, w + 0.24 * sc, w + 0.24 * sc), Color(0.06, 0.05, 0.05, 0.7))
+			draw_rect(Rect2(px, y0, w, w), ec.lightened(0.35) if u.stage == 3 else ec)
 
 	## Mordzug: Strahlenkranz und Wellen in der Pfadfarbe, je nach Pfad mit eigener Form.
 	func _draw_km(e: Dictionary, t: float) -> void:
