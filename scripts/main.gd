@@ -24,6 +24,7 @@ var terr_spr: Sprite2D
 var terr_ov: TerrOverlay  ## Herrschaftsgebiete der Ehrwürdigen, Kriegsgrenzen (über terr_spr)
 var legend: PowerLegend  ## Legende der Mächte oben links
 var infl_t: float = 0.0
+var audio: Audio  ## prozeduraler Klang und Musik (scripts/audio.gd)
 var detail: Detail  ## Nahansicht: Gelände-Shader und hochaufgelöste Objekte (scripts/detail.gd)
 var ents: EntityLayer
 var clouds: CloudLayer
@@ -116,11 +117,13 @@ func _ready() -> void:
 	if not fresh:
 		_load_settings()
 	_build_scene()
+	audio = Audio.new()
+	audio.m = self
+	add_child(audio)
 	hud.toggled = powers.cheat.is_on
 	get_viewport().size_changed.connect(_on_resize)
 	_on_resize()
 	_apply_tab(-1)
-	_apply_audio()
 	if fresh or not _load_game():
 		_start_new_world(true)
 	else:
@@ -829,6 +832,7 @@ func _paint_at(p: Vector2) -> void:
 	var w: Vector2 = to_world(p)
 	if w.x < 0 or w.y < 0 or w.x >= W or w.y >= H:
 		return
+	audio.tool(t)
 	if t["m"] == "spawn":
 		var msg: String = powers.spawn_at(t, w.x, w.y)
 		if msg != "":
@@ -847,6 +851,7 @@ func _tap_at(p: Vector2) -> void:
 			_inspect_at(w.x, w.y)
 			return
 		_end_presim()
+		audio.tool(t)
 		var msg: String = powers.tap_tool(t, w.x, w.y)
 		if msg != "":
 			hud.show_hint("", msg)
@@ -1565,6 +1570,9 @@ func _on_meta(m: String) -> void:
 				music_on = not music_on
 				_apply_audio()
 		_settings_changed()
+	elif m.begins_with("snd:"):
+		audio.meta(m.substr(4))
+		_open_settings()
 
 
 const LAWS: Array = [["war", "Feuds", "Clans declare war on each other."], ["tide", "Beast tides", "Wolf tides raid villages."], ["immortal", "Immortality", "Rank 5 Gu Masters can ascend to Gu Immortals."], ["trib", "Tribulations", "Immortals must regularly survive heavenly tribulations."], ["will", "Heaven's Will", "Heaven strikes down the most outstanding."], ["walls", "Region walls", "Mortals cannot cross the walls."], ["growth", "Growth", "Births, animal offspring and plant growth."], ["fire", "Fire spread", "Fire jumps to neighboring tiles."]]
@@ -1644,8 +1652,7 @@ func _open_settings() -> void:
 	s += "[url=disp:names]%s  [b]Names and banners[/b][/url]\n    %sVillage banners and place names (power names stay).[/color]\n" % [_switch(show_names), mt]
 	s += "[url=disp:layer][color=#9fd0ff][b]»[/b][/color]  [b]Map layer: %s[/b][/url]\n    %s%s[/color]\n" % [World.LAYER_NAME[sim.world.layer], mt, LAYER_DESC[sim.world.layer]]
 	s += _h3("Sound")
-	s += "[b]Volume[/b]\n" + _choice("set:vol", ["Off", "25%", "50%", "75%", "100%"], [0, 25, 50, 75, 100], int(roundf(volume * 4.0)) * 25) + "\n\n"
-	s += "[url=set:music]%s  [b]Music[/b][/url]\n" % _switch(music_on)
+	s += audio.display_text()
 	hud.open_modal(s)
 
 
@@ -1675,27 +1682,14 @@ func _save_settings() -> void:
 	cf.set_value("ui", "labels", label_density)
 	cf.set_value("display", "territories", show_terr)
 	cf.set_value("display", "names", show_names)
-	cf.set_value("audio", "volume", volume)
-	cf.set_value("audio", "music", music_on)
 	cf.save(SETTINGS_PATH)
 
 
 ## Lautstärke weitergeben: an scripts/audio.gd (statisch set_volume/set_music), falls vorhanden, sonst an den Master-Bus.
 func _apply_audio() -> void:
-	var done: bool = false
-	if ResourceLoader.exists("res://scripts/audio.gd"):
-		var sc: Script = load("res://scripts/audio.gd")
-		if sc != null:
-			for md: Dictionary in sc.get_script_method_list():
-				var fn: String = str(md.get("name", ""))
-				if fn == "set_volume":
-					sc.call("set_volume", volume)
-					done = true
-				elif fn == "set_music":
-					sc.call("set_music", music_on)
-	if not done and AudioServer.bus_count > 0:
-		AudioServer.set_bus_mute(0, volume <= 0.0)
-		AudioServer.set_bus_volume_db(0, linear_to_db(maxf(volume, 0.0001)))
+	if audio != null:
+		audio.set_volume(volume)
+		audio.set_music(music_on)
 
 
 func _open_ages() -> void:
