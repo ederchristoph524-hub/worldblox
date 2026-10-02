@@ -90,7 +90,10 @@ func _ready() -> void:
 	sim = Sim.new()
 	add_child(sim)
 	powers = Powers.new(sim)
-	sim.logged.connect(func(t: String, k: String, _n: bool) -> void: hud.toast(t, k, sim.year()))
+	powers.cheat.m = self
+	sim.logged.connect(func(t: String, k: String, _n: bool) -> void:
+		if not sim.cheats.jumping():   # im Zeitsprung keine Meldungsflut
+			hud.toast(t, k, sim.year()))
 	sim.unit_died.connect(func(u: Unit) -> void:
 		if u == sel_unit:
 			sel_unit = null
@@ -98,6 +101,7 @@ func _ready() -> void:
 			if insp_kind == "u":
 				_close_insp())
 	_build_scene()
+	hud.toggled = powers.cheat.is_on
 	get_viewport().size_changed.connect(_on_resize)
 	_on_resize()
 	_apply_tab(-1)
@@ -119,6 +123,10 @@ func _ready() -> void:
 			RankTest.run(self, a != "--ranktest=health", a != "--ranktest=arena")
 		if a.begins_with("--rankshots="):
 			RankTest.shots(self, a.substr(12))
+		if a == "--cheattest":
+			powers.cheat.dev_test()
+		if a.begins_with("--cheatshots="):
+			powers.cheat.dev_shots(a.substr(13))
 		if a.begins_with("--sheets="):
 			_dev_sheets(a.substr(9))
 		if a == "--blanktest":
@@ -426,7 +434,12 @@ func _process(delta: float) -> void:
 	var rdt: float = minf(delta, 0.1)
 	if loading:
 		return
-	if presim_on:
+	if sim.cheats.jumping():
+		# Cheat-Zeitsprung: im Zeitraffer, in Häppchen je Bild
+		if sim.cheats.jump_chunk(50) >= 1.0:
+			hud.toast("Zeitsprung beendet: %d Jahre vergangen – Jahr %d." % [sim.year() - sim.cheats.jump_y0, sim.year()], "violet", sim.year())
+			terr_t = 0.0
+	elif presim_on:
 		# Budget anpassen: was vom letzten Bild nicht Vorgeschichte war, ist Zeichnen/Eingabe
 		var overhead: float = delta * 1000.0 - presim_budget
 		# Untergrenze wächst mit der Zeit, damit die Vorgeschichte auch auf langsamen Geräten zügig endet
@@ -523,7 +536,9 @@ func _process(delta: float) -> void:
 	if gift_cd > 0.0:
 		gift_cd -= rdt
 		hud.gift_btn.disabled = gift_cd > 0.0
-	if presim_on:
+	if sim.cheats.jumping():
+		hud.age_lbl.text = "Zeitsprung … %d %% · Jahr %d" % [int((1.0 - sim.cheats.jump_left / maxf(1.0, sim.cheats.jump_total)) * 100.0), sim.year()]
+	elif presim_on:
 		hud.age_lbl.text = "Vorgeschichte … %d %%" % int(clampf(sim.sim_time / (PRESIM_YEARS * 12.0), 0.0, 0.99) * 100.0)
 	else:
 		var ad: Dictionary = sim.age_data()
@@ -761,6 +776,7 @@ func _tap_at(p: Vector2) -> void:
 func _apply_tab(i: int) -> void:
 	tab = i
 	powers.pair_sel = null
+	powers.cheat.clear_sel()
 	var t: Dictionary = Powers.tool_by_id(tool_id)
 	if not t.is_empty() and int(t["tab"]) != i:
 		tool_id = ""
@@ -777,12 +793,15 @@ func _click_tool(t: Dictionary) -> void:
 		_run_action(t)
 		return
 	powers.pair_sel = null
+	powers.cheat.clear_sel()
 	tool_id = "" if tool_id == t["id"] else str(t["id"])
 	hud.refresh_tools(tool_id, sim.weather.get("type", ""))
 	if tool_id != "":
 		hud.show_hint(t["n"], t.get("d", ""))
 	if tool_id == "s_v9":
 		_open_ven9_picker()
+	elif tool_id != "" and t.get("pick", false):
+		powers.cheat.open_picker(tool_id)
 
 
 ## Auswahl für „Höchster Großmeister (Rang 9 nach Wahl)“: Gesinnung und Pfad (Links p9:/al9: in _on_meta).
@@ -813,6 +832,9 @@ func _ven9_hint() -> void:
 
 
 func _run_action(t: Dictionary) -> void:
+	if int(t["tab"]) == CheatTools.TAB:
+		powers.cheat.act(t)
+		return
 	if t.has("w"):
 		_set_weather(t["w"])
 		if not sim.weather.is_empty():
@@ -908,8 +930,9 @@ func _go_back() -> void:
 	if hud.insp.visible:
 		_close_insp()
 		return
-	if powers.pair_sel != null:
+	if powers.pair_sel != null or powers.cheat.has_sel():
 		powers.pair_sel = null
+		powers.cheat.clear_sel()
 		return
 	if tool_id != "":
 		tool_id = ""
@@ -1379,6 +1402,9 @@ func _open_clans() -> void:
 
 
 func _on_meta(m: String) -> void:
+	if m.begins_with("c:"):
+		powers.cheat.meta(m.substr(2))
+		return
 	if m.begins_with("u"):
 		var id: int = int(m.substr(1))
 		for u: Unit in sim.units:
@@ -3250,10 +3276,28 @@ func _selftest() -> void:
 				hud.close_modal()
 				if id == "w_wipe" or id == "w_flat":
 					powers.world_act(id)
+				if t.has("jump"):
+					sim.cheats.jump_left = 0.0   # Zeitsprung nicht im Hintergrund weiterlaufen lassen
 		for k: int in range(40):
 			sim.step(Sim.DT)
 		print("ok ", id, " units=", sim.units.size())
 	_set_weather("")
+	# Cheats: Auswahlfenster, Links, Cheat-Menü, ein kurzer Zeitsprung
+	for pid: String in ["c_rset", "c_path", "c_apt", "c_give", "c_revive", "c_army"]:
+		tool_id = ""
+		_click_tool(Powers.tool_by_id(pid))
+		hud.close_modal()
+	for mt: String in ["c:r:8", "c:s:2", "c:p:5", "c:a:A", "c:gi:wisdom_gu", "c:gp:3", "c:gm:3:0", "c:d:0", "c:an:10", "c:ar:2", "c:x:5", "c:sw:res", "c:x:1", "c:sw:res", "c:do:heal"]:
+		_on_meta(mt)
+	_run_action(Powers.tool_by_id("c_menu"))
+	_run_action(Powers.tool_by_id("c_mult"))
+	hud.close_modal()
+	sim.cheats.jump(1.0)
+	while sim.cheats.jumping():
+		sim.cheats.jump_chunk(500)
+	print("cheats pickers ok, jump year ", sim.year(), " grave ", sim.cheats.grave.size())
+	tool_id = ""
+	_apply_tab(-1)
 	# Gu-Welt: Inspektoren aller Wesenarten und Orte, Mordzüge, Wiedergeburt
 	var seen: Dictionary = {}
 	for u: Unit in sim.units:

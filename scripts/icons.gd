@@ -62,6 +62,10 @@ static func _make(id: String) -> Px:
 	var sb: Px = _make_sandbox(id)
 	if sb != null:
 		return sb
+	if id.begins_with("c_") or id == "tab7":
+		var ch: Px = _make_cheat(id)
+		if ch != null:
+			return ch
 	match id:
 		"t_deep":
 			return _tile(GuData.DEEP)
@@ -1482,6 +1486,435 @@ static func _make_sandbox(id: String) -> Px:
 				q.p(9 - w2, y, w2 * 2 + 1, 1, "#6aaa44" if y < 14 else "#e8d890")
 			q.p(8, 7, 3, 2, "#8ad05a")
 			_arrow(q, 18, 2, -1, 8, Y)
+		_:
+			return null
+	return q.outline()
+
+
+# ---------------- Reiter 7 „Cheats“ ----------------
+
+## Kleine Figur (6 × 14) für Cheat-Icons.
+static func _mini(q: Px, x: int, y: int, body: Variant, a: float = 1.0) -> void:
+	var bc: Color = body if body is Color else Color(str(body))
+	q.p(x + 1, y, 4, 4, Color(0.94, 0.75, 0.56, a))
+	q.p(x + 1, y, 4, 1, Color(0.24, 0.16, 0.1, a))
+	q.p(x, y + 4, 6, 6, Color(bc, a))
+	q.p(x + 1, y + 4, 1, 5, Color(bc.lightened(0.3), a))
+	q.p(x + 1, y + 10, 2, 4, Color(0.2, 0.17, 0.15, a))
+	q.p(x + 3, y + 10, 2, 4, Color(0.2, 0.17, 0.15, a))
+
+
+## Zahl aus 3 × 5-Ziffern mit dunklem Grund, linke obere Ecke (x, y).
+static func _digits(q: Px, x: int, y: int, num: String, col: Color) -> void:
+	q.p(x - 1, y - 1, num.length() * 4 + 1, 7, Color("#141a16"))
+	for k: int in range(num.length()):
+		var rows: Array = DIGITS[int(num[k])]
+		for r: int in range(5):
+			for c: int in range(3):
+				if str(rows[r])[c] == "1":
+					q.p(x + k * 4 + c, y + r, 1, 1, col)
+
+
+static func _hourglass(q: Px, frame: Variant, sand: Variant, top_fill: int, bot_fill: int) -> void:
+	q.p(5, 2, 14, 2, frame)
+	q.p(5, 20, 14, 2, frame)
+	for y: int in range(4, 20):
+		var w: int = absi(y - 12) * 5 / 8 + 1
+		q.p(12 - w, y, w * 2, 1, Color(0.85, 0.95, 1.0, 0.35))
+		if (y < 12 and y >= 12 - top_fill) or (y >= 12 and y >= 20 - bot_fill):
+			q.p(12 - w + 1, y, maxi(1, w * 2 - 2), 1, sand)
+	q.p(11, 11, 2, 2, sand)
+	q.p(6, 4, 1, 16, frame)
+	q.p(17, 4, 1, 16, frame)
+
+
+static func _shield(q: Px, col: Color, rim: Color) -> void:
+	for y: int in range(3, 22):
+		var w: int = 8 if y < 13 else maxi(1, 8 - (y - 13))
+		q.p(12 - w, y, w * 2, 1, rim)
+		if w > 1:
+			q.p(12 - w + 1, y, w * 2 - 2, 1, col)
+	q.p(6, 5, 2, 7, col.lightened(0.5))
+	q.p(12, 4, 1, 16, col.darkened(0.2))
+
+
+## Fünfzackiger Stern (Punkt-in-Polygon).
+static func _star(q: Px, cx: float, cy: float, ro: float, ri: float, col: Color) -> void:
+	var pts: PackedVector2Array = PackedVector2Array()
+	for k: int in range(10):
+		var a: float = -PI / 2.0 + k * PI / 5.0
+		var r: float = ro if k % 2 == 0 else ri
+		pts.append(Vector2(cx + cos(a) * r, cy + sin(a) * r))
+	for y: int in range(24):
+		for x: int in range(24):
+			if Geometry2D.is_point_in_polygon(Vector2(x + 0.5, y + 0.5), pts):
+				q.p(x, y, 1, 1, col)
+
+
+static func _cloud_dark(q: Px) -> void:
+	q.p(5, 3, 10, 3, "#5a5f78")
+	q.p(2, 6, 20, 5, "#4a4e66")
+	q.p(4, 5, 6, 2, "#6a7090")
+	q.p(3, 10, 18, 2, "#383b50")
+
+
+static func _make_cheat(id: String) -> Px:
+	var q: Px = Px.new(24, 24)
+	match id:
+		"tab7":
+			# Zauberstab mit Stern
+			var t7: Px = Px.new(32, 16)
+			for k: int in range(10):
+				t7.p(6 + k, 14 - k, 2, 2, MINT)
+			for k2: int in range(5):
+				t7.p(19 - k2, 4, 1, 1, MINT)
+			t7.p(18, 1, 3, 7, MINT)
+			t7.p(16, 3, 7, 3, MINT)
+			t7.p(15, 4, 9, 1, MINT)
+			t7.p(19, 0, 1, 9, MINT)
+			t7.p(25, 9, 2, 2, MINT)
+			t7.p(12, 1, 2, 2, MINT)
+			t7.p(27, 3, 1, 1, MINT)
+			return t7
+		"c_menu":
+			q.p(3, 2, 18, 20, "#2a3440")
+			q.p(3, 2, 18, 2, "#4d5d66")
+			for k: int in range(3):
+				var y: int = 6 + k * 5
+				var on: bool = k != 1
+				q.p(6, y, 12, 4, "#3a9a5a" if on else "#8a2a22")
+				q.p(14 if on else 6, y, 4, 4, "#f4f0e0")
+				q.p(14 if on else 6, y, 4, 1, "#ffffff")
+			q.p(5, 21, 14, 1, "#141a16")
+		"c_mult":
+			_mini(q, 1, 8, Color("#3d6fd0"))
+			_mini(q, 8, 6, Color("#c23a2e"))
+			_mini(q, 15, 9, Color("#2f9a7a"))
+			for k: int in range(5):
+				q.p(15 + k, 0 + k, 2, 2, Y)
+				q.p(19 - k, 0 + k, 2, 2, Y)
+		"c_uniq":
+			q.p(3, 9, 18, 9, Y)
+			for cx: int in [3, 11, 19]:
+				q.p(cx, 4, 2, 5, Y)
+				q.p(cx, 3, 2, 1, "#fff2a0")
+			q.p(3, 15, 18, 3, "#c89a10")
+			q.p(6, 11, 3, 3, "#e0402e")
+			q.p(15, 11, 3, 3, "#3d6fd0")
+			q.p(11, 10, 2, 4, "#62d8a4")
+			_digits(q, 18, 18, "1", Color("#ffffff"))
+		"c_rup", "c_rdown":
+			var up: bool = id == "c_rup"
+			_mini(q, 2, 6, Color("#8a46b8"))
+			_arrow(q, 16, 2 if up else 21, -1 if up else 1, 10, "#5ad86a" if up else "#e0402e")
+		"c_rset":
+			for k: int in range(9):
+				q.p(2 + k * 2, 20 - k * 2, 3, 2 + k * 2, GuData.ESS_COL[k + 1])
+			q.p(2, 21, 19, 1, "#8a7a5a")
+			_digits(q, 1, 1, "9", Y)
+		"c_path":
+			for k: int in range(48):
+				var a: float = k / 48.0 * TAU
+				var pc: Color = GuData.PATH_COL[[2, 3, 6, 5, 9, 24, 11, 17][k / 6]]
+				for rr: float in [8.0, 9.0, 10.0]:
+					q.p(12 + roundi(cos(a) * rr), 12 + roundi(sin(a) * rr), 1, 1, pc)
+			q.d(12, 12, 4, "#f4f0ff")
+			q.p(10, 10, 2, 2, "#ffffff")
+			q.d(12, 12, 1, "#b98cff")
+		"c_align":
+			q.d(12, 12, 10, "#f4f0e8")
+			for y: int in range(2, 23):
+				for x: int in range(12, 23):
+					if (x - 12) * (x - 12) + (y - 12) * (y - 12) <= 104:
+						q.p(x, y, 1, 1, "#7a1a1a")
+			q.d(12, 7, 4, "#f4f0e8")
+			q.d(12, 17, 4, "#7a1a1a")
+			q.d(12, 7, 1, "#7a1a1a")
+			q.d(12, 17, 1, "#f4f0e8")
+		"c_apt":
+			_star(q, 12.0, 12.5, 11.0, 4.6, Color(Y))
+			q.p(11, 8, 2, 1, "#7a5010")
+			q.p(10, 9, 1, 6, "#7a5010")
+			q.p(13, 9, 1, 6, "#7a5010")
+			q.p(10, 11, 4, 1, "#7a5010")
+		"c_imm":
+			_hourglass(q, "#ffd23a", Color("#fff2a0"), 5, 5)
+			for k: int in range(16):
+				var a2: float = k / 16.0 * TAU
+				q.p(12 + roundi(cos(a2) * 10.5), 12 + roundi(sin(a2) * 10.5), 1, 1, "#fff2a0")
+		"c_inv":
+			_shield(q, Color("#5a8ad0"), Color("#d8e4f0"))
+		"c_god":
+			_shield(q, Color("#e8b020"), Color("#fff2a0"))
+			q.p(7, 0, 10, 3, "#ffffff")
+			q.p(7, 0, 2, 1, Y)
+			q.p(11, 0, 2, 1, Y)
+			q.p(15, 0, 2, 1, Y)
+			q.p(10, 8, 4, 8, "#ffffff")
+			q.p(8, 10, 8, 3, "#ffffff")
+		"c_heal":
+			q.p(8, 2, 8, 20, "#ffffff")
+			q.p(2, 8, 20, 8, "#ffffff")
+			q.p(9, 3, 6, 18, "#3ab84a")
+			q.p(3, 9, 18, 6, "#3ab84a")
+			q.p(10, 4, 2, 6, "#8ae07a")
+		"c_young":
+			q.p(5, 17, 14, 5, "#8a5a32")
+			q.p(5, 17, 14, 1, "#b07a46")
+			q.p(11, 8, 2, 9, "#3a8a2a")
+			for k: int in range(5):
+				q.p(4 + k, 9 - k / 2, 7 - k, 2, "#5ad84a")
+				q.p(13 + k / 2, 5 + k, 7 - k, 2, "#7aec5a")
+			q.p(19, 1, 3, 3, "#fff2a0")
+			q.p(2, 2, 2, 2, "#fff2a0")
+		"c_old":
+			_hourglass(q, "#8a7a6a", Color("#c8c0b0"), 1, 7)
+			q.p(19, 6, 2, 16, "#7a5030")
+			q.p(16, 5, 5, 2, "#7a5030")
+		"c_clone":
+			_mini(q, 3, 5, Color("#3d6fd0"))
+			_mini(q, 13, 5, Color("#b98cff"), 0.55)
+			for y: int in range(4, 21, 2):
+				q.p(12, y, 1, 1, "#e0d0ff")
+		"c_revive":
+			q.p(5, 10, 14, 12, "#8a8e94")
+			q.p(6, 8, 12, 2, "#8a8e94")
+			q.p(8, 7, 8, 1, "#8a8e94")
+			q.p(6, 10, 2, 11, "#a8acb2")
+			q.p(11, 12, 2, 7, "#4a4e54")
+			q.p(9, 14, 6, 2, "#4a4e54")
+			q.p(3, 21, 18, 2, "#5a8a3a")
+			q.p(10, 0, 4, 7, Color(1.0, 0.97, 0.8, 0.85))
+			q.p(11, 0, 2, 7, "#ffffff")
+		"c_soul":
+			for y: int in range(6, 19):
+				var w: int = 10 - absi(y - 12) * 10 / 7
+				q.p(12 - w, y, w * 2, 1, "#f4f0e8")
+			q.d(12, 12, 4, "#8a46d8")
+			q.d(12, 12, 2, "#1a0a2a")
+			q.p(10, 10, 2, 2, "#ffffff")
+			for k: int in range(3):
+				q.p(4 + k * 7, 3 - (k % 2), 2, 2, "#c8a0ff")
+		"c_give", "c_strip":
+			var g: Px = _gu_icon(Color("#62d8a4") if id == "c_give" else Color("#d8a040"))
+			q.draw_image(g.img, -2, 0)
+			if id == "c_give":
+				q.p(16, 13, 8, 4, "#ffffff")
+				q.p(18, 11, 4, 8, "#ffffff")
+				q.p(17, 14, 6, 2, "#3ab84a")
+				q.p(19, 12, 2, 6, "#3ab84a")
+			else:
+				for k: int in range(8):
+					q.p(15 + k, 12 + k, 2, 2, "#e0402e")
+					q.p(22 - k, 12 + k, 2, 2, "#e0402e")
+		"c_name":
+			q.p(3, 4, 16, 16, "#e8d8a8")
+			q.p(2, 3, 18, 2, "#c8a868")
+			q.p(2, 19, 18, 2, "#c8a868")
+			for k: int in range(4):
+				q.p(5, 7 + k * 3, 10 - (k % 2) * 3, 1, "#5a4028")
+			for k2: int in range(9):
+				q.p(14 + k2 / 2, 18 - k2 * 2, 2, 2, "#ffffff" if k2 > 3 else "#3a2a20")
+		"c_luck":
+			for c: Vector2i in [Vector2i(7, 7), Vector2i(16, 7), Vector2i(7, 15), Vector2i(16, 15)]:
+				q.d(c.x, c.y, 4, "#3ab84a")
+				q.d(c.x, c.y, 2, "#6ae05a")
+			q.p(11, 11, 2, 2, "#2a8a3a")
+			q.p(12, 13, 2, 9, "#2a7a2a")
+			q.p(19, 1, 3, 3, Y)
+			q.p(2, 19, 2, 2, Y)
+		"c_possess":
+			q.d(12, 9, 7, "#b070e8")
+			q.p(5, 9, 15, 10, "#b070e8")
+			for k: int in range(4):
+				q.p(5 + k * 4, 19, 3, 3, "#b070e8")
+			q.p(8, 7, 3, 4, "#1a0a2a")
+			q.p(14, 7, 3, 4, "#1a0a2a")
+			q.p(9, 8, 1, 1, "#ffffff")
+			q.p(15, 8, 1, 1, "#ffffff")
+			q.p(10, 14, 5, 2, "#5a2a8a")
+		"c_join":
+			_mini(q, 1, 8, Color("#3d6fd0"))
+			_arrow(q, 12, 10, -1, 0, Y)
+			q.p(8, 13, 7, 2, Y)
+			for y: int in range(7, 13):
+				q.p(14 + (12 - y), y, 1, 1, Y)
+				q.p(14 + (12 - y), 26 - y, 1, 1, Y)
+			q.p(16, 12, 7, 8, "#e8dcc0")
+			for k: int in range(4):
+				q.p(15 + k, 11 - k, 9 - k * 2, 1, "#c63a2a")
+			q.p(18, 15, 3, 5, "#5a3a22")
+		"c_lead":
+			_mini(q, 9, 9, Color("#2f8a64"))
+			q.p(8, 3, 8, 4, Y)
+			q.p(8, 1, 2, 2, Y)
+			q.p(11, 1, 2, 2, Y)
+			q.p(14, 1, 2, 2, Y)
+			q.p(11, 4, 2, 2, "#e0402e")
+		"c_war":
+			for k: int in range(14):
+				q.p(4 + k, 4 + k, 2, 2, "#e8eef4")
+				q.p(18 - k, 4 + k, 2, 2, "#e8eef4")
+			q.p(3, 15, 6, 2, "#c89a10")
+			q.p(15, 15, 6, 2, "#c89a10")
+			q.p(2, 18, 4, 4, "#7a5030")
+			q.p(18, 18, 4, 4, "#7a5030")
+			q.d(12, 11, 2, "#e0402e")
+		"c_peace":
+			q.p(4, 2, 2, 20, "#7a5030")
+			q.p(6, 3, 14, 9, "#ffffff")
+			q.p(6, 3, 14, 2, "#f4f4f4")
+			q.p(8, 11, 12, 1, "#d8d8d8")
+			for k: int in range(6):
+				q.p(9 + k * 2, 15 + (k % 2), 3, 2, "#5ad84a")
+			q.p(8, 17, 12, 1, "#3a8a2a")
+		"c_ally":
+			for k: int in range(32):
+				var a3: float = k / 32.0 * TAU
+				q.p(8 + roundi(cos(a3) * 6.0), 12 + roundi(sin(a3) * 6.0), 2, 2, Y)
+				q.p(15 + roundi(cos(a3) * 6.0), 12 + roundi(sin(a3) * 6.0), 2, 2, "#62d8a4")
+			for k2: int in range(8):
+				var a4: float = -0.9 + k2 * 0.25
+				q.p(8 + roundi(cos(a4) * 6.0), 12 + roundi(sin(a4) * 6.0), 2, 2, Y)
+		"c_take":
+			q.p(3, 12, 14, 10, "#e8dcc0")
+			for k: int in range(5):
+				q.p(2 + k, 11 - k, 16 - k * 2, 1, "#c63a2a")
+			q.p(8, 16, 4, 6, "#5a3a22")
+			q.p(18, 2, 2, 20, "#5a3a22")
+			q.p(20, 2, 4, 3, "#e0402e")
+			q.p(20, 5, 3, 2, "#e0402e")
+		"c_disband":
+			q.p(3, 2, 2, 20, "#7a5030")
+			q.p(5, 3, 7, 14, "#3d6fd0")
+			q.p(15, 5, 6, 13, "#3d6fd0")
+			q.p(5, 3, 7, 2, "#6a9ae8")
+			for k: int in range(6):
+				q.p(12 + (k % 2), 3 + k * 3, 2, 3, "#141a16")
+			q.p(17, 18, 2, 4, "#3d6fd0")
+			q.p(7, 17, 2, 3, "#3d6fd0")
+		"c_vmax":
+			q.p(6, 17, 12, 5, "#c8382a")
+			q.p(9, 18, 6, 4, "#5a3a22")
+			for lv: int in range(3):
+				var y2: int = 15 - lv * 5
+				var w2: int = 10 - lv * 3
+				q.p(12 - w2, y2, w2 * 2, 2, "#3a5a3a" if lv % 2 == 0 else "#2a4a2a")
+				q.p(12 - w2 + 2, y2 - 3, w2 * 2 - 4, 3, "#c8382a")
+			q.p(11, 0, 2, 3, Y)
+			_arrow(q, 21, 1, -1, 6, "#5ad86a")
+		"c_res":
+			q.p(3, 11, 18, 11, "#8a5a2a")
+			q.p(3, 11, 18, 2, "#b07a46")
+			q.p(3, 15, 18, 1, "#5a3a1a")
+			q.p(10, 13, 4, 4, Y)
+			for c2: Vector2i in [Vector2i(5, 7), Vector2i(9, 4), Vector2i(13, 6), Vector2i(17, 4), Vector2i(7, 1)]:
+				q.p(c2.x, c2.y, 4, 4, "#eef8f2")
+				q.p(c2.x, c2.y, 2, 2, "#ffffff")
+			q.p(16, 9, 5, 2, "#e8c070")
+			q.p(4, 9, 4, 2, "#e8c070")
+		"c_clanup":
+			q.p(3, 2, 2, 20, "#7a5030")
+			q.p(5, 3, 10, 12, "#2f8a64")
+			q.p(5, 3, 10, 2, "#5ad8a4")
+			q.p(8, 7, 4, 4, Y)
+			_arrow(q, 19, 3, -1, 12, "#5ad86a")
+		"c_pop":
+			_mini(q, 1, 9, Color("#3d6fd0"))
+			_mini(q, 9, 9, Color("#d8a040"))
+			_mini(q, 17, 9, Color("#c84a6a"))
+			q.p(8, 2, 8, 4, "#ffffff")
+			q.p(10, 0, 4, 8, "#ffffff")
+			q.p(9, 3, 6, 2, "#3ab84a")
+			q.p(11, 1, 2, 6, "#3ab84a")
+		"c_army":
+			for r: int in range(2):
+				for k: int in range(3):
+					var x: int = 1 + k * 7 + r * 3
+					var y3: int = 2 + r * 8
+					_mini(q, x, y3, Color("#c23a2e") if r == 0 else Color("#8a2a22"))
+					q.p(x + 6, y3 - 2, 1, 12, "#c8ccd0")
+			q.p(20, 0, 4, 3, Y)
+		"c_r9rain":
+			q.p(4, 1, 16, 4, "#fff2c0")
+			q.p(2, 3, 20, 3, "#ffe8a0")
+			for c3: Vector2i in [Vector2i(4, 8), Vector2i(10, 11), Vector2i(16, 8), Vector2i(7, 16), Vector2i(19, 14)]:
+				q.p(c3.x, c3.y, 2, 4, Y)
+				q.p(c3.x, c3.y + 4, 2, 1, "#c89a10")
+			_digits(q, 15, 18, "9", GuData.ESS_COL[9])
+		"c_worldup":
+			q.d(12, 13, 9, "#2f7ad8")
+			q.p(5, 9, 6, 5, "#5ab84a")
+			q.p(13, 15, 6, 4, "#5ab84a")
+			q.p(14, 7, 3, 3, "#5ab84a")
+			_arrow(q, 12, 0, -1, 9, Y)
+			for k: int in range(3):
+				q.p(2 + k * 9, 1 + (k % 2) * 2, 2, 2, "#fff2a0")
+		"c_j1", "c_j10", "c_j100":
+			_hourglass(q, "#3d6fd0", Color("#9fd0ff"), 4, 4)
+			q.p(19, 4, 1, 5, "#ffffff")
+			q.p(20, 5, 1, 3, "#ffffff")
+			q.p(21, 6, 1, 1, "#ffffff")
+			var num: String = id.substr(3)
+			_digits(q, 23 - num.length() * 4, 17, num, Color("#ffffff"))
+		"c_age":
+			q.d(12, 12, 10, "#2a3a7a")
+			for y4: int in range(2, 23):
+				for x4: int in range(2, 12):
+					if (x4 - 12) * (x4 - 12) + (y4 - 12) * (y4 - 12) <= 100:
+						q.p(x4, y4, 1, 1, "#ffc83a")
+			q.d(16, 9, 3, "#e8e8f8")
+			q.d(17, 8, 2, "#2a3a7a")
+			q.p(5, 11, 3, 3, "#ffe8a0")
+			for k: int in range(3):
+				q.p(14 + k * 2, 15 + (k % 2) * 2, 1, 1, "#ffffff")
+		"c_freeze":
+			for k: int in range(3):
+				var a5: float = k * PI / 3.0
+				for d: int in range(-10, 11):
+					q.p(12 + roundi(cos(a5) * d), 12 + roundi(sin(a5) * d), 2, 2, "#cfefff")
+				for sgn: int in [-1, 1]:
+					var bx: int = 12 + roundi(cos(a5) * 7 * sgn)
+					var by: int = 12 + roundi(sin(a5) * 7 * sgn)
+					q.p(bx - 1, by - 1, 3, 3, "#81d4fa")
+			q.d(12, 12, 2, "#ffffff")
+		"c_will":
+			_mini(q, 3, 9, Color("#8a46b8"))
+			q.p(14, 0, 4, 3, "#b98cff")
+			q.p(13, 3, 4, 3, "#b98cff")
+			q.p(12, 6, 7, 2, "#e0c8ff")
+			q.p(15, 8, 4, 3, "#b98cff")
+			q.p(14, 11, 4, 3, "#b98cff")
+			q.p(13, 14, 3, 3, "#ffffff")
+			q.d(20, 19, 3, "#b98cff")
+		"c_trib":
+			_cloud_dark(q)
+			for c4: Vector2i in [Vector2i(6, 12), Vector2i(15, 12)]:
+				q.p(c4.x + 2, c4.y, 3, 3, Y)
+				q.p(c4.x + 1, c4.y + 3, 3, 3, Y)
+				q.p(c4.x, c4.y + 6, 5, 2, "#fff2a0")
+				q.p(c4.x + 1, c4.y + 8, 2, 3, Y)
+		"c_ward":
+			_cloud_dark(q)
+			for k: int in range(40):
+				var a6: float = PI + k / 40.0 * PI
+				q.p(12 + roundi(cos(a6) * 9.0), 21 + roundi(sin(a6) * 9.0), 2, 2, "#bfe8ff")
+			_mini(q, 9, 9, Color("#3d6fd0"))
+			q.p(14, 12, 2, 2, "#fff27a")
+		"c_fatebreak", "c_fatefix":
+			var f: Px = _igu_core("fate_gu")
+			q.draw_image(f.img, 0, 0)
+			_r9_mark(q, "fate_gu", 9)
+			if id == "c_fatebreak":
+				for k: int in range(10):
+					q.p(5 + k + (k % 2), 1 + k * 2, 2, 2, "#1a0a0a")
+					q.p(6 + k + (k % 2), 1 + k * 2, 1, 1, "#ff5a3a")
+			else:
+				for k2: int in range(32):
+					var a7: float = k2 / 32.0 * TAU
+					q.p(12 + roundi(cos(a7) * 11.0), 12 + roundi(sin(a7) * 11.0), 1, 1, "#5ad86a")
+				q.p(1, 3, 6, 2, "#5ad86a")
+				q.p(3, 1, 2, 6, "#5ad86a")
 		_:
 			return null
 	return q.outline()
