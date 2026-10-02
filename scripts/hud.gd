@@ -77,6 +77,9 @@ var age_lbl: Label
 var show_btn: Button
 var bar_hidden: bool = false
 var legend: Control = null  ## Legende der Mächte (PowerLegend, gesetzt von GuMain); Meldungen rutschen darunter
+var toggled: Callable = Callable()  ## Werkzeug-Id -> bool: Schalter-Knöpfe (Cheats) leuchten, solange sie an sind
+var modal_input: LineEdit
+var _input_cb: Callable = Callable()
 
 
 func _ready() -> void:
@@ -472,7 +475,7 @@ func set_tools(tab: int) -> void:
 func refresh_tools(active_id: String, weather_type: String) -> void:
 	for id: String in tool_btns.keys():
 		var t: Dictionary = Powers.tool_by_id(id)
-		var on: bool = id == active_id or (t.has("w") and t["w"] == weather_type)
+		var on: bool = id == active_id or (t.has("w") and t["w"] == weather_type) or (toggled.is_valid() and bool(toggled.call(id)))
 		var b: Button = tool_btns[id]
 		var s: StyleBox = well_style(on, bool(b.get_meta("riv", false)))
 		b.add_theme_stylebox_override("normal", s)
@@ -1031,6 +1034,19 @@ func _build_windows() -> void:
 	modal_text = _rich()
 	modal_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mv.add_child(modal_text)
+	modal_input = LineEdit.new()
+	modal_input.visible = false
+	modal_input.custom_minimum_size = Vector2(0, 32)
+	modal_input.add_theme_stylebox_override("normal", sb(C_SLATE_DK, Color("#4d5d66"), 1, 3))
+	modal_input.add_theme_stylebox_override("focus", sb(C_SLATE_DK, C_BLUE, 1, 3))
+	modal_input.add_theme_font_size_override("font_size", 14)
+	modal_input.text_submitted.connect(func(txt: String) -> void:
+		if _input_cb.is_valid():
+			var cb: Callable = _input_cb
+			_input_cb = Callable()
+			close_modal()
+			cb.call(txt))
+	mv.add_child(modal_input)
 	modal_btns = HFlowContainer.new()
 	modal_btns.add_theme_constant_override("h_separation", 6)
 	modal_btns.add_theme_constant_override("v_separation", 6)
@@ -1212,6 +1228,8 @@ func open_modal(body: String, buttons: Array = []) -> void:
 		body = body.substr(rest + 12).lstrip("\n")
 	modal_title.text = title
 	modal_text.text = body
+	modal_input.visible = false
+	_input_cb = Callable()
 	_fill_buttons(modal_btns, buttons)
 	modal_btns.visible = not buttons.is_empty()
 	modal.visible = true
@@ -1219,6 +1237,23 @@ func open_modal(body: String, buttons: Array = []) -> void:
 
 func close_modal() -> void:
 	modal.visible = false
+	modal_input.visible = false
+	modal_input.release_focus()
+
+
+## Fenster mit Eingabezeile (z. B. „Namen ändern“): ok bekommt den Text.
+func open_input(body: String, value: String, ok_text: String, ok: Callable) -> void:
+	open_modal(body, [[ok_text, func() -> void:
+		var txt: String = modal_input.text
+		_input_cb = Callable()
+		close_modal()
+		ok.call(txt), "jade"], ["Abbrechen", func() -> void: close_modal(), ""]])
+	modal_input.text = value
+	modal_input.visible = true
+	_input_cb = ok
+	if modal_input.is_inside_tree():
+		modal_input.grab_focus()
+		modal_input.select_all()
 
 
 # ---------------- Ladebildschirm ----------------

@@ -58,6 +58,7 @@ var seeds: Array[Dictionary] = []      # Biom-Samen {x, y, tt, r, n}
 var possessed: Unit = null             # Seelenbesitz
 var age_off: int = 0                   # Jahre, die das Zeitalter angehalten war (Gesetz „Zeitalter“ aus) bzw. per Hand verschoben wurde
 var ven: Venerables                    # Rang-9-Ehrwürdige: Pfad-Blüte, Herrschaft, Blutlinien, Agenden, Schicksals-Gu (v5)
+var cheats: Cheats                     # Cheat-Schalter, Wesens-Merker, Friedhof, Zeitsprung (scripts/cheats.gd)
 var _nat_acc: float = 0.0
 
 # Wirkungen Unsterblicher Gu (Unit.igf)
@@ -83,6 +84,7 @@ const MOVE_OFFS: PackedFloat32Array = [0.0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9]
 func _init() -> void:
 	world = World.new()
 	ven = Venerables.new(self)
+	cheats = Cheats.new(self)
 	_grid.resize(GW * GH)
 	for k: int in range(GW * GH):
 		_grid[k] = []
@@ -628,7 +630,7 @@ func new_clan(r: int, sur: String, race: int = 0) -> Clan:
 ## Clan einer Organisation aus Lore.ORGS (fester Name, Siegel, Farbe).
 func new_org_clan(o: Dictionary, r: int) -> Clan:
 	var c: Clan = Clan.new()
-	c.name = o["n"]
+	c.name = str(o["n"]) + cheats.org_suffix(str(o["id"]))
 	c.glyph = o["gl"]
 	c.kind = o["k"]
 	c.col = Color(str(o["col"]))
@@ -978,7 +980,7 @@ func cultivate(u: Unit) -> void:
 		rate *= u.pb
 	if u.ow:
 		rate *= 2.5
-	rate *= ven.cult_mul(u)
+	rate *= ven.cult_mul(u) * cheats.cult
 	u.prog += rate * (0.7 + randf() * 0.6)
 	if u.prog >= 1.0:
 		u.prog = 0.0
@@ -1237,7 +1239,7 @@ func fire_step() -> void:
 # ---------------- Schaden ----------------
 
 func hurt(t: Unit, dmg: float, src: Unit) -> void:
-	if t.hp <= 0.0:
+	if t.hp <= 0.0 or (t.ch != 0 and Cheats.blocks(t, dmg)):
 		return
 	if t.rank >= 9 and src != null and src.rank >= 9 and t.k == "p":
 		dmg *= 0.25   # Ehrwürdige töten einander nur selten
@@ -1560,6 +1562,7 @@ func monthly() -> void:
 	place_month()
 	nature_spawns()
 	update_leaders()
+	cheats.month()
 	terr_dirty = true
 
 
@@ -2592,6 +2595,7 @@ func reset_state() -> void:
 	possessed = null
 	age_off = 0
 	ven.reset()
+	cheats.reset_world()
 	next_pid = 1
 	sim_time = 0.0
 	last_month = 0
@@ -2757,7 +2761,7 @@ func serialize() -> Dictionary:
 	var lv: Array = []
 	for i: int in lava.keys():
 		lv.append([i, snappedf(float(lava[i]), 0.01)])
-	return {"v": 5, "ven": ven.to_dict(), "age_off": age_off, "lava": lv, "mines": Array(mines), "layer": world.layer, "seed": seed_val, "sim_time": sim_time, "next_id": next_id, "map_mode": world.map_mode, "places": ps, "next_pid": next_pid,
+	return {"v": 5, "ven": ven.to_dict(), "cheat": cheats.to_dict(), "age_off": age_off, "lava": lv, "mines": Array(mines), "layer": world.layer, "seed": seed_val, "sim_time": sim_time, "next_id": next_id, "map_mode": world.map_mode, "places": ps, "next_pid": next_pid,
 		"tile": Marshalls.raw_to_base64(world.tile), "feat": Marshalls.raw_to_base64(world.feat), "region": Marshalls.raw_to_base64(world.region),
 		"hgt": Marshalls.raw_to_base64(hb), "ts": Marshalls.raw_to_base64(world.temp_snow),
 		"units": us, "villages": vs, "clans": cs, "buildings": bs, "laws": laws, "log": log_entries.slice(0, 120), "fire": fr}
@@ -2810,6 +2814,7 @@ func deserialize(d: Dictionary) -> bool:
 	world.layer = int(d.get("layer", 0))
 	age_off = int(d.get("age_off", 0))
 	ven.from_dict(d.get("ven", {}))
+	cheats.from_dict(d.get("cheat", {}))
 	for i: int in range(N):
 		if world.tile[i] == GuData.LAVA and not lava.has(i):
 			lava[i] = 0.3
@@ -2834,6 +2839,8 @@ func deserialize(d: Dictionary) -> bool:
 
 ## Frühling-Herbst-Zikade (jung wiedergeboren) oder Auferstehung von den Toten. true = lebt weiter.
 func try_revive(u: Unit) -> bool:
+	if cheats.keep_alive(u):
+		return true
 	if u.k != "p" or u.dreason == "göttliche Auslöschung" or (u.igf & (F_REVIVE | F_REZ)) == 0:
 		return false
 	var rez: bool = (u.igf & F_REVIVE) == 0
@@ -2976,11 +2983,14 @@ func spawn_immortal(x: float, y: float, rank: int) -> Unit:
 ## Einer der elf Ehrwürdigen (nur einer je Ehrwürdigem zur selben Zeit). Gibt einen Hinweis zurück oder "".
 func spawn_venerable(vd: Dictionary, x: float, y: float) -> String:
 	var key: String = vd["fig"]
-	if fig_alive(key) != null:
+	if cheats.is_on("uniq") and fig_alive(key) != null:
 		return str(vd["t"]) + " lebt bereits."
+	if not cheats.room():
+		return cheats.full_msg()
+	var dup: String = cheats.fig_suffix(key)   # weitere Exemplare: „Riesensonne II“
 	var u: Unit = mk_person(x, y, 0, 600.0 + randf() * 900.0)
 	u.sur = ""
-	u.given = vd["n"]
+	u.given = str(vd["n"]) + dup
 	u.awk = true
 	awaken(u, true)
 	u.path = int(vd["p"])
@@ -3008,11 +3018,14 @@ func spawn_custom_venerable(p: int, al: int, x: float, y: float) -> String:
 	var key: String = "ven9_%d" % p
 	var pn: String = GuData.PATH_NAME[p]
 	var title: String = pn + ("-Dämonen-Ehrwürdiger" if al == 1 else "-Unsterblicher-Ehrwürdiger")
-	if fig_alive(key) != null:
+	if cheats.is_on("uniq") and fig_alive(key) != null:
 		return "Der " + title + " lebt bereits."
+	if not cheats.room():
+		return cheats.full_msg()
+	var dup: String = cheats.fig_suffix(key)
 	var u: Unit = mk_person(x, y, 0, 600.0 + randf() * 900.0)
 	u.sur = ""
-	u.given = pn + Venerables.EPITHET[randi() % Venerables.EPITHET.size()]
+	u.given = pn + Venerables.EPITHET[randi() % Venerables.EPITHET.size()] + dup
 	u.awk = true
 	awaken(u, true)
 	u.path = p
@@ -3052,12 +3065,15 @@ func era_text() -> String:
 ## Benannte Figur aus der Geschichte (einzigartig). Gibt einen Hinweis zurück oder "".
 func spawn_figure(fd: Dictionary, x: float, y: float) -> String:
 	var nm: String = (str(fd["sur"]) + " " + str(fd["given"])).strip_edges()
-	if fig_alive(fd["id"]) != null:
+	if cheats.is_on("uniq") and fig_alive(fd["id"]) != null:
 		return nm + " lebt bereits."
+	if not cheats.room():
+		return cheats.full_msg()
+	var dup: String = cheats.fig_suffix(str(fd["id"]))
 	var rank: int = int(fd["r"])
 	var u: Unit = mk_person(x, y, int(fd.get("race", 0)), float(fd["age"]), str(fd["sur"]))
 	u.sur = fd["sur"]
-	u.given = fd["given"]
+	u.given = str(fd["given"]) + dup
 	var oc: Clan = org_clan(str(fd["org"])) if str(fd["org"]) != "" else null
 	if oc != null:
 		var bv: Village = nearest_village(x, y, 9999.0, func(v: Village) -> bool: return v.clan == oc.id)
@@ -3089,13 +3105,14 @@ func spawn_figure(fd: Dictionary, x: float, y: float) -> String:
 ## Gründet eine Organisation aus Lore.ORGS am Ort (x, y). Gibt einen Hinweis zurück oder "".
 func found_org(o: Dictionary, x: float, y: float, quiet: bool = false) -> String:
 	var nm: String = o["n"]
-	if org_clan(o["id"]) != null:
+	var canon: bool = cheats.is_on("uniq")
+	if canon and org_clan(o["id"]) != null:
 		return nm + " existiert bereits."
 	if not world.in_map(int(x), int(y)):
 		return ""
 	var reg: int = region_at(x, y)
 	var oreg: int = int(o.get("reg", -1))
-	if oreg >= 0 and reg != oreg:
+	if canon and oreg >= 0 and reg != oreg:
 		return nm + " gehört in " + GuData.REGN_IN[oreg] + "."
 	var tx: int = int(x)
 	var ty: int = int(y)
@@ -3304,7 +3321,8 @@ func place_ok(type: String, x: float, y: float) -> String:
 	var nm: String = D["n"]
 	if not world.in_map(int(x), int(y)):
 		return ""
-	if D.get("uniq", false) and find_place(type) != null:
+	var canon: bool = cheats.is_on("uniq")
+	if canon and D.get("uniq", false) and find_place(type) != null:
 		return nm + " existiert bereits."
 	var t: int = world.tile[int(y) * W + int(x)]
 	if type == "palace":
@@ -3312,10 +3330,10 @@ func place_ok(type: String, x: float, y: float) -> String:
 			return "Der Drachenpalast muss im Meer stehen."
 	elif not GuData.is_land(t) or t == GuData.WALL:
 		return nm + " braucht festen Boden."
-	if type == "court" and region_at(x, y) != 4:
+	if canon and type == "court" and region_at(x, y) != 4:
 		return "Der Himmelshof gehört in den Zentralkontinent."
 	for p: Place in places:
-		if p.alive and Vector2(p.x - x, p.y - y).length() < 12.0:
+		if p.alive and Vector2(p.x - x, p.y - y).length() < (12.0 if canon else 4.0):
 			return "Zu nah an " + p.name + "."
 	return ""
 
@@ -3328,7 +3346,7 @@ func add_place(type: String, x: float, y: float, quiet: bool = false) -> Place:
 	p.x = x
 	p.y = y
 	p.born = sim_time
-	p.name = Lore.PLACE[type]["n"]
+	p.name = str(Lore.PLACE[type]["n"]) + (cheats.place_suffix(type) if Lore.PLACE[type].get("uniq", false) else "")
 	if type == "inherit":
 		p.name = Lore.INHERIT_NAMES[randi() % Lore.INHERIT_NAMES.size()]
 	var life: float = float(Lore.PLACE[type].get("life", 0.0))

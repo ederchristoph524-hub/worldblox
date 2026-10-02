@@ -6,7 +6,7 @@ const W: int = GuData.W
 const H: int = GuData.H
 
 ## Reiter -1 ist das Hauptmenü. m: paint = Pinsel, tap = Tippen, pair = zwei Dörfer, spawn = Setzen, act = Sofort-Aktion.
-const TABS: PackedStringArray = ["Welt formen", "Noosphäre und Leben", "Kreaturen und Bestien", "Natur und Katastrophen", "Zerstörung und Chaos", "Gu und Schicksal", "Gu-Meister und Unsterbliche"]
+const TABS: PackedStringArray = ["Welt formen", "Noosphäre und Leben", "Kreaturen und Bestien", "Natur und Katastrophen", "Zerstörung und Chaos", "Gu und Schicksal", "Gu-Meister und Unsterbliche", "Cheats"]
 ## Alle Werkzeuge, nach Reiter und Gruppe sortiert (Gruppenwechsel = Trennstrich in der Leiste).
 static var TOOLS: Array = _build_tools()
 
@@ -101,8 +101,8 @@ static func _build_tools() -> Array:
 	L.append({"id": "s_gi7", "tab": 6, "g": 1, "n": "Rang-7-Gu-Unsterblicher", "d": "Ein mächtiger wandernder Unsterblicher, oft mit einem Unsterblichen Gu.", "m": "spawn", "sp": "gi", "r": 7})
 	L.append({"id": "s_gi8", "tab": 6, "g": 1, "n": "Rang-8-Gu-Unsterblicher", "d": "Fast ein Ehrwürdiger – vom Himmelswillen beobachtet.", "m": "spawn", "sp": "gi", "r": 8})
 	for vd: Dictionary in Lore.VEN:
-		L.append({"id": "s_v_" + str(vd["id"]), "tab": 6, "g": 2, "n": vd["t"], "d": str(vd["d"]) + " %s-Pfad, %s. Nur einer zur selben Zeit." % [GuData.PATH_NAME[int(vd["p"])], "dämonisch" if int(vd["al"]) == 1 else "rechtschaffen"], "m": "spawn", "sp": "ven", "ven": vd["id"]})
-	L.append({"id": "s_v9", "tab": 6, "g": 2, "n": "Höchster Großmeister (Rang 9 nach Wahl)", "d": "Wähle Pfad und Gesinnung, dann tippe auf die Karte: Ein Rang-9-Ehrwürdiger mit Höchster-Großmeister-Errungenschaft erscheint, errichtet nahe dem Ort seinen Sitz und seine Blutlinie, unterwirft die Clans ringsum – und sein Pfad blüht in der ganzen Welt. Einer je Pfad.", "m": "spawn", "sp": "ven9"})
+		L.append({"id": "s_v_" + str(vd["id"]), "tab": 6, "g": 2, "n": vd["t"], "d": str(vd["d"]) + " %s-Pfad, %s. Beliebig oft setzbar (weitere heißen „… II“); mit dem Cheat „Einzigartigkeit“ nur einer zur selben Zeit." % [GuData.PATH_NAME[int(vd["p"])], "dämonisch" if int(vd["al"]) == 1 else "rechtschaffen"], "m": "spawn", "sp": "ven", "ven": vd["id"]})
+	L.append({"id": "s_v9", "tab": 6, "g": 2, "n": "Höchster Großmeister (Rang 9 nach Wahl)", "d": "Wähle Pfad und Gesinnung, dann tippe auf die Karte: Ein Rang-9-Ehrwürdiger mit Höchster-Großmeister-Errungenschaft erscheint, errichtet nahe dem Ort seinen Sitz und seine Blutlinie, unterwirft die Clans ringsum – und sein Pfad blüht in der ganzen Welt. Beliebig viele; mit dem Cheat „Einzigartigkeit“ einer je Pfad.", "m": "spawn", "sp": "ven9"})
 	for fd: Dictionary in Lore.FIG:
 		L.append({"id": "s_f_" + str(fd["id"]), "tab": 6, "g": 3, "n": (str(fd["sur"]) + " " + str(fd["given"])).strip_edges(), "d": str(fd["d"]) + " (" + GuData.rank_title(int(fd["r"])) + ")", "m": "spawn", "sp": "fig", "fig": fd["id"]})
 	# --- Reiter 5: wilde Gu und Unsterbliche Gu ---
@@ -136,6 +136,7 @@ static func _build_tools() -> Array:
 	L.append({"id": "ev_frag", "tab": 4, "g": 2, "n": "Himmelsfragment", "d": "Ein Trümmerstück eines zerstörten Himmels stürzt herab und bleibt als Schatz liegen.", "m": "tap"})
 	_parity_tools(L)
 	_sandbox_tools(L)
+	CheatTools.add_tools(L)
 	for k: int in range(L.size()):
 		L[k]["o"] = k
 	L.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
@@ -164,10 +165,12 @@ var held_off: Array[Vector2] = []
 ## Auswahl für „Höchster Großmeister (Rang 9 nach Wahl)“: Pfad (-1 = zufällig) und Gesinnung (1 = dämonisch)
 var v9_path: int = -1
 var v9_al: int = 0
+var cheat: CheatTools  ## Reiter 7 „Cheats“ (scripts/cheat_tools.gd)
 
 
 func _init(s: Sim) -> void:
 	sim = s
+	cheat = CheatTools.new(s, self)
 
 
 ## Gottkräfte nach dem Vorbild von WorldBox (Gelände-Werkzeuge, Naturgewalten, Mordzug-Leiter, Zivilisation).
@@ -306,6 +309,9 @@ func apply_paint(t: Dictionary, wx: float, wy: float, stroke: Dictionary) -> voi
 	else:
 		_seg_from = Vector2(-1, -1)
 	stroke["lp"] = Vector2(tx, ty)
+	if int(t["tab"]) == CheatTools.TAB:
+		cheat.paint(t, wx, wy, stroke_id)
+		return
 	if paint_parity(t, wx, wy, stroke) or paint_sandbox(t, tx, ty):
 		return
 	var w: World = sim.world
@@ -420,8 +426,36 @@ func apply_paint(t: Dictionary, wx: float, wy: float, stroke: Dictionary) -> voi
 				sim.spark(u.x, u.y - 1.0, Color.WHITE, 5, 6.0)
 
 
-## Setzt ein Wesen. Gibt einen Hinweistext zurück, wenn es nicht geht.
+## Setzt ein Wesen – mit der Cheat-Spawn-Menge gleich mehrere um den Punkt herum.
+## Gibt einen Hinweistext zurück, wenn es nicht geht.
 func spawn_at(t: Dictionary, wx: float, wy: float) -> String:
+	var C: Cheats = sim.cheats
+	if not C.room():
+		return C.full_msg()
+	var n: int = C.mult
+	if n <= 1:
+		return _spawn_one(t, wx, wy)
+	var first: String = ""
+	var ok: int = 0
+	var rr: float = 1.5 + sqrt(float(n)) * 1.2
+	for k: int in range(n):
+		if not C.room():
+			return C.full_msg()
+		var a: float = randf() * TAU
+		var d: float = 0.0 if k == 0 else sqrt(randf()) * rr
+		var px: float = wx + cos(a) * d
+		var py: float = wy + sin(a) * d
+		if not sim.world.in_map(int(px), int(py)):
+			continue
+		var msg: String = _spawn_one(t, px, py)
+		if msg == "":
+			ok += 1
+		elif first == "":
+			first = msg
+	return "" if ok > 0 else first
+
+
+func _spawn_one(t: Dictionary, wx: float, wy: float) -> String:
 	var tx: int = int(wx)
 	var ty: int = int(wy)
 	if not sim.world.in_map(tx, ty):
@@ -515,6 +549,8 @@ func tap_tool(t: Dictionary, wx: float, wy: float) -> String:
 		return ""
 	if t.has("org"):
 		return sim.found_org(Lore.org(t["org"]), wx, wy)
+	if int(t["tab"]) == CheatTools.TAB:
+		return cheat.tap(t, wx, wy)
 	if t.has("seed"):
 		if not sim._solid(ty * W + tx):
 			return "Samen brauchen festen Boden."
@@ -1194,6 +1230,7 @@ func village_lines(v: Village) -> String:
 	var capv: Village = sim.villages[c.cap] if c.cap >= 0 and c.cap < sim.villages.size() else null
 	s += mt + "Hauptstadt[/color]  " + ("[color=#ffd24a]dieses Dorf[/color]" if c.cap == v.id else (capv.name if capv != null else "–")) + "\n"
 	s += mt + "Einfluss[/color]  " + Influence.text(sim, c) + "\n"
+	s += sim.cheats.village_line(v)
 	var L: Unit = c.lead
 	if L != null and L.hp > 0.0:
 		s += mt + "Clan-Oberhaupt[/color]  [color=#%s]■[/color] %s, %s\n" % [GuData.ESS_COL[L.rank].to_html(false), L.pname(), GuData.rank_title(L.rank)]
@@ -1232,7 +1269,7 @@ func unit_lines(u: Unit) -> String:
 		s += "\n[color=#c070ff]Besessen – Tippen mit „Seelenbesitz“ lenkt es[/color]"
 	if u.boat:
 		s += "\n[color=#9fd6ff]Siedler im Boot[/color]"
-	return s
+	return s + sim.cheats.unit_lines(u)
 
 
 ## Inhalt des Fensters „Pläne und Kriege“.

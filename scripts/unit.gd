@@ -75,6 +75,7 @@ var bless: int = 0            # 1 = gesegnet, -1 = verflucht
 var prot: float = -1.0        # Himmelsschutz bis (Simulationszeit): keine Drangsal, kein Himmelswille
 var undead: bool = false      # wandelnde Leiche (Leichen-Gu-Seuche)
 var boat: bool = false        # Siedler im Boot: darf tiefes Wasser befahren
+var ch: int = 0               # Cheat-Merker (Cheats.CH_*: unsterblich, unverwundbar, ewiges Glück)
 # abgeleitet, nicht gespeichert
 var beh: int = -1             # Tierverhalten GuData.B_*
 var aqua: bool = false
@@ -124,7 +125,7 @@ func to_dict() -> Dictionary:
 		"next_trib": next_trib, "title": title, "militia": militia, "col_clan": col_clan, "swim": swim, "fly": fly, "speed": speed,
 		"phys_x": phys_x, "hungry": hungry, "tide": tide, "tide_v": tide_v,
 		"gname": gname, "igu": Array(igu), "fig": fig, "ow": ow, "hx": hx, "hy": hy, "notrib": notrib,
-		"bless": bless, "prot": prot, "undead": undead, "boat": boat}
+		"bless": bless, "prot": prot, "undead": undead, "boat": boat, "ch": ch}
 
 
 static func from_dict(d: Dictionary) -> Unit:
@@ -132,7 +133,7 @@ static func from_dict(d: Dictionary) -> Unit:
 	for key: String in d.keys():
 		if key == "gus" or key == "igu":
 			u.set(key, PackedStringArray(d[key]))
-		elif key in ["id", "race", "vil", "clan", "rank", "stage", "path", "align", "kills", "col_clan", "tide_v", "bless"]:
+		elif key in ["id", "race", "vil", "clan", "rank", "stage", "path", "align", "kills", "col_clan", "tide_v", "bless", "ch"]:
 			u.set(key, int(d[key]))
 		else:
 			u.set(key, d[key])
