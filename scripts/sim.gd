@@ -342,12 +342,15 @@ func _cell_spec(c: int) -> int:
 	l1.clear()
 	lg.clear()
 	lw.clear()
+	var ncl: int = clans.size()
 	for o: Unit in _grid[c]:
+		if o.hp <= 0.0:
+			continue
 		if o.k == "p":
 			if o.rogue or o.undead or o.ow:
 				sp = 2
 				l2.append(o)
-			elif o.clan >= 0 and not clans[o.clan].war.is_empty():
+			elif o.clan >= 0 and o.clan < ncl and not clans[o.clan].war.is_empty():
 				lw.append(o)
 		else:
 			var ob: int = o.beh
@@ -4403,7 +4406,7 @@ func _special(u: Unit, dt: float, t: int) -> bool:
 		raise_undead(u)
 	if u.frz > sim_time:
 		u.moving = false
-		if randf() < dt * 3.0:
+		if not fast and randf() < dt * 3.0:
 			parts.append({"x": u.x + (randf() - 0.5) * 2.0, "y": u.y - randf() * 3.0, "vx": 0.0, "vy": -0.5, "l": 0.5, "ml": 0.5, "c": Color("#d8f4ff"), "s": 0.6, "g": 0.0})
 		return true
 	if not on:
