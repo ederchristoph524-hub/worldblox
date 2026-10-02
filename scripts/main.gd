@@ -1479,17 +1479,31 @@ class EntityLayer:
 		for b: Building in vis:
 			var v: Village = sim.villages[b.v]
 			var c: Clan = sim.clans[v.clan]
-			# Gebäude der Nahansicht: 4 Texel je Kachel, Fußpunkt (Meta „foot“) auf Mitte der Grundfläche-Unterkante
-			var tx: Dictionary = Sprites.clan_textures_hd(c.col, v.race)
+			# Nahansicht: Gebäude mit 4 Texeln je Kachel, Fußpunkt (Meta „foot“) auf Mitte der Grundfläche-Unterkante;
+			# im Fernblick (oder solange das Bild noch entsteht) das grobe Bild mit einem Pixel je Kachel
 			var key: String = Sprites.building_key(b, v)
-			var tex: Texture2D = tx[key]
-			var foot: Vector2 = tex.get_meta("foot")
-			var tsz: Vector2 = tex.get_size() / float(Detail.DS)
-			var dx: float = b.x + b.w * 0.5 - foot.x / Detail.DS
-			var dy: float = b.y + b.h - foot.y / Detail.DS
-			var tw: float = tsz.x
-			var th: float = tsz.y
-			draw_texture_rect(tex, Rect2(dx, dy, tsz.x, tsz.y), false)
+			# schon ab z 1,8 anfordern, damit die Bilder beim Umschalten fertig sind
+			var hdt: ImageTexture = Sprites.hd_building(c.col, v.race, key) if z >= 1.8 else null
+			var tex: Texture2D = hdt if z >= Detail.Z_ON else null
+			var dx: float
+			var dy: float
+			var tw: float
+			var th: float
+			if tex != null:
+				var foot: Vector2 = tex.get_meta("foot")
+				var tsz: Vector2 = tex.get_size() / float(Detail.DS)
+				dx = b.x + b.w * 0.5 - foot.x / Detail.DS
+				dy = b.y + b.h - foot.y / Detail.DS
+				tw = tsz.x
+				th = tsz.y
+				draw_texture_rect(tex, Rect2(dx, dy, tsz.x, tsz.y), false)
+			else:
+				tex = Sprites.clan_textures(c.col, v.race)[key]
+				tw = tex.get_width() - 1
+				th = tex.get_height() - 1
+				dx = b.x - floori((tw - b.w) / 2.0)
+				dy = b.y + b.h - th
+				draw_texture(tex, Vector2(dx, dy))
 			if key == "fire":
 				# Flammen in Viertelkacheln über dem Holzstoß
 				var fx: float = b.x + b.w * 0.5
@@ -1627,9 +1641,10 @@ class EntityLayer:
 
 	## Ort zeichnen: Schatten, Bild (schwebend mit Auf und Ab), belebte Effekte.
 	func _draw_place(p: Place, tnow: float, sel: bool) -> void:
-		var tex: Texture2D = Sprites.place_tex(p.type)
-		var tw: float = tex.get_width() / 4.0
-		var th: float = tex.get_height() / 4.0
+		var pt: Array = Sprites.place_tex_any(p.type)
+		var tex: Texture2D = pt[0]
+		var tw: float = tex.get_width() / float(pt[1])
+		var th: float = tex.get_height() / float(pt[1])
 		var fl: bool = p.type in Sprites.PLACE_FLOAT
 		var bob: float = sin(tnow * 1.3 + p.id) * 0.8 if fl else 0.0
 		var pos: Vector2 = Vector2(roundf(p.x - tw / 2.0), roundf(p.y - th + 2.0 - (8.0 if fl else 0.0) + bob))
@@ -2680,6 +2695,15 @@ func _dev_gfx(dir: String) -> void:
 	for k: int in range(20):
 		await get_tree().process_frame
 	printerr("GFX start")
+	var te: int = Time.get_ticks_usec()
+	for c: int in range(World.CXN * World.CXN):
+		detail._encode(c)
+	var te2: int = Time.get_ticks_usec()
+	for c2: int in range(World.CXN * World.CXN):
+		detail._bake(c2)
+	var te3: int = Time.get_ticks_usec()
+	printerr("GFXPERF encode 64 chunks ms %.1f, bake 64 chunks ms %.1f" % [(te2 - te) / 1000.0, (te3 - te2) / 1000.0])
+	printerr("GFXPERF longest single sprite job ms %.1f" % (Sprites.hd_job_max_us / 1000.0))
 	_set_ui_hidden(true)
 	show_names = false
 	var t: PackedByteArray = sim.world.tile
@@ -2695,7 +2719,7 @@ func _dev_gfx(dir: String) -> void:
 	var bestv: Dictionary = {}
 	for y: int in range(12, H - 12, 5):
 		for x: int in range(12, W - 12, 5):
-			var cnt: Dictionary = {"mount": 0, "snow": 0, "tree": 0, "sand": 0, "shal": 0, "grass": 0, "des": 0, "wall": 0, "deep": 0}
+			var cnt: Dictionary = {"mount": 0, "snow": 0, "tree": 0, "sand": 0, "shal": 0, "grass": 0, "des": 0, "wall": 0, "deep": 0, "road": 0}
 			for dy: int in range(-8, 9, 4):
 				for dx: int in range(-8, 9, 4):
 					var i: int = (y + dy) * W + x + dx
@@ -2711,56 +2735,82 @@ func _dev_gfx(dir: String) -> void:
 						cnt["snow"] += 1
 					if GuData.is_tree(f[i]):
 						cnt["tree"] += 1
+					if f[i] == GuData.F_ROAD:
+						cnt["road"] += 1
 			var sc: Dictionary = {
 				"gebirge": cnt["mount"] * 2 + cnt["snow"] * 3 + mini(cnt["grass"], 12),
 				"kueste": mini(cnt["sand"], 12) * 2 + mini(cnt["shal"], 20) + mini(cnt["grass"], 20) + mini(cnt["deep"], 10) - cnt["wall"] * 5,
 				"wald": cnt["tree"] * 3 + mini(cnt["grass"], 30) - cnt["wall"] * 5,
 				"wueste": cnt["des"] * 2 + mini(cnt["mount"] + cnt["sand"], 10) - cnt["wall"] * 5,
-				"wand": mini(cnt["wall"], 14) * 3 + mini(cnt["grass"], 20) + mini(cnt["shal"] + cnt["deep"], 10)}
+				"wand": mini(cnt["wall"], 14) * 3 + mini(cnt["grass"], 20) + mini(cnt["shal"] + cnt["deep"], 10),
+				"strasse": cnt["road"] * 4 + mini(cnt["grass"], 10)}
 			for key: String in sc:
 				if not bestv.has(key) or int(sc[key]) > int(bestv[key]):
 					bestv[key] = sc[key]
 					spots[key] = Vector2(x, y)
+	# Straßen-Probe: ein gewundener Weg neben dem Dorf (nur Entwickler-Welt)
+	var nroad: int = 0
+	for i2: int in range(GuData.N):
+		if f[i2] == GuData.F_ROAD:
+			nroad += 1
+	if spots.has("dorf"):
+		var rp: Vector2 = spots["dorf"] + Vector2(-14, 10)
+		for k2: int in range(28):
+			var rx: int = int(rp.x) + k2
+			var ry: int = int(rp.y + sin(k2 * 0.3) * 3.0)
+			for ddy: int in range(2):
+				var ii: int = (ry + ddy) * W + rx
+				if sim.world.in_map(rx, ry + ddy) and GuData.buildable(t[ii]):
+					f[ii] = GuData.F_ROAD
+					sim.world.mark_area(rx, ry + ddy)
+		spots["strasse"] = rp + Vector2(14, 0)
+	printerr("GFX roads in world ", nroad)
 	printerr("GFX spots ", spots)
 	paused = true
 	for key: String in spots:
 		var c: Vector2 = spots[key]
-		for zz: float in [4.0, 10.0, 24.0]:
+		for zz: float in [2.4, 2.8, 3.3, 4.0, 10.0, 24.0]:
 			if zz == 24.0 and key != "dorf" and key != "kueste" and key != "gebirge":
+				continue
+			if zz < 3.5 and key != "dorf":
 				continue
 			z = zz
 			zoom_goal = -1.0
 			cam = c
 			_clamp_cam()
 			await _wait(0.8)
-			await _shot(dir + "/%s_z%d.png" % [key, int(zz)])
+			await _shot(dir + "/%s_z%s.png" % [key, str(zz).replace(".0", "")])
 			printerr("GFX shot ", key, " ", zz)
-	# Kameraschwenk: Bildzeiten messen
-	paused = false
-	z = 6.0
-	var p0: Vector2 = Vector2(40, 60)
-	cam = p0
-	_clamp_cam()
-	await _wait(0.5)
-	var times: Array[float] = []
-	var dsum: float = 0.0
-	var dmax: float = 0.0
-	var b0: int = detail.built
-	var last: int = Time.get_ticks_usec()
-	for k: int in range(240):
-		cam = p0 + Vector2(k * 0.75, k * 0.6)
+	# Kameraschwenk: Bildzeiten messen (Simulation angehalten), einmal mit und einmal ohne Nahansicht
+	paused = true
+	for pass_i: int in range(2):
+		detail.dev_off = pass_i == 1
+		z = 6.0
+		var p0: Vector2 = Vector2(40, 60)
+		cam = p0
 		_clamp_cam()
-		await get_tree().process_frame
-		var now: int = Time.get_ticks_usec()
-		times.append((now - last) / 1000.0)
-		dsum += detail.last_ms
-		dmax = maxf(dmax, detail.last_ms)
-		last = now
-	print("GFXPERF detail cpu avg ms %.2f max %.2f chunks baked %d" % [dsum / 240.0, dmax, detail.built - b0])
-	times.sort()
-	var sum: float = 0.0
-	for v2: float in times:
-		sum += v2
-	print("GFXPERF pan z6 frames ", times.size(), " avg ms %.2f median %.2f p95 %.2f max %.2f" % [sum / times.size(), times[times.size() / 2], times[int(times.size() * 0.95)], times[times.size() - 1]])
+		await _wait(0.5)
+		var times: Array[float] = []
+		var dsum: float = 0.0
+		var dmax: float = 0.0
+		var b0: int = detail.built
+		var last: int = Time.get_ticks_usec()
+		for k: int in range(240):
+			cam = p0 + Vector2(k * 0.75, k * 0.6)
+			_clamp_cam()
+			await get_tree().process_frame
+			var now: int = Time.get_ticks_usec()
+			times.append((now - last) / 1000.0)
+			dsum += detail.last_ms
+			dmax = maxf(dmax, detail.last_ms)
+			last = now
+		times.sort()
+		var sum: float = 0.0
+		for v2: float in times:
+			sum += v2
+		var nm: String = "ohne Nahansicht" if pass_i == 1 else "mit Nahansicht"
+		print("GFXPERF %s: detail cpu avg ms %.2f max %.2f chunks baked %d" % [nm, dsum / 240.0, dmax, detail.built - b0])
+		print("GFXPERF %s: pan z6 frames %d avg ms %.2f median %.2f p95 %.2f max %.2f" % [nm, times.size(), sum / times.size(), times[times.size() / 2], times[int(times.size() * 0.95)], times[times.size() - 1]])
+	detail.dev_off = false
 	print("GFXSHOTS DONE")
 	get_tree().quit()

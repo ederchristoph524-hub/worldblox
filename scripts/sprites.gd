@@ -1007,6 +1007,21 @@ const PLACE_SIZE: Dictionary = {"blessed": 24, "grotto": 34, "court": 40, "langy
 ## Schwebende Orte (mit Schatten am Boden und leichtem Auf und Ab).
 const PLACE_FLOAT: Array[String] = ["blessed", "grotto", "court", "langya", "hu", "imperial"]
 static var _place_cache: Dictionary = {}
+static var _place_lo: Dictionary = {}
+
+
+## Ort für die Karte: hochaufgelöst, sobald erzeugt; bis dahin das grobe Bild (Kacheln = Pixel, dann size_div 1).
+## Gibt [Textur, Teiler] zurück.
+static func place_tex_any(type: String) -> Array:
+	if _place_cache.has(type):
+		return [_place_cache[type], float(PK)]
+	if not _place_lo.has(type):
+		_place_lo[type] = ImageTexture.create_from_image(place_image(type))
+		var pk: String = "place:" + type
+		if not _hd_pending.has(pk):
+			_hd_pending[pk] = true
+			_hd_jobs.append(func() -> void: place_tex(type))
+	return [_place_lo[type], 1.0]
 
 
 static func place_size(type: String) -> float:
@@ -1204,36 +1219,91 @@ static func place_image(type: String) -> Image:
 
 const HD_SHADOW: Color = Color(0.04, 0.12, 0.03, 0.34)
 static var _hd: Dictionary = {}
-static var _hd_ready: bool = false
 
 
+## Aufträge zum Erzeugen der Nahansicht-Bilder; Detail.tick arbeitet sie im Zeitbudget ab (hd_step),
+## damit der Start nicht stockt (im Browser läuft alles in einem Faden).
+static var _hd_jobs: Array[Callable] = []
+static var _hd_pending: Dictionary = {}
+static var _hd_feat_left: int = -1
+## Entwickler: längster einzelner Auftrag in Mikrosekunden
+static var hd_job_max_us: int = 0
+
+
+## Alle Objekt-Bilder sofort erzeugen (Entwickler-Bogen, Rückfall).
 static func hd_init() -> void:
-	if _hd_ready:
+	hd_begin()
+	while _hd_feat_left > 0:
+		hd_step(1000000)
+
+
+## Aufträge für alle Objekt-Bilder und Orte einreihen (einmal).
+static func hd_begin() -> void:
+	if _hd_feat_left >= 0:
 		return
-	_hd_ready = true
+	var jobs: Array[Callable] = []
 	var trees: Array = []
-	var pi: int = 0
-	for p: Array in GuData.TREEPAL:
+	for pi: int in range(GuData.TREEPAL.size()):
 		for big: int in range(2):
 			var vs: Array = []
-			for v: int in range(2):
-				var e: Array = _hd_tree(p, big == 0, pi * 31 + big * 7 + v * 3 + 1)
-				vs.append(e)
-				vs.append([(e[0] as Image).duplicate(), e[1]])
-				(vs[vs.size() - 1][0] as Image).flip_x()
-				vs[vs.size() - 1][1] = Vector2i((e[0] as Image).get_width() - 1 - (e[1] as Vector2i).x, (e[1] as Vector2i).y)
 			trees.append(vs)
-		pi += 1
+			for v: int in range(2):
+				var p: Array = GuData.TREEPAL[pi]
+				var sd: int = pi * 31 + big * 7 + v * 3 + 1
+				jobs.append(func() -> void:
+					var e: Array = _hd_tree(p, big == 0, sd)
+					var fl: Image = (e[0] as Image).duplicate()
+					fl.flip_x()
+					vs.append(e)
+					vs.append([fl, Vector2i(fl.get_width() - 1 - (e[1] as Vector2i).x, (e[1] as Vector2i).y)]))
 	_hd["tree"] = trees
-	_hd["pine"] = [_hd_pine(false, 3), _hd_pine(false, 4), _hd_pine(true, 5), _hd_pine(true, 6)]
-	_hd["palm"] = [_hd_palm(1, false), _hd_palm(2, true)]
-	_hd["bamb"] = [_hd_bamboo(1), _hd_bamboo(2)]
-	_hd["rock"] = [_hd_rock(1, false), _hd_rock(2, false)]
-	_hd["ore"] = [_hd_rock(3, true), _hd_rock(4, true)]
-	_hd["spring"] = [_hd_spring()]
-	_hd["shrub"] = [_hd_shrub(1), _hd_shrub(2)]
-	_hd["tuft"] = [_hd_tuft(1), _hd_tuft(2), _hd_tuft(3)]
-	_hd["flower"] = [_hd_flower(0), _hd_flower(1), _hd_flower(2), _hd_flower(3)]
+	_hd["pine"] = []
+	_hd["palm"] = []
+	_hd["bamb"] = []
+	_hd["rock"] = []
+	_hd["ore"] = []
+	_hd["spring"] = []
+	_hd["shrub"] = []
+	_hd["tuft"] = []
+	_hd["flower"] = []
+	jobs.append(func() -> void: _hd["pine"].append_array([_hd_pine(false, 3), _hd_pine(false, 4)]))
+	jobs.append(func() -> void: _hd["pine"].append_array([_hd_pine(true, 5), _hd_pine(true, 6)]))
+	jobs.append(func() -> void: _hd["palm"].append_array([_hd_palm(1, false), _hd_palm(2, true)]))
+	jobs.append(func() -> void: _hd["bamb"].append_array([_hd_bamboo(1), _hd_bamboo(2)]))
+	jobs.append(func() -> void:
+		_hd["rock"].append_array([_hd_rock(1, false), _hd_rock(2, false)])
+		_hd["ore"].append_array([_hd_rock(3, true), _hd_rock(4, true)])
+		_hd["spring"].append(_hd_spring())
+		_hd["shrub"].append_array([_hd_shrub(1), _hd_shrub(2)])
+		_hd["tuft"].append_array([_hd_tuft(1), _hd_tuft(2), _hd_tuft(3)])
+		_hd["flower"].append_array([_hd_flower(0), _hd_flower(1), _hd_flower(2), _hd_flower(3)]))
+	_hd_feat_left = jobs.size()
+	for j: Callable in jobs:
+		_hd_jobs.append(func() -> void:
+			j.call()
+			_hd_feat_left -= 1)
+	# Orte danach (bis dahin zeigt die Karte das grobe Bild)
+	for pt: String in PLACE_SIZE.keys():
+		_hd_jobs.append(func() -> void: place_tex(pt))
+
+
+## Sind alle Objekt-Bilder der Nahansicht fertig?
+static func hd_feat_ready() -> bool:
+	return _hd_feat_left == 0
+
+
+## Aufträge abarbeiten, bis budget_us Mikrosekunden verbraucht sind; true, wenn nichts mehr ansteht.
+static func hd_step(budget_us: int) -> bool:
+	var t0: int = Time.get_ticks_usec()
+	while not _hd_jobs.is_empty():
+		var j: Callable = _hd_jobs.pop_front()
+		var t1: int = Time.get_ticks_usec()
+		j.call()
+		var now: int = Time.get_ticks_usec()
+		hd_job_max_us = maxi(hd_job_max_us, now - t1)
+		if now - t0 > budget_us:
+			break
+	return _hd_jobs.is_empty()
 
 
 ## Bild und Fußpunkt eines Objekts für die Nahansicht.
@@ -1269,19 +1339,23 @@ static func _hdh(x: int, y: int, s: int) -> float:
 	return GuData.hash2(x, y, s)
 
 
-## Weiches Wertrauschen auf einem Gitter der Weite sc (für Blattbüschel).
+static var _nimg: Image = null
+
+
+## Weiches Rauschen mit Strukturweite sc Pixel (für Blattbüschel, Fels): ein Nachschlagen in einem
+## einmal nativ erzeugten Rauschbild (FastNoiseLite) statt vieler Hash-Rechnungen.
 static func _hdvn(x: float, y: float, sc: float, s: int) -> float:
-	var fx: float = x / sc
-	var fy: float = y / sc
-	var ix: int = int(floorf(fx))
-	var iy: int = int(floorf(fy))
-	var tx: float = fx - ix
-	var ty: float = fy - iy
-	tx = tx * tx * (3.0 - 2.0 * tx)
-	ty = ty * ty * (3.0 - 2.0 * ty)
-	var a: float = lerpf(_hdh(ix, iy, s), _hdh(ix + 1, iy, s), tx)
-	var b: float = lerpf(_hdh(ix, iy + 1, s), _hdh(ix + 1, iy + 1, s), tx)
-	return lerpf(a, b, ty)
+	if _nimg == null:
+		var n: FastNoiseLite = FastNoiseLite.new()
+		n.noise_type = FastNoiseLite.TYPE_VALUE_CUBIC
+		n.frequency = 0.25
+		n.fractal_type = FastNoiseLite.FRACTAL_NONE
+		n.seed = 4711
+		_nimg = n.get_image(256, 256, false, false, true)
+	var f: float = 4.0 / sc
+	var ix: int = int(floorf(x * f + s * 37.0)) & 255
+	var iy: int = int(floorf(y * f + s * 59.0)) & 255
+	return _nimg.get_pixel(ix, iy).r
 
 
 ## Weicher Bodenschatten unter allem Bisherigen (nur auf leere Pixel).
@@ -1296,18 +1370,29 @@ static func _hd_ground_shadow(im: Image, cx: float, cy: float, rx: float, ry: fl
 				im.set_pixel(x, y, HD_SHADOW)
 
 
-## Dunkle Kontur um alle deckenden Pixel (Schatten zählt nicht).
+## Dunkle Kontur um alle deckenden Pixel (Schatten zählt nicht). Arbeitet auf den Rohdaten (schnell).
 static func _hd_outline(im: Image, col: Color) -> void:
 	var w: int = im.get_width()
 	var h: int = im.get_height()
-	var src: Image = im.duplicate()
+	var d: PackedByteArray = im.get_data()
+	var src: PackedByteArray = d.duplicate()
+	var r: int = int(col.r * 255.0)
+	var g: int = int(col.g * 255.0)
+	var bb: int = int(col.b * 255.0)
+	var a: int = int(col.a * 255.0)
+	var row: int = w * 4
 	for y: int in range(h):
+		var o: int = y * row
 		for x: int in range(w):
-			if src.get_pixel(x, y).a > 0.6:
+			var i: int = o + x * 4 + 3
+			if src[i] > 153:
 				continue
-			var n: bool = (x > 0 and src.get_pixel(x - 1, y).a > 0.6) or (x < w - 1 and src.get_pixel(x + 1, y).a > 0.6) or (y > 0 and src.get_pixel(x, y - 1).a > 0.6) or (y < h - 1 and src.get_pixel(x, y + 1).a > 0.6)
-			if n:
-				im.set_pixel(x, y, col)
+			if (x > 0 and src[i - 4] > 153) or (x < w - 1 and src[i + 4] > 153) or (y > 0 and src[i - row] > 153) or (y < h - 1 and src[i + row] > 153):
+				d[i - 3] = r
+				d[i - 2] = g
+				d[i - 1] = bb
+				d[i] = a
+	im.set_data(w, h, false, Image.FORMAT_RGBA8, d)
 
 
 ## Kugeliger Klumpen mit Licht von links oben in vier Stufen (+ Blattsprenkel).
@@ -1713,34 +1798,67 @@ static var _clan_cache_hd: Dictionary = {}
 const HD_OL: Color = Color(0.13, 0.08, 0.06, 1.0)
 
 
-## Gebäude-Texturen der Nahansicht in der Farbe eines Clans (zwischengespeichert), Schlüssel wie clan_textures.
+## Gebäude-Texturen der Nahansicht in der Farbe eines Clans, sofort und vollständig (Entwickler-Bogen).
 static func clan_textures_hd(col: Color, race: int = 0) -> Dictionary:
-	var key: String = col.to_html(false) + str(race)
-	if _clan_cache_hd.has(key):
-		return _clan_cache_hd[key]
-	var res: Dictionary = {}
-	res["fire"] = _hd_bt(_hdb_fire(), Vector2i(12, 13))
-	var tent: Image = _hdb_tent(col, race)
-	res["tent"] = _hd_bt(tent, Vector2i(12, 21))
-	var tent_b: Image = tent.duplicate()
-	tent_b.flip_x()
-	res["tent_b"] = _hd_bt(tent_b, Vector2i(12, 21))
-	var hut: Image = _hdb_hut(col, race)
-	res["hut"] = _hd_bt(hut, Vector2i(15, 26))
-	var hut_b: Image = hut.duplicate()
-	hut_b.flip_x()
-	res["hut_b"] = _hd_bt(hut_b, Vector2i(15, 26))
-	res["house"] = _hd_bt(_hdb_house(col, race, false), Vector2i(17, 33))
-	res["house_b"] = _hd_bt(_hdb_house(col, race, true), Vector2i(17, 43))
-	res["hall1"] = _hd_bt(_hdb_hall(col, false), Vector2i(23, 38))
-	res["hall2"] = _hd_bt(_hdb_hall(col, true), Vector2i(30, 54))
-	res["hall"] = res["hall2"]
-	res["forge"] = _hd_bt(_hdb_forge(col), Vector2i(18, 29))
-	res["tower"] = _hd_bt(_hdb_tower(col), Vector2i(12, 53))
-	res["farm"] = _hd_bt(_hdb_farm(col, false), Vector2i(31, 46), false)
-	res["pen"] = _hd_bt(_hdb_farm(col, true), Vector2i(31, 46), false)
-	_clan_cache_hd[key] = res
-	return res
+	for key: String in ["fire", "tent", "hut", "house", "house_b", "hall1", "hall2", "forge", "tower", "farm", "pen"]:
+		_hd_make_building(col, race, key)
+	return _clan_cache_hd[col.to_html(false) + str(race)]
+
+
+## Eine Gebäude-Textur der Nahansicht (Schlüssel wie clan_textures) oder null, solange sie noch
+## erzeugt wird – dann ist der Auftrag eingereiht und der Aufrufer zeichnet das grobe Bild.
+static func hd_building(col: Color, race: int, key: String) -> ImageTexture:
+	var ck: String = col.to_html(false) + str(race)
+	var d: Dictionary = _clan_cache_hd.get(ck, {})
+	if d.has(key):
+		return d[key]
+	var pk: String = ck + key
+	if not _hd_pending.has(pk):
+		_hd_pending[pk] = true
+		_hd_jobs.append(func() -> void: _hd_make_building(col, race, key))
+	return null
+
+
+static func _hd_make_building(col: Color, race: int, key: String) -> void:
+	var ck: String = col.to_html(false) + str(race)
+	if not _clan_cache_hd.has(ck):
+		_clan_cache_hd[ck] = {}
+	var res: Dictionary = _clan_cache_hd[ck]
+	if res.has(key):
+		return
+	match key:
+		"fire":
+			res["fire"] = _hd_bt(_hdb_fire(), Vector2i(12, 13))
+		"tent", "tent_b":
+			var tent: Image = _hdb_tent(col, race)
+			res["tent"] = _hd_bt(tent, Vector2i(12, 21))
+			var tent_b: Image = tent.duplicate()
+			tent_b.flip_x()
+			res["tent_b"] = _hd_bt(tent_b, Vector2i(12, 21))
+		"hut", "hut_b":
+			var hut: Image = _hdb_hut(col, race)
+			res["hut"] = _hd_bt(hut, Vector2i(15, 26))
+			var hut_b: Image = hut.duplicate()
+			hut_b.flip_x()
+			res["hut_b"] = _hd_bt(hut_b, Vector2i(15, 26))
+		"house":
+			res["house"] = _hd_bt(_hdb_house(col, race, false), Vector2i(17, 33))
+		"house_b":
+			res["house_b"] = _hd_bt(_hdb_house(col, race, true), Vector2i(17, 43))
+		"hall1":
+			res["hall1"] = _hd_bt(_hdb_hall(col, false), Vector2i(23, 38))
+		"hall2", "hall":
+			res["hall2"] = _hd_bt(_hdb_hall(col, true), Vector2i(30, 54))
+			res["hall"] = res["hall2"]
+		"forge":
+			res["forge"] = _hd_bt(_hdb_forge(col), Vector2i(18, 29))
+		"tower":
+			res["tower"] = _hd_bt(_hdb_tower(col), Vector2i(12, 53))
+		"farm":
+			res["farm"] = _hd_bt(_hdb_farm(col, false), Vector2i(31, 46), false)
+		"pen":
+			res["pen"] = _hd_bt(_hdb_farm(col, true), Vector2i(31, 46), false)
+	_hd_pending.erase(ck + key)
 
 
 ## Kontur, Schlagschatten (2 Texel nach rechts unten) und Mipmaps; Fußpunkt als Meta.
@@ -1751,11 +1869,23 @@ static func _hd_bt(im: Image, foot: Vector2i, outline: bool = true) -> ImageText
 	src.blit_rect(im, Rect2i(0, 0, w, h), Vector2i(1, 1))
 	if outline:
 		_hd_outline(src, HD_OL)
-	var out: Image = Image.create_empty(w + 5, h + 5, false, Image.FORMAT_RGBA8)
+	# Schlagschatten: Silhouette 2 Texel versetzt in Schattenfarbe (über die Rohdaten)
+	var sd: PackedByteArray = src.get_data()
+	var od: PackedByteArray = PackedByteArray()
+	od.resize((w + 5) * (h + 5) * 4)
+	var sr: int = int(HD_SHADOW.r * 255.0)
+	var sg: int = int(HD_SHADOW.g * 255.0)
+	var sb: int = int(HD_SHADOW.b * 255.0)
+	var sa: int = int(HD_SHADOW.a * 255.0)
 	for y: int in range(h + 2):
 		for x: int in range(w + 2):
-			if src.get_pixel(x, y).a > 0.5:
-				out.set_pixel(x + 2, y + 2, HD_SHADOW)
+			if sd[(y * (w + 2) + x) * 4 + 3] > 127:
+				var o: int = ((y + 2) * (w + 5) + x + 2) * 4
+				od[o] = sr
+				od[o + 1] = sg
+				od[o + 2] = sb
+				od[o + 3] = sa
+	var out: Image = Image.create_from_data(w + 5, h + 5, false, Image.FORMAT_RGBA8, od)
 	out.blend_rect(src, Rect2i(0, 0, w + 2, h + 2), Vector2i.ZERO)
 	out.generate_mipmaps()
 	var t: ImageTexture = ImageTexture.create_from_image(out)
@@ -2364,7 +2494,9 @@ static func place_image_hd(type: String) -> Image:
 							c = c.lightened(0.2)
 						c.a = 0.95 - dd * 0.45
 						q.p(x, y, 1, 1, c)
-			P.call(cx - 1.0, H2 * 0.55 - 1.0, 3.0, 3.0, Color("#ffffff"))
+			# leuchtender Kern
+			q.d(roundi(cx * k), roundi(H2 * 0.55 * k), 5, Color("#f4e0ff"))
+			q.d(roundi(cx * k), roundi(H2 * 0.55 * k), 3, Color("#ffffff"))
 		_:
 			# übrige Orte: grobes Bild vergrößern (Scale2x zweimal) – sie sind klein
 			return scale2x(scale2x(place_image(type)))
@@ -2375,12 +2507,14 @@ static func place_image_hd(type: String) -> Image:
 ## Schwebende Insel in feinen Pixeln: gewölbte Grasdecke (Licht links oben), Grasnarbe,
 ## Fels in Schichten nach unten spitz zulaufend, hängende Wurzeln.
 static func _island_hd(q: Px, k: int, cx: float, top: float, rx: float, ry: float, depth: float, grass: Array, rock: Array, sd: int) -> void:
+	var im: Image = q.img
+	var iw: int = im.get_width()
 	var ky: int = int((top - ry) * k)
 	var kb: int = int((top + depth) * k) + 1
-	for y: int in range(ky, kb):
+	for y: int in range(maxi(0, ky), mini(im.get_height(), kb)):
 		var fy: float = (y + 0.5) / k
 		if fy <= top:
-			for x: int in range(int((cx - rx) * k) - 2, int((cx + rx) * k) + 3):
+			for x: int in range(maxi(0, int((cx - rx) * k) - 2), mini(iw, int((cx + rx) * k) + 3)):
 				var fx: float = (x + 0.5) / k
 				var dx: float = (fx - cx) / rx
 				var dy: float = (fy - top) / ry
@@ -2396,12 +2530,12 @@ static func _island_hd(q: Px, k: int, cx: float, top: float, rx: float, ry: floa
 					ci = maxi(0, ci - 1)
 				elif hh > 0.95:
 					ci = mini(3, ci + 1)
-				q.p(x, y, 1, 1, grass[ci])
+				im.set_pixel(x, y, grass[ci])
 		else:
 			var kk: float = (fy - top) / depth
 			var jag: float = 0.85 + 0.25 * _hdvn(0.0, y, 2.5 * k / 4.0, sd + 3)
 			var hw: float = rx * pow(maxf(0.0, 1.0 - kk), 0.9) * jag
-			for x: int in range(int((cx - hw) * k) - 1, int((cx + hw) * k) + 2):
+			for x: int in range(maxi(0, int((cx - hw) * k) - 1), mini(iw, int((cx + hw) * k) + 2)):
 				var fx2: float = (x + 0.5) / k
 				if absf(fx2 - cx) > hw:
 					continue
@@ -2421,7 +2555,7 @@ static func _island_hd(q: Px, k: int, cx: float, top: float, rx: float, ry: floa
 				# Grasnarbe direkt unter der Decke
 				if fy - top < 0.75:
 					c = grass[3] if fy - top > 0.4 or _hdh(x, 0, sd + 2) < 0.4 else grass[2]
-				q.p(x, y, 1, 1, c)
+				im.set_pixel(x, y, c)
 	# hängende Wurzeln
 	for r: int in range(5):
 		var wx: float = cx - rx * 0.6 + r * rx * 0.3

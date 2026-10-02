@@ -19,8 +19,8 @@ const MAX_FEAT: int = 48
 ## Zeitbudget je Bild für das Backen in Millisekunden
 const BUDGET_MS: float = 3.0
 ## Ab dieser Zoomstufe blendet die Nahansicht ein (voll ab Z_FULL)
-const Z_ON: float = 2.5
-const Z_FULL: float = 3.1
+const Z_ON: float = 2.7
+const Z_FULL: float = 2.95
 
 var world: World
 var dat_img: Image
@@ -39,10 +39,12 @@ var mat: ShaderMaterial
 var last_ms: float = 0.0
 var max_ms: float = 0.0
 var built: int = 0
+## Entwickler: Nahansicht abschalten (Vergleichsmessung)
+var dev_off: bool = false
 
 
 func _ready() -> void:
-	Sprites.hd_init()
+	Sprites.hd_begin()
 	mat = ShaderMaterial.new()
 	var sh: Shader = Shader.new()
 	sh.code = SHADER
@@ -55,6 +57,8 @@ func _ready() -> void:
 	dat_img = Image.create_empty(World.W, World.H, false, Image.FORMAT_RGBA8)
 	dat_tex = ImageTexture.create_from_image(dat_img)
 	mat.set_shader_parameter("dat", dat_tex)
+	mat.set_shader_parameter("nz", _noise_tex(64, 11))
+	mat.set_shader_parameter("wn", _noise_tex(256, 23))
 	mat.set_shader_parameter("ds", float(DS))
 	dat_ver = PackedInt32Array()
 	dat_ver.resize(CXN * CXN)
@@ -67,6 +71,17 @@ func _ready() -> void:
 	ftex.resize(CXN * CXN)
 
 
+## Zufallswerte in allen vier Kanälen (n × n, kachelbar durch Wiederholung im Shader).
+static func _noise_tex(n: int, sd: int) -> ImageTexture:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = sd
+	var ints: PackedInt32Array = PackedInt32Array()
+	ints.resize(n * n)
+	for i: int in range(n * n):
+		ints[i] = rng.randi()
+	return ImageTexture.create_from_image(Image.create_from_data(n, n, false, Image.FORMAT_RGBA8, ints.to_byte_array()))
+
+
 ## Jedes Bild aus main.gd: sichtbarer Ausschnitt in Kacheln und Zoom.
 func tick(w: World, vrect: Rect2, z: float) -> void:
 	if w != world:
@@ -76,17 +91,21 @@ func tick(w: World, vrect: Rect2, z: float) -> void:
 		for c: int in range(ftex.size()):
 			ftex[c] = null
 	frame += 1
-	amt = clampf((z - Z_ON) / (Z_FULL - Z_ON), 0.0, 1.0)
+	amt = 0.0 if dev_off else clampf((z - Z_ON) / (Z_FULL - Z_ON), 0.0, 1.0)
+	var t0: int = Time.get_ticks_usec()
+	# Bilder der Nahansicht im Hintergrund erzeugen; bis die Objekte fertig sind, bleibt das 1:1-Bild
+	Sprites.hd_step(int(BUDGET_MS * 1000.0))
+	if not Sprites.hd_feat_ready():
+		amt = 0.0
 	visible = amt > 0.0
 	view = vrect
-	var t0: int = Time.get_ticks_usec()
 	# Datenbild: geänderte Blöcke neu kodieren (immer, damit es beim Hineinzoomen bereit ist)
 	for c: int in range(CXN * CXN):
 		if dat_ver[c] != world.dver[c]:
 			_encode(c)
 			dat_ver[c] = world.dver[c]
 			dat_dirty = true
-			if not visible and (Time.get_ticks_usec() - t0) > BUDGET_MS * 1000.0:
+			if (Time.get_ticks_usec() - t0) > BUDGET_MS * 1000.0:
 				break
 	if dat_dirty and (visible or frame % 30 == 0):
 		dat_tex.update(dat_img)
@@ -234,6 +253,9 @@ const SHADER: String = """
 shader_type canvas_item;
 
 uniform sampler2D dat : filter_nearest, repeat_disable;
+// Rauschtexturen statt Hash-Rechnung (billiger auf Handy-GPUs): nz weich (bilinear), wn je Texel
+uniform sampler2D nz : filter_linear, repeat_enable;
+uniform sampler2D wn : filter_nearest, repeat_enable;
 uniform float ds = 4.0;
 uniform float amt = 1.0;
 
@@ -248,29 +270,21 @@ const vec3 GR[15] = {
 };
 const float BAY[16] = { 0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0 };
 
-uint hu(uint x) {
-	x ^= x >> 16u;
-	x *= 2146121005u;
-	x ^= x >> 15u;
-	x *= 2221713035u;
-	x ^= x >> 16u;
-	return x;
+float ch(vec4 v, int s) {
+	int c = s & 3;
+	return c == 0 ? v.r : (c == 1 ? v.g : (c == 2 ? v.b : v.a));
 }
 
+// weißes Rauschen je Texel (Periode 256)
 float h2(ivec2 p, int s) {
-	return float(hu(uint(p.x) * 1973u + uint(p.y) * 9277u + uint(s) * 26699u) & 65535u) / 65535.0;
+	ivec2 q = (p + ivec2(s * 37, s * 61)) & ivec2(255);
+	return ch(texelFetch(wn, q, 0), s);
 }
 
+// weiches Wertrauschen, Gitterweite 1 (Periode 64)
 float vn(vec2 p, int s) {
-	vec2 i = floor(p);
-	vec2 f = fract(p);
-	f = f * f * (3.0 - 2.0 * f);
-	ivec2 q = ivec2(i);
-	float a = h2(q, s);
-	float b = h2(q + ivec2(1, 0), s);
-	float c = h2(q + ivec2(0, 1), s);
-	float d = h2(q + ivec2(1, 1), s);
-	return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+	vec2 o = vec2(float(s) * 17.31, float(s) * 9.73);
+	return ch(texture(nz, (p + o) / 64.0), s);
 }
 
 vec4 D(ivec2 t) {
@@ -292,7 +306,21 @@ vec3 pick5(vec3 a, vec3 b, vec3 c, vec3 d, vec3 e, float v) {
 
 // Stufe runden, nur nahe der Stufengrenze gerastert (saubere Pixel-Flächen statt Rauschen)
 float lv(float v, float dith, float hi) {
-	return clamp(floor(v + 0.5 + (dith - 0.5) * 0.55), 0.0, hi);
+	return clamp(floor(v + 0.5 + dith), 0.0, hi);
+}
+
+// Licht aus dem unverwackelten Höhenfeld (ruhigere Flächen für Fels und Schnee)
+float relief(vec2 p) {
+	vec2 q = p - 0.5;
+	ivec2 b = ivec2(floor(q));
+	vec2 f = q - floor(q);
+	float a = D(b).g;
+	float bx = D(b + ivec2(1, 0)).g;
+	float cy = D(b + ivec2(0, 1)).g;
+	float d = D(b + ivec2(1, 1)).g;
+	float gx = mix(bx - a, d - cy, f.y);
+	float gy = mix(cy - a, d - bx, f.x);
+	return clamp((gx + gy) * 3.2, -1.0, 1.0);
 }
 
 int tt(vec2 p) {
@@ -310,7 +338,8 @@ void fragment() {
 	float fw = fwidth(wp.x) * ds;
 	// Kleinteiliges (Halme, Körner, Funkeln) im Fernblick ausblenden, sonst flimmert es
 	float spk = clamp(1.7 - fw * 1.1, 0.0, 1.0);
-	float dith = (BAY[(ti.y & 3) * 4 + (ti.x & 3)] + 0.5) / 16.0;
+	// Raster nur nahe den Stufengrenzen; im Nahblick (große Texel) fast keins, sonst wirkt es wie Rauschen
+	float dith = ((BAY[(ti.y & 3) * 4 + (ti.x & 3)] + 0.5) / 16.0 - 0.5) * mix(0.12, 0.4, clamp(fw * 1.4, 0.0, 1.0));
 
 	// verwackelte Abtastung: organische Grenzen zwischen den Kacheln
 	vec2 jt = vec2(vn(pc * 0.85, 1), vn(pc * 0.85 + 17.3, 2)) - 0.5;
@@ -338,7 +367,7 @@ void fragment() {
 
 	if (wd > 0.5) {
 		// ---------- Wasser ----------
-		float dep = wd + (vn(pc * 0.3, 5) - 0.5) * 3.0 + (dith - 0.5) * 0.6;
+		float dep = wd + (vn(pc * 0.3, 5) - 0.5) * 3.0 + dith * 1.5;
 		if (dep < 1.4) col = c8(vec3(98.0, 204.0, 236.0));
 		else if (dep < 3.2) col = c8(vec3(76.0, 184.0, 234.0));
 		else if (dep < 7.0) col = c8(vec3(62.0, 156.0, 226.0));
@@ -362,7 +391,7 @@ void fragment() {
 		float ph = fract(wd * 0.8 - T * 0.22 + vn(pc * 0.45, 8) * 0.7);
 		if (wd < 3.0 && ph < 0.09) {
 			float fa = (1.0 - (wd - 0.5) / 2.5) * 0.85;
-			col = mix(col, c8(vec3(214.0, 242.0, 252.0)), fa * (dith < fa ? 1.0 : 0.45));
+			col = mix(col, c8(vec3(214.0, 242.0, 252.0)), fa);
 		}
 		// Gischtsaum direkt am Ufer
 		float rim = 0.5 + 0.2 + vn(pc * 1.3 + vec2(T * 0.15, 0.0), 9) * 0.22;
@@ -426,8 +455,11 @@ void fragment() {
 			col = c8(pick5(vec3(92.0, 68.0, 42.0), vec3(114.0, 86.0, 52.0), vec3(132.0, 100.0, 62.0), vec3(150.0, 116.0, 74.0), vec3(170.0, 136.0, 90.0), lv(v, dith, 4.0)));
 		} else if (t == 6) {
 			// ---------- Hügel: Fels mit Grasflecken ----------
-			float rk = vn(pc * 0.9, 19) + 0.5 * vn(pc * 2.2, 20);
-			float v = 2.0 + L * 2.2 + (rk - 0.75) * 1.4;
+			L = relief(pc);
+			float rk = vn(pc * 0.6, 19);
+			float v = 2.0 + L * 2.2 + (rk - 0.5) * 1.6;
+			float cr = abs(vn(pc * 1.1, 20) - 0.5);
+			if (cr < 0.03) v -= 1.0;
 			if (hb < 0.04 * spk) v -= 1.0;
 			int tb = tt(pj + vec2(0.0, 0.4));
 			if (tb != 6 && tb != 7) v -= 1.2;
@@ -441,6 +473,7 @@ void fragment() {
 			}
 		} else if (t == 7) {
 			// ---------- Gebirge: Fels in Facetten, Schneekappen ----------
+			L = relief(pc);
 			// Facetten: grobes Rauschen gestuft, dazu feine Risse
 			float rk = vn(pc * 0.75, 22);
 			float v = 2.0 + L * 2.6 + (rk - 0.5) * 2.0 + (hg - 0.85) * 4.0;
@@ -453,7 +486,8 @@ void fragment() {
 			else if (tt(pj - vec2(0.0, 0.45)) != 7) v += 1.0;
 			float snow = hg + (vn(pc * 0.8, 24) - 0.5) * 0.05;
 			if (snow > 0.935 && tb == 7) {
-				col = c8(pick5(vec3(150.0, 166.0, 196.0), vec3(184.0, 200.0, 224.0), vec3(220.0, 230.0, 242.0), vec3(240.0, 246.0, 250.0), vec3(255.0, 255.0, 255.0), lv(v + 0.6, dith, 4.0)));
+				float sv = v - 0.2 + (vn(pc * 0.9, 34) - 0.5) * 1.4;
+				col = c8(pick5(vec3(132.0, 150.0, 188.0), vec3(170.0, 188.0, 218.0), vec3(204.0, 216.0, 236.0), vec3(232.0, 240.0, 248.0), vec3(252.0, 253.0, 255.0), lv(sv, dith, 4.0)));
 			} else {
 				col = c8(pick5(vec3(46.0, 46.0, 54.0), vec3(70.0, 70.0, 78.0), vec3(98.0, 98.0, 102.0), vec3(130.0, 128.0, 126.0), vec3(166.0, 164.0, 158.0), lv(v, dith, 4.0)));
 			}
