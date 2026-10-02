@@ -246,7 +246,7 @@ func jump_chunk(budget_ms: int) -> float:
 	var t0: int = Time.get_ticks_msec()
 	sim.fast = true   # Schnelllauf: große Schritte, keine Effekte (Sim.FAST_DT)
 	while jump_left > 0.0 and Time.get_ticks_msec() - t0 < budget_ms:
-		var dt: float = minf(Sim.FAST_DT, jump_left)
+		var dt: float = minf(Sim.JUMP_DT, jump_left)
 		sim.step(dt)
 		jump_left -= dt
 		if jump_left < 0.001:

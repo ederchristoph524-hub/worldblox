@@ -80,7 +80,12 @@ var _grid: Array = []
 var _gused: PackedInt32Array = PackedInt32Array()   # belegte Zellen des Rasters (nur diese werden geleert)
 var _gver: int = 0                                  # zählt jeden Neuaufbau des Rasters
 var _gstamp: PackedInt32Array = PackedInt32Array()  # je Zelle: _gver, für den _gspec gilt
-var _gspec: PackedByteArray = PackedByteArray()     # je Zelle: 1 = enthält ein Wesen, das friedlichen Menschen gefährlich sein kann
+var _gspec: PackedByteArray = PackedByteArray()     # je Zelle: Gefahrenstufe (_cell_spec)
+var _gs2: Array = []   # je Zelle: Wesen der Gefahrenstufe 2 (siehe _cell_spec), mit _gstamp gültig
+var _gs1: Array = []   # je Zelle: Raubtiere ohne Angreifer/Wolfsflut (Stufe 1)
+var _ggu: Array = []   # je Zelle: wilde sterbliche Gu
+var _gwar: Array = []  # je Zelle: gewöhnliche Menschen, deren Clan im Krieg ist
+var _igu_list: Array[Unit] = []   # wilde Unsterbliche Gu (monatlich in nature_spawns neu, dazu spawn_wild_igu)
 var _fire_acc: float = 0.0
 var _sand: bool = false
 const MOVE_OFFS: PackedFloat32Array = [0.0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9]
@@ -89,6 +94,7 @@ const MOVE_OFFS: PackedFloat32Array = [0.0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9]
 ## (Partikel, Ringe, Säulen, schwebende Texte, Blitzbilder). Spielregeln bleiben gleich, alle Raten hängen an dt.
 var fast: bool = false
 const FAST_DT: float = 0.25
+const JUMP_DT: float = 0.5   ## Schrittweite im Cheat-Zeitsprung (Bewegung prüft bei großen Schritten auch die Wegmitte)
 ## Gestaffelt (hohe Spieltempi, von GuMain gesetzt): Wesen ohne Ziel laufen nur jeden zweiten Schritt (mit doppeltem dt,
 ## je nach Id gerade/ungerade), das Wesen-Raster wird nur jeden zweiten Schritt neu aufgebaut. Kämpfer jeden Schritt.
 var stagger: bool = false
@@ -97,6 +103,8 @@ var _gn: int = 0          # Wesenzahl beim letzten Rasteraufbau (abzüglich entf
 var _gforce: bool = true  # Raster sicher neu aufbauen (neue Welt, Laden)
 var _fire_any: bool = false   # zu Schrittbeginn: brennt irgendwo etwas?
 var _uid_cache: Dictionary = {}   # unit_by_id: Id -> Wesen
+var _m_cult: float = 1.0          # Kultivierungsfaktor des Zeitalters, in monthly gesetzt (gültig bei _m_cult_t == sim_time)
+var _m_cult_t: float = -1.0
 
 ## Entwickler-Profil (--perftest): Zeit je Teilsystem in µs, gemessen nur bei prof = true.
 var prof: bool = false
@@ -165,8 +173,16 @@ func _sync_size() -> void:
 	if _grid.size() == GW * GH:
 		return
 	_grid.resize(GW * GH)
+	_gs2.resize(GW * GH)
+	_gs1.resize(GW * GH)
+	_ggu.resize(GW * GH)
+	_gwar.resize(GW * GH)
 	for k: int in range(GW * GH):
 		_grid[k] = []
+		_gs2[k] = []
+		_gs1[k] = []
+		_ggu[k] = []
+		_gwar[k] = []
 	_gused = PackedInt32Array()
 	_gstamp.resize(GW * GH)
 	_gstamp.fill(-1)
@@ -313,22 +329,36 @@ func rebuild_grid() -> void:
 ## Gefahrenstufe einer Rasterzelle für friedliche Menschen (kein Jäger, Clan ohne Krieg), je Rasteraufbau einmal
 ## berechnet (nearest_hostile): 2 = Abtrünnige, Leichen, Fremdweltdämonen, Bestienkönige, Wolfsflut oder Tiere mit
 ## Angreifer; 1 = nur Raubtiere (feindlich nur gegenüber Gu-Meistern); 0 = nichts.
+## Füllt dabei die Zell-Listen _gs2 (Stufe 2), _gs1 (Raubtiere), _ggu (wilde Gu) und _gwar (Menschen im Krieg).
 func _cell_spec(c: int) -> int:
 	if _gstamp[c] == _gver:
 		return _gspec[c]
 	var sp: int = 0
+	var l2: Array = _gs2[c]
+	var l1: Array = _gs1[c]
+	var lg: Array = _ggu[c]
+	var lw: Array = _gwar[c]
+	l2.clear()
+	l1.clear()
+	lg.clear()
+	lw.clear()
 	for o: Unit in _grid[c]:
 		if o.k == "p":
 			if o.rogue or o.undead or o.ow:
 				sp = 2
-				break
+				l2.append(o)
+			elif o.clan >= 0 and not clans[o.clan].war.is_empty():
+				lw.append(o)
 		else:
 			var ob: int = o.beh
-			if ob == GuData.B_KING or o.tide or (o.aggro != null and ob != GuData.B_GU and ob != GuData.B_IGU):
+			if ob == GuData.B_GU:
+				lg.append(o)
+			elif ob == GuData.B_KING or o.tide or (o.aggro != null and ob != GuData.B_IGU):
 				sp = 2
-				break
-			if ob == GuData.B_PRED:
-				sp = 1
+				l2.append(o)
+			elif ob == GuData.B_PRED:
+				sp = maxi(sp, 1)
+				l1.append(o)
 	_gstamp[c] = _gver
 	_gspec[c] = sp
 	return sp
@@ -402,19 +432,51 @@ func nearest_hostile(u: Unit, r: float, skip_civ: bool = false) -> Unit:
 	var x1: int = clampi(int((ux + r) / GC), 0, GW - 1)
 	var y0: int = clampi(int((uy - r) / GC), 0, GH - 1)
 	var y1: int = clampi(int((uy + r) / GC), 0, GH - 1)
-	if plain and cw.is_empty() and u.job != "hunt":
-		# Friedlicher Mensch ohne Krieg: feindlich kann nur sein, was _cell_spec meldet
-		var any: bool = false
-		var lim: int = 1 if u.rank > 0 else 2
+	if plain and u.job != "hunt":
+		# Gewöhnlicher Mensch (kein Jäger): feindlich kann nur sein, was _cell_spec in die Zell-Listen legt –
+		# Gefahrenstufe 2, Raubtiere (nur für Gu-Meister) und Menschen aus Clans, mit denen sein Clan Krieg führt
+		var gm: bool = u.rank > 0
+		var war: bool = not cw.is_empty()
 		for gy0: int in range(y0, y1 + 1):
 			for gx0: int in range(x0, x1 + 1):
-				if _cell_spec(gy0 * GW + gx0) >= lim:
-					any = true
-					break
-			if any:
-				break
-		if not any:
-			return null
+				var c0: int = gy0 * GW + gx0
+				var lv: int = _gspec[c0] if _gstamp[c0] == _gver else _cell_spec(c0)
+				if war:
+					for o: Unit in _gwar[c0]:
+						var oc: int = o.clan
+						if oc == uc or o.hp <= 0.0 or not cw.has(oc):
+							continue
+						var dx4: float = o.x - ux
+						var dy4: float = o.y - uy
+						var d24: float = dx4 * dx4 + dy4 * dy4
+						if d24 > bd or (skip_civ and o.rank == 0 and not o.militia):
+							continue
+						bd = d24
+						best = o
+				if lv == 0 or (lv == 1 and not gm):
+					continue
+				for o: Unit in _gs2[c0]:
+					if o.hp <= 0.0:
+						continue
+					var dx2: float = o.x - ux
+					var dy2: float = o.y - uy
+					var d22: float = dx2 * dx2 + dy2 * dy2
+					if d22 > bd or (skip_civ and o.k == "p" and o.rank == 0 and not o.militia and not o.rogue) or not hostile(u, o):
+						continue
+					bd = d22
+					best = o
+				if gm:
+					for o: Unit in _gs1[c0]:
+						if o.hp <= 0.0:
+							continue
+						var dx3: float = o.x - ux
+						var dy3: float = o.y - uy
+						var d23: float = dx3 * dx3 + dy3 * dy3
+						if d23 > bd or not hostile(u, o):
+							continue
+						bd = d23
+						best = o
+		return best
 	for gy: int in range(y0, y1 + 1):
 		for gx: int in range(x0, x1 + 1):
 			for o: Unit in _grid[gy * GW + gx]:
@@ -453,9 +515,13 @@ func nearest_beh(u: Unit, r: float, beh: int) -> Unit:
 	var x1: int = clampi(int((ux + r) / GC), 0, GW - 1)
 	var y0: int = clampi(int((uy - r) / GC), 0, GH - 1)
 	var y1: int = clampi(int((uy + r) / GC), 0, GH - 1)
+	var gu: bool = beh == GuData.B_GU
 	for gy: int in range(y0, y1 + 1):
 		for gx: int in range(x0, x1 + 1):
-			for o: Unit in _grid[gy * GW + gx]:
+			var c: int = gy * GW + gx
+			if gu:
+				_cell_spec(c)
+			for o: Unit in (_ggu[c] if gu else _grid[c]):
 				if o.beh != beh or o == u or o.hp <= 0.0:
 					continue
 				var dx: float = o.x - ux
@@ -1034,6 +1100,8 @@ func recount(v: Village) -> void:
 	v.farms = 0
 	v.forge = false
 	v.towers = 0
+	v.forge_b = -1
+	v.farm_b = PackedInt32Array()
 	var keep: PackedInt32Array = PackedInt32Array()
 	for id: int in v.b:
 		var b: Building = buildings[id]
@@ -1045,8 +1113,10 @@ func recount(v: Village) -> void:
 				v.houses += 1
 			"farm":
 				v.farms += 1
+				v.farm_b.append(id)
 			"forge":
 				v.forge = true
+				v.forge_b = id
 			"tower":
 				v.towers += 1
 	v.b = keep
@@ -1207,6 +1277,12 @@ func nearest_village(x: float, y: float, r: float, pred: Callable = Callable()) 
 	return best
 
 
+## Pause nach erfolgloser Bauplatzsuche: 2, 3, 4 … höchstens 8 Monate (je weiterer Fehlschlag länger, Erfolg setzt zurück).
+func _bcool(v: Village) -> float:
+	v.bfn = mini(v.bfn + 1, 7)
+	return 1.0 + v.bfn
+
+
 func try_build(v: Village, type: String) -> bool:
 	var s: Vector2i = GuData.BSIZE[type]
 	var r0: float = 6.0 + mini(10, v.houses) * 1.4
@@ -1217,6 +1293,7 @@ func try_build(v: Village, type: String) -> bool:
 		var y: int = roundi(v.cy + sin(a) * d * 0.85 - s.y / 2.0)
 		if x >= 0 and y >= 0 and x < W and y < H and world.region[y * W + x] == v.reg and can_place(x, y, s.x, s.y, 1):
 			place_building(v, type, x, y)
+			v.bfn = 0
 			return true
 	return false
 
@@ -1283,7 +1360,7 @@ func cultivate(u: Unit) -> void:
 	var v: Village = villages[u.vil] if u.vil >= 0 else null
 	var am: float = APTM.get(u.apt, 1.0)
 	var yps: float = pow(u.rank, 1.15) / am if u.rank <= 5 else 6.0 * pow(u.rank - 5, 1.5) / am
-	var rate: float = 1.0 / (yps * 12.0) * float(age_data()["cult"])
+	var rate: float = 1.0 / (yps * 12.0) * (_m_cult if _m_cult_t == sim_time else float(age_data()["cult"]))
 	if u.rank <= 5:
 		var need: float = 0.04 * u.rank
 		if v != null and v.stones >= need:
@@ -1751,6 +1828,8 @@ func monthly() -> void:
 		if u.rank > 0:
 			v.gm += 1
 	var ad: Dictionary = age_data()
+	_m_cult = float(ad["cult"])   # für cultivate in diesem Monat
+	_m_cult_t = sim_time
 	var t0: int = Time.get_ticks_usec() if prof else 0
 	for v: Village in villages:
 		if not v.alive:
@@ -1780,7 +1859,7 @@ func monthly() -> void:
 				join_village(kid, v)
 				v.food -= 2.0
 		var tb: int = Time.get_ticks_usec() if prof else 0
-		# Kein Platz gefunden: erst nach zwei Monaten wieder suchen (je Suche bis zu 40 Versuche)
+		# Kein Platz gefunden: erst nach einer Pause wieder suchen (je Suche bis zu 40 Versuche; _bcool)
 		var bok: bool = v.bfail <= sim_time
 		if not bok:
 			pass
@@ -1788,22 +1867,22 @@ func monthly() -> void:
 			if try_build(v, "house"):
 				v.wood -= 10.0
 			else:
-				v.bfail = sim_time + 2.0
+				v.bfail = sim_time + _bcool(v)
 		elif v.wood >= 6.0 and v.farms < ceili(v.pop / 7.0):
 			if try_build(v, "farm"):
 				v.wood -= 6.0
 			else:
-				v.bfail = sim_time + 2.0
+				v.bfail = sim_time + _bcool(v)
 		elif not v.forge and v.gm > 0 and v.wood >= 12.0:
 			if try_build(v, "forge"):
 				v.wood -= 12.0
 			else:
-				v.bfail = sim_time + 2.0
+				v.bfail = sim_time + _bcool(v)
 		elif not c.war.is_empty() and v.towers < 2 and v.wood >= 12.0 and v.pop > 10:
 			if try_build(v, "tower"):
 				v.wood -= 12.0
 			else:
-				v.bfail = sim_time + 2.0
+				v.bfail = sim_time + _bcool(v)
 		if prof:
 			tb = _pa(P_M_BUILD, tb)
 		if laws["expand"] and v.pop >= mini(v.cap, 40) - 1 and v.houses >= (4 if v.reg == 3 else 6) and randf() < (0.05 if v.reg == 3 else 0.035):
@@ -2064,9 +2143,12 @@ func random_tile(pred: Callable, tries: int = 80) -> Vector2:
 
 func nature_spawns() -> void:
 	sp_count = {}
+	_igu_list.clear()
 	for u: Unit in units:
 		if u.k == "a" and u.hp > 0.0:
 			sp_count[u.sp] = sp_count.get(u.sp, 0) + 1
+			if u.beh == GuData.B_IGU:
+				_igu_list.append(u)
 	wild_igu = int(sp_count.get("wildimm", 0))
 	if not laws["growth"]:
 		return
@@ -2102,6 +2184,7 @@ func spawn_wild_igu(x: float, y: float, id: String = "") -> Unit:
 		id = Lore.igu_random()
 	var g: Unit = mk_animal(x, y, "wildimm")
 	wild_igu += 1
+	_igu_list.append(g)
 	g.gname = id
 	g.path = int(Lore.igu(id).get("p", 0))
 	return g
@@ -2246,19 +2329,28 @@ func update_leaders() -> void:
 	for u: Unit in units:
 		if u.k != "p" or u.hp <= 0.0 or u.undead:
 			continue
+		var key: int = u.rank * 4 + u.stage
 		if u.clan >= 0 and not u.rogue:
 			var c2: Clan = clans[u.clan]
 			var CL: Unit = c2.lead
-			if CL == null or u.rank * 4 + u.stage > CL.rank * 4 + CL.stage or (u.rank == CL.rank and u.stage == CL.stage and uage(u) > uage(CL)):
+			if CL == null:
 				c2.lead = u
+			else:
+				var ck: int = CL.rank * 4 + CL.stage
+				if key > ck or (key == ck and u.birth < CL.birth):   # gleich stark: der Ältere
+					c2.lead = u
 		if u.vil < 0:
 			continue
 		var v: Village = villages[u.vil]
 		if not v.alive:
 			continue
 		var L: Unit = v.lead
-		if L == null or u.rank * 4 + u.stage > L.rank * 4 + L.stage or (u.rank == L.rank and u.stage == L.stage and uage(u) > uage(L)):
+		if L == null:
 			v.lead = u
+		else:
+			var lk: int = L.rank * 4 + L.stage
+			if key > lk or (key == lk and u.birth < L.birth):
+				v.lead = u
 	if presim:
 		return
 	for c3: Clan in clans:
@@ -2376,6 +2468,8 @@ func work_at(u: Unit, i: int, t: float, type: String) -> void:
 
 func finish_work(u: Unit) -> void:
 	u.st = "idle"
+	if fast:
+		u.think = minf(u.think, 0.01)
 	if u.vil < 0:
 		return
 	var v: Village = villages[u.vil]
@@ -2505,11 +2599,10 @@ func think_p(u: Unit) -> void:
 		else:
 			var hx: float = v.cx
 			var hy: float = v.cy + 4.0
-			for id: int in v.b:
-				var b: Building = buildings[id]
-				if b != null and b.type == "forge":
-					hx = b.x + 3.0
-					hy = b.y + 4.5
+			var fb: Building = buildings[v.forge_b] if v.forge_b >= 0 else null   # letzte Schmiede (recount)
+			if fb != null and fb.type == "forge":
+				hx = fb.x + 3.0
+				hy = fb.y + 4.5
 			go_to(u, hx + randf() * 6.0 - 3.0, hy + randf() * 3.0)
 		return
 	do_job(u, v)
@@ -2536,15 +2629,14 @@ func do_job(u: Unit, v: Village) -> void:
 			u.wi = i
 			work_at(u, i, 3.0, "mine")
 		"farm":
-			var fs: Array[Building] = []
-			for id: int in v.b:
-				var b: Building = buildings[id]
-				if b != null and b.type == "farm":
-					fs.append(b)
-			if fs.is_empty():
+			# Felder aus recount (v.farm_b) statt bei jedem Denken alle Gebäude durchzusehen
+			if v.farm_b.is_empty():
 				u.job = "gather"
 				return
-			var bb: Building = fs.pick_random()
+			var bb: Building = buildings[v.farm_b[randi() % v.farm_b.size()]]
+			if bb == null or bb.type != "farm":
+				recount(v)
+				return
 			work_at(u, (bb.y + randi_range(1, bb.h - 2)) * W + bb.x + randi_range(1, bb.w - 2), 3.0, "farm")
 		"gather":
 			# Ziel merken, solange es hingeht (vorher: bei jedem Denken neu gesucht); nach der Arbeit neu suchen
@@ -2553,8 +2645,10 @@ func do_job(u: Unit, v: Village) -> void:
 				var f: int = world.feat[i]
 				if not ((f >= 1 and f <= 4) or f == GuData.F_SHRUB or f == GuData.F_TUFT) or world.bmap[i] >= 0 or fire.has(i):
 					i = -1
-			if i < 0:
+			if i < 0 and v.gfail <= sim_time:
 				i = find_feat_k(v.cx, v.cy, 20.0, FF_GATHER)
+				if i < 0:
+					v.gfail = sim_time + 0.5   # nichts zu sammeln: das Dorf sucht einen halben Monat nicht erneut
 			if i < 0:
 				wander_near(u, v.cx, v.cy, 10.0)
 				return
@@ -2682,7 +2776,18 @@ func catch_wild_gu(u: Unit, g: Unit) -> void:
 ## Unsterbliche (und Rang 5 für den Fötus) jagen wilde Unsterbliche Gu. true = beschäftigt.
 func catch_igu_think(u: Unit) -> bool:
 	var imm: bool = u.rank >= 6
-	var g: Unit = nearest(u, 40.0, func(o: Unit) -> bool: return o.beh == GuData.B_IGU and (imm or o.gname == "sovereign_immortal_fetus"))
+	# wie nearest(u, 40, wildes Unsterbliches Gu), aber über die kurze Liste _igu_list
+	var g: Unit = null
+	var bd: float = 1600.0
+	for o: Unit in _igu_list:
+		if o.hp <= 0.0 or o == u or o.beh != GuData.B_IGU or not (imm or o.gname == "sovereign_immortal_fetus"):
+			continue
+		var dx: float = o.x - u.x
+		var dy: float = o.y - u.y
+		var d2: float = dx * dx + dy * dy
+		if d2 <= bd:
+			bd = d2
+			g = o
 	if g == null or randf() > 0.8:
 		return false
 	if Vector2(g.x - u.x, g.y - u.y).length() < 2.2:
@@ -2845,7 +2950,8 @@ func step_unit(u: Unit, dt: float) -> void:
 		u.km_cd -= dt
 	u.think -= dt
 	if u.think <= 0.0:
-		u.think = 0.35 + randf() * 0.45
+		# Schnelllauf: wer kein Ziel hat, denkt seltener (nach getaner Arbeit sofort, siehe finish_work)
+		u.think = (0.35 + randf() * 0.45) * (1.6 if fast and u.tgt == null else 1.0)
 		var tt: int = Time.get_ticks_usec() if prof else 0
 		if u.poss:
 			poss_think(u)
@@ -3003,26 +3109,34 @@ func step(dt: float) -> void:
 	env_step(dt)
 	if prof:
 		t0 = _pa(P_ENV, t0)
-	var dead: bool = false
-	for u: Unit in units:
-		if u.hp <= 0.0:
-			dead = true
-			break
-	if dead:
-		var alive: Array[Unit] = []
-		for u: Unit in units:
-			if u.hp > 0.0:
-				alive.append(u)
-			elif try_revive(u):
-				alive.append(u)
-			elif rise_dead(u):
-				alive.append(u)
-			else:
-				if u == possessed:
-					possessed = null
-				on_death(u)
-		_gn -= units.size() - alive.size()
-		units = alive
+	# Tote entfernen: erst die Stellen sammeln (Liste bleibt dabei unverändert – on_death und die Signale sehen sie
+	# wie bisher), dann ab dem ersten Toten in derselben Liste zusammenschieben (keine neue Liste je Schritt)
+	var dk: PackedInt32Array = PackedInt32Array()
+	for k: int in range(units.size()):
+		if units[k].hp <= 0.0:
+			dk.append(k)
+	if not dk.is_empty():
+		var gone: PackedByteArray = PackedByteArray()
+		gone.resize(dk.size())
+		for j: int in range(dk.size()):
+			var u: Unit = units[dk[j]]
+			if try_revive(u) or rise_dead(u):
+				continue
+			if u == possessed:
+				possessed = null
+			on_death(u)
+			gone[j] = 1
+		var w: int = dk[0]
+		var j2: int = 0
+		for k: int in range(dk[0], units.size()):
+			if j2 < dk.size() and dk[j2] == k:
+				j2 += 1
+				if gone[j2 - 1] == 1:
+					continue
+			units[w] = units[k]
+			w += 1
+		_gn -= units.size() - w
+		units.resize(w)
 	if prof:
 		_pa(P_DEAD, t0)
 
@@ -3151,6 +3265,7 @@ func reset_state() -> void:
 	_sync_size()
 	_gforce = true
 	_uid_cache.clear()
+	_igu_list.clear()
 	units.clear()
 	villages.clear()
 	clans.clear()

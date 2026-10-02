@@ -108,7 +108,7 @@ static func run(m: GuMain) -> void:
 		sim.prof = false
 		print("PERF jump +%d years: %.0f ms (%.1f s per 100 years, %d chunks à 50 ms) · year %d→%d · %s" % [int(jump_y), jms, jms / jump_y * 100.0 / 1000.0, chunks, y0, sim.year(), census(sim)])
 		if detail:
-			_print_prof(sim, "jump", maxi(1, int(jump_y * 12.0 / Sim.FAST_DT)))
+			_print_prof(sim, "jump", maxi(1, int(jump_y * 12.0 / Sim.JUMP_DT)))
 	var avg: float = 0.0
 	for p: float in presim_ms:
 		avg += p
@@ -156,6 +156,14 @@ static func _print_prof(sim: Sim, tag: String, steps: int) -> void:
 		if sim.pacc[k] > 0:
 			s += "\n   %-9s %8.1f ms  %7.1f µs  %4.1f %%  %8d calls  %6.2f µs/call" % [Sim.PK[k], sim.pacc[k] / 1000.0, float(sim.pacc[k]) / steps, 100.0 * sim.pacc[k] / maxf(1.0, tot), sim.pcnt[k], float(sim.pacc[k]) / maxf(1.0, sim.pcnt[k])]
 	print(s)
+	if "tp" in sim:
+		var tpd: Dictionary = sim.get("tp")
+		var ks: Array = tpd.keys()
+		ks.sort()
+		for k2: String in ks:
+			if not k2.ends_with("#"):
+				print("   tp %-22s %9.1f ms %8d calls %7.1f µs" % [k2, tpd[k2] / 1000.0, tpd[k2 + "#"], float(tpd[k2]) / tpd[k2 + "#"]])
+		tpd.clear()
 
 
 ## Einzelmessungen typischer Abfragen (µs je Aufruf) über alle Menschen.

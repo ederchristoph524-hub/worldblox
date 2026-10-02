@@ -29,6 +29,10 @@ var reg: int = 0
 var lvl: int = 0
 var lead: Unit = null
 var bfail: float = -1.0  ## Bauplatz nicht gefunden: bis zu dieser Simulationszeit nicht erneut suchen (nicht gespeichert)
+var gfail: float = -1.0  ## nichts zum Sammeln gefunden: bis dahin nicht erneut suchen (nicht gespeichert)
+var bfn: int = 0         ## erfolglose Bauplatzsuchen in Folge (Pause wächst, siehe Sim._bcool)
+var forge_b: int = -1    ## Gebäude-Id der (letzten) Schmiede, von Sim.recount gesetzt
+var farm_b: PackedInt32Array = PackedInt32Array()   ## Gebäude-Ids der Felder, von Sim.recount gesetzt
 var loy: float = 80.0      # Loyalität zum Clan (0..100); niedrig = Aufstand
 var capt: float = -999.0   # Zeitpunkt der letzten Eroberung
 var road: bool = false     # Straße zur Hauptstadt gebaut
