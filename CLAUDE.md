@@ -37,7 +37,7 @@ Zeiteinheit der Simulation: 1.0 = ein Monat, ein Simulationsschritt `Sim.DT` = 0
 ```
 Godot_v4.7.2-stable_win64_console.exe --headless --path C:\Projekte\gu-weltenbox -- --selftest
 ```
-Mit `-- --fresh --selftest` wird kein Spielstand geladen oder überschrieben. Löst jedes Werkzeug einmal aus, speichert und lädt und endet mit `SELFTEST DONE`. Screenshots für Vergleiche: `-- --shots=<ordner>` (ohne `--headless`).
+Mit `-- --fresh --selftest` wird kein Spielstand geladen oder überschrieben. Löst jedes Werkzeug einmal aus, speichert und lädt und endet mit `SELFTEST DONE`. Screenshots für Vergleiche: `-- --shots=<ordner>` (ohne `--headless`). Leere/freie Welten: `-- --fresh --blanktest` (jede Kartenart und Lebensstufe ~5 Jahre, alle Fenster, Speichern/Laden im Speicher, alle Gottkräfte auf leerer Welt; endet mit `BLANKTEST DONE`), Bilder mit `-- --fresh --blankshots=<ordner>`.
 
 ## Regeln
 
@@ -50,7 +50,7 @@ Mit `-- --fresh --selftest` wird kein Spielstand geladen oder überschrieben. L�
 - Die Vorgeschichte läuft im Hintergrund (`GuMain.presim_on`): die Karte ist nach ~1–2 s sichtbar, `Sim.presim_chunk` bekommt pro Bild ein anpassbares Zeitbudget, oben links steht „Vorgeschichte … n %“. Greift der Spieler mit einer Gottkraft ein, endet sie sofort (`_end_presim`).
 - Kamera: Übersicht passt immer ganz und mittig über die Leiste (`min_z`, `_clamp_cam`), weiches Zoomen über `zoom_smooth`, Schwung nach dem Wischen (`fling`), Doppeltippen/-klick zoomt hinein. Desktop-Querformat nutzt Basis 400 × 760 (`_on_resize`).
 - In der Vorgeschichte (`Sim.presim`) entzündet nichts Feuer, sonst verascht der Zentralkontinent durch Drangsal-Blitze der Unsterblichen.
-- Neue Welt: `Sim.new_world(live, mode)` mit `mode` „gu“ (Standard, kanonische Mächte über `Sim.seed_canon`) oder „random“.
+- Neue Welt: `Sim.new_world(live, mode, opts)` mit `mode` „gu“ (Standard, kanonische Mächte über `Sim.seed_canon`), „random“ oder einer leeren Welt aus `World.BLANK_MODES` („ocean“ nur tiefes Meer, „flat“ eine Ebene mit schmalem Meeressaum, „island“ eine runde Insel, „continents“ flache Landmassen mit ~40 % Land). Leere Welten (`World.is_blank`, `_base_blank`, `_blank_plants`): eine einzige Region 4, daher keine Regionswände, keine benannten Orte, nur vereinzelte Bäume/Grasbüschel, Höhen `hgt` = `GuData.DEFH` der Kachel. `opts`: `life` „full“/„animals“/„none“ (Standard: `live` → „full“, sonst „animals“, auf leeren Karten „none“; „none“ schaltet das Weltgesetz Tier-Spawn aus, sonst an – es steuert auch wilde Gu), `canon` false = Gu-Karte ohne kanonische Mächte, `presim` false = ohne Vorgeschichte (Jahr 1 sofort). `GuMain.presim_on` folgt `Sim.presim`. Fenster „Neue Welt“ ist zweistufig (`_open_new_world` → `_open_new_world_life` bzw. `_open_new_world_blank`); erster Start bleibt Gu-Weltkarte mit Clans und Vorgeschichte. `map_mode` wird gespeichert, kein neues Spielstandformat.
 - Spielstand liegt in `user://gu_weltenbox.json`. Bei Formatänderungen `v` in `Sim.serialize` erhöhen. Aktuell **v3** (neu: `lava` [Kachel, Hitze], `mines`, `layer`; Unit-Felder `bless/prot/undead/boat`; Village `loy/capt/road`; Clan `cap/exh/plans`); v2 (`map_mode`, `places`, `next_pid`, Unit `gname/igu/fig/ow/hx/hy/notrib`, Clan `org/align/sur`) und v1 werden weiter geladen. `Clan.war`-Werte sind der Kriegsbeginn (Simulationszeit), nach dem Laden `true`.
 - Entwickler-Bögen: `-- --fresh --sheets=<ordner>` schreibt `icons.png` (alle Werkzeug-Icons, nach Reitern) und `sprites.png` (Völker, alle Tierarten, Orte) – läuft auch headless.
 

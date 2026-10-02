@@ -35,7 +35,10 @@ const LANDMARKS: Array = [
 	{"name": "Unpassierbare Dünen", "x": 34, "y": 166, "region": 2, "kind": "gebiet"},
 ]
 
-## Kartenart der aktuellen Welt ("gu" oder "random") und ihre benannten Orte (leer bei "random").
+## Leere Startwelten zum freien Bauen (ohne Regionswände, ohne benannte Orte, kaum Pflanzen).
+const BLANK_MODES: PackedStringArray = ["ocean", "flat", "island", "continents"]
+
+## Kartenart der aktuellen Welt ("gu", "random" oder eine aus BLANK_MODES) und ihre benannten Orte (nur bei "gu").
 var map_mode: String = "gu"
 var landmarks: Array[Dictionary] = []
 
@@ -146,17 +149,66 @@ func _set_landmarks(mode: String) -> void:
 			landmarks.append(l.duplicate())
 
 
-## mode "gu": kanonische Gu-Weltkarte (Form fest, Samen ändert nur Details); "random": Zufallswelt.
+static func is_blank(mode: String) -> bool:
+	return mode in BLANK_MODES
+
+
+## mode "gu": kanonische Gu-Weltkarte (Form fest, Samen ändert nur Details); "random": Zufallswelt;
+## "ocean", "flat", "island", "continents": leere Welt zum freien Bauen.
 func generate(S: int, mode: String = "gu") -> void:
 	alloc()
 	var open_sea: PackedByteArray = PackedByteArray()
+	var blank: bool = is_blank(mode)
 	if mode == "random":
 		_base_random(S)
+	elif blank:
+		_base_blank(S, mode)
 	else:
 		mode = "gu"
 		open_sea = MapGu.build(self, S)
 	_set_landmarks(mode)
-	_finish(S, open_sea)
+	_finish(S, open_sea, blank)
+	if blank:
+		# Höhen passend zu den Kacheln, damit Heben/Senken und Lava sich wie gewohnt verhalten
+		for i: int in range(N):
+			hgt[i] = GuData.DEFH[tile[i]] + (GuData.hash2(i, 7, 5) - 0.5) * 0.06
+
+
+## Grundgelände der leeren Welten: eine einzige Region (Zentralkontinent), also keine Regionswände.
+## Land ist Grasland (Höhe 0,5), Wasser tiefes Meer (Höhe 0,2); Flachwasser und Strand setzt _finish.
+func _base_blank(S: int, mode: String) -> void:
+	region.fill(4)
+	var nw: FastNoiseLite = _noise(S + 17, 0.035, 3)
+	var nc: FastNoiseLite = _noise(S + 29, 0.011, 4)
+	var cx: float = (W - 1) * 0.5
+	var cy: float = (H - 1) * 0.5
+	var rad: float = W * 0.22
+	for y: int in range(H):
+		for x: int in range(W):
+			var i: int = y * W + x
+			var land: bool = false
+			match mode:
+				"flat":
+					# eine Ebene bis auf einen schmalen, leicht welligen Meeressaum
+					var edge: float = minf(minf(x, W - 1 - x), minf(y, H - 1 - y))
+					land = edge >= 6.0 + (n01(nw, x, y) - 0.5) * 5.0
+				"island":
+					# eine runde, organisch gewellte Insel in der Mitte
+					var d: float = Vector2(x - cx, y - cy).length() / rad
+					land = d + (n01(nw, x, y) - 0.5) * 0.55 + (n01(nc, x * 3.0, y * 3.0) - 0.5) * 0.25 < 1.0
+				"continents":
+					# einige große Landmassen, zum Rand hin Meer (Schwelle unten über den Landanteil)
+					var e: float = minf(minf(x, W - 1 - x), minf(y, H - 1 - y)) / (W * 0.5)
+					var fall: float = clampf((0.3 - e) / 0.3, 0.0, 1.0)
+					hgt[i] = n01(nc, x, y) - fall * 0.45 + (n01(nw, x, y) - 0.5) * 0.12
+			tile[i] = GuData.GRASS if land else GuData.DEEP
+	if mode == "continents":
+		# immer etwa 40 % Land, unabhängig vom Samen
+		var sorted: PackedFloat32Array = hgt.duplicate()
+		sorted.sort()
+		var thr: float = sorted[int(N * 0.6)]
+		for i: int in range(N):
+			tile[i] = GuData.GRASS if hgt[i] > thr else GuData.DEEP
 
 
 ## Grundgelände der Zufallswelt (Regionen, Höhen, Kacheln) – unveränderter Algorithmus.
@@ -226,13 +278,14 @@ func _base_random(S: int) -> void:
 
 ## Gemeinsamer Abschluss: Flachwasser, Regionswände, Strände, Pflanzen.
 ## open_sea[i] == 1: offenes Außenmeer – dort entfällt die Wand, wenn sie mehr als 10 Kacheln von Land entfernt ist.
-func _finish(S: int, open_sea: PackedByteArray) -> void:
+## blank: leere Welt – keine Regionswände, nur vereinzelte Bäume und Grasbüschel.
+func _finish(S: int, open_sea: PackedByteArray, blank: bool = false) -> void:
 	compute_water()
 	for i: int in range(N):
 		if tile[i] == GuData.DEEP and wdist[i] <= 8:
 			tile[i] = GuData.SHAL
 	# Regionswände
-	for y: int in range(H):
+	for y: int in range(0 if blank else H):
 		for x: int in range(W):
 			var i: int = y * W + x
 			var r: int = region[i]
@@ -274,6 +327,9 @@ func _finish(S: int, open_sea: PackedByteArray) -> void:
 				if GuData.hash2(x, y, S + 4) < 0.45 and GuData.is_land(tile[i - 2 * W]) and tile[i - 2 * W] != GuData.WALL:
 					tile[i - 2 * W] = GuData.SAND
 	compute_water()
+	if blank:
+		_blank_plants(S)
+		return
 	# Pflanzen, Felsen, Adern
 	var nf: FastNoiseLite = _noise(S + 55, 0.045, 3)
 	for y: int in range(H):
@@ -345,6 +401,24 @@ func _finish(S: int, open_sea: PackedByteArray) -> void:
 				if q < 0.006:
 					ft = GuData.F_ORE
 			feat[i] = ft
+
+
+## Leere Welt: ganz vereinzelte Baumgruppen, Grasbüschel und Blumen auf dem Grasland.
+func _blank_plants(S: int) -> void:
+	var nf: FastNoiseLite = _noise(S + 55, 0.04, 3)
+	for i: int in range(N):
+		if tile[i] != GuData.GRASS:
+			continue
+		var x: int = i % W
+		var y: int = i / W
+		var q: float = GuData.hash2(x, y, S + 999)
+		var f: float = n01(nf, x, y)
+		if (f > 0.66 and q < 0.006) or q < 0.0004:
+			feat[i] = GuData.F_TREE
+		elif q > 0.9985:
+			feat[i] = GuData.F_FLOWER
+		elif q > 0.985:
+			feat[i] = GuData.F_TUFT
 
 
 # ---------------- Zeichnen ----------------

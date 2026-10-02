@@ -33,7 +33,7 @@ var laws: Dictionary = {"war": true, "tide": true, "will": true, "trib": true, "
 ## Weitere Weltgesetze (WorldBox-Parität) für das Gesetze-Fenster: [Schlüssel, Name, Beschreibung].
 const LAWS_EXTRA: Array = [["hunger", "Hunger", "Dörfer ohne Nahrung verlieren Bewohner."], ["age", "Alter", "Sterbliche und Tiere sterben an Altersschwäche."],
 	["rebel", "Aufstände", "Dörfer mit geringer Loyalität sagen sich von ihrem Clan los."], ["diplo", "Diplomatie", "Clans planen und schließen Bündnisse."],
-	["expand", "Ausbreitung", "Volle Dörfer schicken Siedler aus – auch per Boot zu Inseln."], ["animals", "Tier-Spawn", "Wildtiere, Bestien und Bestienkönige entstehen von selbst."],
+	["expand", "Ausbreitung", "Volle Dörfer schicken Siedler aus – auch per Boot zu Inseln."], ["animals", "Tier-Spawn", "Wildtiere, wilde Gu, Bestien und Bestienkönige entstehen von selbst."],
 	["grass", "Grasausbreitung", "Erde und Asche ergrünen wieder."], ["trees", "Baumwachstum", "Wälder breiten sich aus."],
 	["disaster", "Katastrophen", "Von Zeit zu Zeit Erdbeben, Erdfeuer-Vulkane, Wirbel, Giftregen, Sternenfall, Seuchen und Dünenwanderung."]]
 var weather: Dictionary = {}           # {type, t}
@@ -1631,7 +1631,7 @@ func nature_spawns() -> void:
 			var p: Vector2 = random_tile(func(i: int) -> bool: return world.tile[i] in ts and world.region[i] in rs)
 			if p.x >= 0.0:
 				mk_animal(p.x, p.y, s)
-	if sp_count.get("wildgu", 0) < 50 and randf() < 0.6:
+	if laws["animals"] and sp_count.get("wildgu", 0) < 50 and randf() < 0.6:
 		var p2: Vector2 = random_tile(func(i: int) -> bool: return (world.tile[i] == GuData.GRASS or world.tile[i] == GuData.HILL or world.tile[i] == GuData.STEP or world.tile[i] == GuData.DES) and world.region[i] != 3)
 		if p2.x >= 0.0:
 			var pth: int = int(GuData.REGPATH[region_at(p2.x, p2.y)].pick_random())
@@ -2539,9 +2539,10 @@ func reset_state() -> void:
 	weather = {}
 
 
-func seed_life() -> void:
+## Startdörfer und Tiere; canon = false lässt auf der Gu-Weltkarte die kanonischen Mächte weg (dann wie bei der Zufallswelt).
+func seed_life(canon: bool = true) -> void:
 	var plan: Array = [[0, 2], [1, 3], [2, 1], [3, 1], [4, 3]]
-	if world.map_mode == "gu":
+	if world.map_mode == "gu" and canon:
 		seed_canon()
 		plan = [[0, 1], [1, 1], [3, 1]]
 	for e: Array in plan:
@@ -2636,15 +2637,24 @@ func nature_only() -> void:
 					mk_animal(p.x, p.y, s)
 
 
-func new_world(live: bool, mode: String = "gu") -> void:
+## Neue Welt. live = true: Clans, Tiere und Vorgeschichte (Standard); live = false: nur Tiere, auf leeren Karten gar nichts.
+## opts (optional, überschreibt live):
+##   "life": "full" (Dörfer, Clans und Tiere), "animals" (nur Tiere und wilde Gu) oder "none" (kein Leben,
+##           auch kein Tier-Spawn – das Weltgesetz „Tier-Spawn“ wird dann ausgeschaltet),
+##   "canon": false – auf der Gu-Weltkarte ohne die kanonischen Mächte,
+##   "presim": false – ohne Vorgeschichte, die Welt beginnt sofort in Jahr 1.
+func new_world(live: bool, mode: String = "gu", opts: Dictionary = {}) -> void:
 	reset_state()
 	seed_val = randi()
 	world.generate(seed_val, mode)
-	if live:
-		presim = true
-		seed_life()
-	else:
-		nature_only()
+	var life: String = str(opts.get("life", "full" if live else ("none" if World.is_blank(world.map_mode) else "animals")))
+	presim = life == "full" and bool(opts.get("presim", true))
+	laws["animals"] = life != "none"
+	match life:
+		"full":
+			seed_life(bool(opts.get("canon", true)))
+		"animals":
+			nature_only()
 
 
 ## Läuft die Vorgeschichte in Häppchen; gibt den Fortschritt 0..1 zurück.

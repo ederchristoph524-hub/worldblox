@@ -98,6 +98,10 @@ func _ready() -> void:
 			_selftest()
 		if a.begins_with("--sheets="):
 			_dev_sheets(a.substr(9))
+		if a == "--blanktest":
+			_dev_blanktest()
+		if a.begins_with("--blankshots="):
+			_dev_blankshots(a.substr(13))
 
 
 func _build_scene() -> void:
@@ -251,10 +255,11 @@ func view_center() -> Vector2:
 
 # ---------------- Ablauf ----------------
 
-func _start_new_world(live: bool, mode: String = "gu") -> void:
+## opts wie bei Sim.new_world: {"life": "full"/"animals"/"none", "canon": bool, "presim": bool}.
+func _start_new_world(live: bool, mode: String = "gu", opts: Dictionary = {}) -> void:
 	loading = true
 	load_live = live
-	hud.set_loading(true, "Die fünf Regionen entstehen …", 0.05)
+	hud.set_loading(true, "Die Welt entsteht …" if World.is_blank(mode) else "Die fünf Regionen entstehen …", 0.05)
 	_close_insp()
 	hud.close_modal()
 	sel_unit = null
@@ -262,14 +267,67 @@ func _start_new_world(live: bool, mode: String = "gu") -> void:
 	follow = false
 	await get_tree().process_frame
 	await get_tree().process_frame
-	sim.new_world(live, mode)
+	sim.new_world(live, mode, opts)
 	sim.world.render_all()
-	# Karte sofort zeigen; die Vorgeschichte läuft danach in Häppchen im Hintergrund.
-	presim_on = live
+	# Karte sofort zeigen; die Vorgeschichte (falls gewählt) läuft danach in Häppchen im Hintergrund.
+	presim_on = sim.presim
 	presim_ms0 = Time.get_ticks_msec()
 	presim_budget = 12.0
 	_finish_start()
+	if World.is_blank(sim.world.map_mode):
+		hud.show_hint("Leere Welt", "Forme Land mit „Welt formen“, setze Völker und Tiere mit „Kreaturen“ – alles liegt in deiner Hand.")
+	elif not presim_on and sim.villages.is_empty():
+		hud.show_hint("Freie Welt", "Keine Clans, keine Vorgeschichte: setze Völker, Gu-Meister und Tiere selbst.")
 	print("WORLD VISIBLE ms ", Time.get_ticks_msec() - t_boot)
+
+
+## Fenster „Neue Welt“, Schritt 1: Kartenart wählen (wie in WorldBox).
+func _open_new_world() -> void:
+	hud.open_modal(Hud.H_PREFIX + "Neue Welt erschaffen[/b][/color][/font_size]\n\n[b]Gu-Weltkarte[/b]: die fünf Regionen mit Himmelshof, Gu-Yue-Dorf, Shang-Clan-Stadt und den anderen bekannten Orten.\n\n[b]Zufallswelt[/b]: frei erzeugte Regionen ohne benannte Orte.\n\n[b]Leere Welt[/b]: nur Wasser, eine Ebene, eine Insel oder flache Kontinente – ohne Regionswände und ohne Leben. Du formst alles selbst.\n\n[color=#9db09e]Die aktuelle Welt geht verloren, wenn du sie nicht gespeichert hast.[/color]", [
+		["Gu-Weltkarte mit Clans", func() -> void: _new_world_go(true, "gu", {}), "red"],
+		["Gu-Weltkarte …", func() -> void: _open_new_world_life("gu"), ""],
+		["Zufallswelt …", func() -> void: _open_new_world_life("random"), "jade"],
+		["Leere Welt …", func() -> void: _open_new_world_blank(false), ""]])
+
+
+func _new_world_go(live: bool, mode: String, opts: Dictionary) -> void:
+	hud.close_modal()
+	_start_new_world(live, mode, opts)
+
+
+## Schritt 2 für Gu-Weltkarte und Zufallswelt: wie viel Leben und ob es eine Vorgeschichte gibt.
+func _open_new_world_life(mode: String) -> void:
+	var gu: bool = mode == "gu"
+	var nm: String = "Gu-Weltkarte" if gu else "Zufallswelt"
+	var txt: String = Hud.H_PREFIX + nm + "[/b][/color][/font_size]\n\n"
+	txt += "[b]Mit Clans und Vorgeschichte[/b]: %s, dann vergehen %d Jahre Vorgeschichte.\n\n" % ["die kanonischen Mächte und Clans entstehen" if gu else "Clans entstehen in allen Regionen", int(PRESIM_YEARS)]
+	txt += "[b]Mit Clans, ohne Vorgeschichte[/b]: die Startdörfer stehen, die Welt beginnt sofort in Jahr 1.\n\n"
+	txt += "[b]Nur Tiere[/b]: Wildtiere und wilde Gu, aber keine Menschen – du setzt Völker und Gu-Meister selbst.\n\n"
+	txt += "[b]Ganz frei[/b]: nur die Karte, kein Leben. Auch der Tier-Spawn ist aus (Weltgesetze)."
+	hud.open_modal(txt, [
+		["Mit Clans und Vorgeschichte", func() -> void: _new_world_go(true, mode, {}), "red" if gu else "jade"],
+		["Mit Clans, ohne Vorgeschichte", func() -> void: _new_world_go(true, mode, {"presim": false}), ""],
+		["Nur Tiere", func() -> void: _new_world_go(false, mode, {"life": "animals"}), ""],
+		["Ganz frei", func() -> void: _new_world_go(false, mode, {"life": "none"}), ""],
+		["Zurück", func() -> void: _open_new_world(), ""]])
+
+
+## Schritt 2 für leere Welten; animals schaltet zwischen „ohne Leben“ und „mit Tieren“ um.
+func _open_new_world_blank(animals: bool) -> void:
+	var opts: Dictionary = {"life": "animals" if animals else "none"}
+	var txt: String = Hud.H_PREFIX + "Leere Welt[/b][/color][/font_size]\n\n"
+	txt += "[b]Nur Ozean[/b]: überall tiefes Meer – hebe mit „Land heben“ eigene Inseln und Kontinente aus dem Wasser.\n\n"
+	txt += "[b]Eine Ebene[/b]: ein einziges Grasland bis zum Kartenrand.\n\n"
+	txt += "[b]Eine Insel[/b]: eine runde Insel mitten im Meer.\n\n"
+	txt += "[b]Kontinente[/b]: einige flache Landmassen ohne Gebirge und Regionen.\n\n"
+	txt += "Leben: [b]%s[/b] [color=#9db09e](umschalten mit dem letzten Knopf)[/color]" % ("Wildtiere und wilde Gu" if animals else "keines – du setzt alles selbst")
+	hud.open_modal(txt, [
+		["Nur Ozean", func() -> void: _new_world_go(false, "ocean", opts), "jade"],
+		["Eine Ebene", func() -> void: _new_world_go(false, "flat", opts), "jade"],
+		["Eine Insel", func() -> void: _new_world_go(false, "island", opts), "jade"],
+		["Kontinente", func() -> void: _new_world_go(false, "continents", opts), "jade"],
+		["Zurück", func() -> void: _open_new_world(), ""],
+		["Mit Tieren: ja" if animals else "Mit Tieren: nein", func() -> void: _open_new_world_blank(not animals), ""]])
 
 
 func _finish_start() -> void:
@@ -643,19 +701,7 @@ func _run_action(t: Dictionary) -> void:
 			var ok2: bool = _load_game()
 			hud.toast("Gespeicherte Welt geladen." if ok2 else "Kein Spielstand gefunden.", "jade" if ok2 else "red", sim.year())
 		"new":
-			hud.open_modal("[font_size=20][color=#9fd0ff][b]Neue Welt erschaffen[/b][/color][/font_size]\n\n[b]Gu-Weltkarte (Standard)[/b]: die fünf Regionen der Gu-Welt mit Himmelshof, Gu-Yue-Dorf, Shang-Clan-Stadt und den anderen bekannten Orten. Mit Clans entstehen die kanonischen Mächte, dann vergehen %d Jahre Vorgeschichte.\n\n[b]Zufallswelt[/b]: frei erzeugte Regionen ohne benannte Orte.\n\n[color=#9db09e]Die aktuelle Welt geht verloren, wenn du sie nicht gespeichert hast.[/color]" % int(PRESIM_YEARS), [
-				["Gu-Weltkarte mit Clans", func() -> void:
-					hud.close_modal()
-					_start_new_world(true, "gu"), "red"],
-				["Gu-Weltkarte, nur Natur", func() -> void:
-					hud.close_modal()
-					_start_new_world(false, "gu"), ""],
-				["Zufallswelt mit Clans", func() -> void:
-					hud.close_modal()
-					_start_new_world(true, "random"), "jade"],
-				["Zufallswelt, nur Natur", func() -> void:
-					hud.close_modal()
-					_start_new_world(false, "random"), ""]])
+			_open_new_world()
 		"hideui":
 			_set_ui_hidden(true)
 		# Gottkräfte-Parität (Logik in Powers/Sim)
@@ -2260,6 +2306,108 @@ func _wait(t: float) -> void:
 func _shot(path: String) -> void:
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(path)
+
+
+## Entwickler: -- --fresh --blanktest – erzeugt jede leere bzw. freie Welt, lässt sie Jahre laufen,
+## öffnet alle Fenster, löst jede Gottkraft aus, speichert und lädt (im Speicher) und endet mit BLANKTEST DONE.
+func _dev_blanktest() -> void:
+	while loading or presim_on:
+		await get_tree().process_frame
+	var t0: int = Time.get_ticks_msec()
+	var cases: Array = [["ocean", {}], ["flat", {}], ["island", {}], ["continents", {}], ["flat", {"life": "animals"}], ["island", {"life": "animals"}],
+		["gu", {"life": "none"}], ["gu", {"life": "animals"}], ["gu", {"life": "full", "presim": false}], ["random", {"life": "none"}], ["random", {"life": "full", "presim": false}], ["continents", {"life": "full", "presim": false}]]
+	for cs: Array in cases:
+		var mode: String = cs[0]
+		var opts: Dictionary = cs[1]
+		await _start_new_world(false, mode, opts)
+		var walls: int = sim.world.tile.count(GuData.WALL)
+		var land: int = 0
+		for i: int in range(GuData.N):
+			if GuData.is_land(sim.world.tile[i]):
+				land += 1
+		print("[%s %s] presim=%s units=%d villages=%d clans=%d walls=%d land=%d landmarks=%d law_animals=%s" % [mode, str(opts), str(presim_on), sim.units.size(), sim.villages.size(), sim.clans.size(), walls, land, sim.world.landmarks.size(), str(sim.laws["animals"])])
+		for k: int in range(1200):
+			sim.step(Sim.DT)
+		sim.world.update_territory(sim.villages, sim.clans)
+		print("  nach %d Jahren: units=%d villages=%d" % [sim.year() - 1, sim.units.size(), sim.villages.size()])
+		_open_rank()
+		_open_clans()
+		_open_chron()
+		_open_world_info()
+		_open_ages()
+		_open_laws()
+		_open_plans()
+		_open_display()
+		hud.close_modal()
+		_refresh_insp()
+		var d: Variant = JSON.parse_string(JSON.stringify(sim.serialize()))
+		var ok: bool = d is Dictionary and sim.deserialize(d)
+		print("  speichern/laden ok=%s map=%s walls=%d" % [str(ok), sim.world.map_mode, sim.world.tile.count(GuData.WALL)])
+		for k: int in range(100):
+			sim.step(Sim.DT)
+	# alle Gottkräfte auf einer leeren Welt: zuerst die Aktionen ohne jedes Leben, dann alles
+	for mode2: String in ["ocean", "flat"]:
+		await _start_new_world(false, mode2, {})
+		var c: Vector2 = Vector2(W / 2.0, H / 2.0)
+		for pass_i: int in range(2):
+			for t: Dictionary in Powers.TOOLS:
+				var id: String = t["id"]
+				if id in ["new", "hideui", "load", "save"]:
+					continue
+				if pass_i == 0 and str(t["m"]) != "act":
+					continue
+				match str(t["m"]):
+					"paint":
+						powers.begin_stroke()
+						var st: Dictionary = {}
+						for k: int in range(4):
+							powers.apply_paint(t, c.x + k * 3.0, c.y + 20.0, st)
+						powers.end_stroke(c.x, c.y + 20.0)
+					"spawn":
+						powers.spawn_at(t, c.x + 6.0, c.y + 8.0)
+					"tap", "pair":
+						if id == "inspect":
+							_inspect_at(c.x, c.y)
+						else:
+							powers.tap_tool(t, c.x, c.y)
+							powers.tap_tool(t, c.x + 40.0, c.y)
+					"act":
+						_run_action(t)
+						hud.close_modal()
+				for k: int in range(10):
+					sim.step(Sim.DT)
+		_set_weather("")
+		for k: int in range(600):
+			sim.step(Sim.DT)
+		print("[%s alle Werkzeuge] units=%d villages=%d" % [mode2, sim.units.size(), sim.villages.size()])
+	print("BLANKTEST DONE ms ", Time.get_ticks_msec() - t0)
+	get_tree().quit()
+
+
+## Entwickler: -- --fresh --blankshots=<ordner> – Übersichtsbilder der leeren Welten (ohne --headless).
+func _dev_blankshots(dir: String) -> void:
+	while loading or presim_on:
+		await get_tree().process_frame
+	for mode: String in ["ocean", "flat", "island", "continents"]:
+		await _start_new_world(false, mode, {})
+		await _wait(0.8)
+		await _shot(dir + "/blank_" + mode + ".png")
+	await _start_new_world(false, "island", {})
+	z = 4.0
+	cam = Vector2(W / 2.0, H / 2.0 + 40.0)
+	_clamp_cam()
+	await _wait(0.8)
+	await _shot(dir + "/blank_island_nah.png")
+	_open_new_world()
+	await _wait(0.3)
+	await _shot(dir + "/neu_1.png")
+	_open_new_world_life("gu")
+	await _wait(0.3)
+	await _shot(dir + "/neu_2_gu.png")
+	_open_new_world_blank(false)
+	await _wait(0.3)
+	await _shot(dir + "/neu_3_leer.png")
+	get_tree().quit()
 
 
 func _selftest() -> void:
