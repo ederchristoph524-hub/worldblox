@@ -76,6 +76,7 @@ var load_bar: ProgressBar
 var age_lbl: Label
 var show_btn: Button
 var bar_hidden: bool = false
+var legend: Control = null  ## Legende der Mächte (PowerLegend, gesetzt von GuMain); Meldungen rutschen darunter
 
 
 func _ready() -> void:
@@ -779,6 +780,8 @@ func tick_layout() -> void:
 		var ir: Rect2 = insp.get_global_rect()
 		if ir.position.x < 10.0 + tw:
 			ty = ir.end.y + 6.0
+	if legend != null and legend.visible:
+		ty = maxf(ty, legend.get_global_rect().end.y + 6.0)
 	toasts.offset_top = ty
 	toasts.visible = not bar_hidden and ty + 40.0 < vs.y - b - 60.0
 
@@ -810,7 +813,8 @@ const STAT_ICON: Dictionary = {
 	"Bewohner": "person", "Volk": "person", "Vorräte": "apple", "Gebäude": "house", "Clan": "flag", "Stärkster": "crown",
 	"Fehden": "sword", "Bündnisse": "hand", "Alter": "hourglass", "Pfad": "orb", "Begabung": "star", "Essenz": "gem",
 	"Fortschritt": "arrow", "Öffnung": "eye", "Arbeit": "hammer", "Leben": "heart", "Siege": "sword", "Stärke": "sword", "Beute": "skull",
-	"Gesinnung": "yinyang", "Besitzer": "crown", "Wirkung": "gem", "Gu-Meister": "person", "Stufe": "star", "Verblasst": "hourglass", "Fötus-Gu": "orb"}
+	"Gesinnung": "yinyang", "Besitzer": "crown", "Wirkung": "gem", "Gu-Meister": "person", "Stufe": "star", "Verblasst": "hourglass", "Fötus-Gu": "orb",
+	"Einfluss": "crown", "Gebiet": "flag"}
 
 
 static func stat_icon(id: String) -> ImageTexture:

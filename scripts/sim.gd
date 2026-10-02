@@ -4784,3 +4784,18 @@ func shift_sea(dir: int) -> int:
 	else:
 		log_event("Die Kontinente heben sich aus dem Meer: %d Kacheln verändern sich." % n, "jade", true)
 	return n
+
+
+# ---------------- Herrschaftsgebiete der Ehrwürdigen ----------------
+# STUB – wird von Zweig venerables ersetzt (dort mit echter Weltherrschaft der Rang-9-Ehrwürdigen).
+## Herrschaftsgebiete lebender Rang-9-Ehrwürdiger für die Einfluss-Anzeige:
+## [{name, title, col, x, y, r (Radius in Kacheln), region, path, clan, uid}]
+func ven_dominions() -> Array:
+	var out: Array = []
+	for u: Unit in units:
+		if u.k != "p" or u.hp <= 0.0 or u.rank < 9:
+			continue
+		var col: Color = GuData.PATH_COL[u.path] if u.path >= 0 and u.path < GuData.PATH_COL.size() else Color.GOLD
+		out.append({"name": u.pname(), "title": u.title, "col": col, "x": u.x, "y": u.y, "r": 40.0,
+			"region": region_at(u.x, u.y), "path": u.path, "clan": u.clan if u.clan >= 0 else -1, "uid": u.id})
+	return out

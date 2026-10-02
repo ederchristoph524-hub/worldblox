@@ -14,6 +14,8 @@ var region: PackedByteArray
 var hgt: PackedFloat32Array
 var bmap: PackedInt32Array
 var terr: PackedInt32Array
+## Einflusszone: Clan-Id je herrenloser Kachel rund um Dörfer (-1 = keine), siehe update_territory
+var infl: PackedInt32Array
 var temp_snow: PackedByteArray
 var wdist: PackedByteArray
 
@@ -45,14 +47,28 @@ var landmarks: Array[Dictionary] = []
 var near_img: Image
 var far_img: Image
 var terr_img: Image
+var war_img: Image  ## umkämpfte Grenzen (rot gestrichelt, pulsiert in TerrOverlay)
+var fill_img: Image  ## Nahansicht: nur Gebietsflächen und Einflusszonen, ohne Kachel-Ränder
+var edge_img: Image  ## Nahansicht: feine Doppel-Grenzlinien in EDGE_S-facher Auflösung
 var near_tex: ImageTexture
 var far_tex: ImageTexture
 var terr_tex: ImageTexture
+var war_tex: ImageTexture
+var fill_tex: ImageTexture
+var edge_tex: ImageTexture
+## Auflösung der Grenzlinien-Textur je Kachel (Außenlinie, Farblinie, frei)
+const EDGE_S: int = 3
 var dirty: PackedByteArray
 var water_dirty: bool = false
-## Kartenebene der Gebietsanzeige: 0 Clan-Gebiete, 1 Dorf-Gebiete, 2 Regionen.
+## Kartenebene der Gebietsanzeige: 0 Clan-Gebiete, 1 Dorf-Gebiete, 2 Regionen, 3 Einflusssphären (Mächte).
 var layer: int = 0
-const LAYER_NAME: PackedStringArray = ["Clan-Gebiete", "Dorf-Gebiete", "Regionen"]
+const LAYER_NAME: PackedStringArray = ["Clan-Gebiete", "Dorf-Gebiete", "Regionen", "Einflusssphären"]
+## Breite der verblassenden Einflusszone jenseits des Dorfgebiets (Kacheln)
+const INF_R: int = 12
+## Beschriftungspunkte nach dem letzten update_territory: Clan-Id -> Vector3(x, y, Kacheln);
+## der Punkt liegt immer im eigenen Gebiet des Clans.
+var terr_center: Dictionary = {}
+var terr_ms: float = 0.0  ## Dauer des letzten update_territory (Entwickler)
 const REG_COL: Array[Color] = [Color("#e8e0a0"), Color("#5ac85a"), Color("#e8a040"), Color("#40a8e8"), Color("#c070e8")]
 
 
@@ -63,9 +79,15 @@ func _init() -> void:
 	near_img = Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
 	far_img = Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
 	terr_img = Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
+	war_img = Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
+	fill_img = Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
+	edge_img = Image.create_empty(W * EDGE_S, H * EDGE_S, false, Image.FORMAT_RGBA8)
 	near_tex = ImageTexture.create_from_image(near_img)
 	far_tex = ImageTexture.create_from_image(far_img)
 	terr_tex = ImageTexture.create_from_image(terr_img)
+	war_tex = ImageTexture.create_from_image(war_img)
+	fill_tex = ImageTexture.create_from_image(fill_img)
+	edge_tex = ImageTexture.create_from_image(edge_img)
 	dirty = PackedByteArray()
 	dirty.resize(CXN * CXN)
 
@@ -85,6 +107,9 @@ func alloc() -> void:
 	terr = PackedInt32Array()
 	terr.resize(N)
 	terr.fill(-1)
+	infl = PackedInt32Array()
+	infl.resize(N)
+	infl.fill(-1)
 	temp_snow = PackedByteArray()
 	temp_snow.resize(N)
 	wdist = PackedByteArray()
@@ -615,55 +640,550 @@ func set_tile(i: int, t: int) -> int:
 	return old
 
 
-func update_territory(villages: Array, clans: Array) -> void:
-	terr.fill(-1)
-	terr_img.fill(Color(0, 0, 0, 0))
-	if layer == 2:
+## Clan-Gebiete neu berechnen und zeichnen – auf einmal (Tests, Ladevorgänge). Im Spiel läuft dasselbe
+## verteilt über mehrere Bilder: begin_territory, dann territory_step je Bild (Web-Build ist Single-Threaded).
+## Jede Kachel gehört dem nächstgelegenen Dorf (Abstand relativ zum Dorfradius); jenseits davon liegt eine
+## verblassende Einflusszone (infl). Ebenen: 0 Clan-Farbe, 1 Dörfer, 3 Mächte (Farbe der Vormacht, Rest abgedunkelt).
+## Ränder wie bei WorldBox: dunkle Außenlinie, helle Innenlinie; bei Ebene 0 ist die Außenlinie in der
+## Farbe der Vormacht, wenn der Clan einer folgt. Umkämpfte Grenzen landen gestrichelt in war_img.
+## head: je Clan-Id die Vormacht (Influence.head); leer = jeder Clan ist seine eigene Macht.
+func update_territory(villages: Array, clans: Array, head: PackedInt32Array = PackedInt32Array()) -> void:
+	begin_territory(villages, clans, head)
+	while not territory_step(1 << 30):
+		pass
+
+
+# Zustand der laufenden Gebiets-Berechnung (Arbeitskopien, erst am Ende nach terr/infl übernommen)
+var _jv: Array = []
+var _jc: Array = []
+var _jhd: PackedInt32Array
+var _jphase: int = -1  ## -1 = nichts zu tun
+var _jpos: int = 0
+var _jus: int = 0  ## verbrauchte Rechenzeit (µs)
+var _jterr: PackedInt32Array
+var _jinfl: PackedInt32Array
+var _jbest: PackedInt32Array
+var _jinf_s: PackedInt32Array
+var _jvclan: PackedInt32Array
+var _jK: PackedInt32Array
+var _jCL: PackedInt32Array
+var _jbk: PackedByteArray
+var _jimg: PackedInt32Array
+var _jfill: PackedInt32Array
+var _jedge: PackedInt32Array
+var _jwar: PackedInt32Array
+var _jany_war: bool = false
+var _jcsx: PackedFloat32Array
+var _jcsy: PackedFloat32Array
+var _jcn: PackedInt32Array
+var _jc_fill: PackedInt32Array
+var _jc_out: PackedInt32Array
+var _jc_in: PackedInt32Array
+var _jc_hatch: PackedInt32Array
+var _jc_soft: PackedInt32Array
+var _jc_csoft: PackedInt32Array
+var _jc_infl: PackedInt32Array
+var _jveil: int = 0
+var _jlayer: int = 0
+
+
+func territory_busy() -> bool:
+	return _jphase >= 0
+
+
+## Neue Gebiets-Berechnung beginnen (eine laufende wird verworfen).
+func begin_territory(villages: Array, clans: Array, head: PackedInt32Array = PackedInt32Array()) -> void:
+	_jv = villages.duplicate()
+	_jc = clans.duplicate()
+	var nc: int = clans.size()
+	_jhd = head.duplicate()
+	if _jhd.size() != nc:
+		_jhd.resize(nc)
+		for k: int in range(nc):
+			_jhd[k] = k
+	_jlayer = layer
+	_jphase = 0
+	_jpos = 0
+	_jus = 0
+
+
+## Ein Stück der Gebiets-Berechnung (höchstens etwa budget_us Mikrosekunden); true = fertig und hochgeladen.
+func territory_step(budget_us: int) -> bool:
+	if _jphase < 0:
+		return true
+	var t0: int = Time.get_ticks_usec()
+	var tend: int = t0 + budget_us
+	while _jphase >= 0 and Time.get_ticks_usec() < tend:
+		match _jphase:
+			0:
+				_job_init()
+			1:
+				_job_claim(tend)
+			2:
+				_job_keys(tend)
+			3:
+				_job_colors()
+			4:
+				_job_borders(tend)
+			5:
+				_job_pixels(tend)
+			6:
+				_job_finish()
+	_jus += Time.get_ticks_usec() - t0
+	if _jphase < 0:
+		terr_ms = _jus / 1000.0
+		return true
+	return false
+
+
+func _job_init() -> void:
+	if _jlayer == 2:
+		terr.fill(-1)
+		infl.fill(-1)
+		terr_center.clear()
+		war_img.fill(Color(0, 0, 0, 0))
+		war_tex.update(war_img)
+		fill_img.fill(Color(0, 0, 0, 0))
+		fill_tex.update(fill_img)
+		edge_img.fill(Color(0, 0, 0, 0))
+		edge_tex.update(edge_img)
+		terr_img.fill(Color(0, 0, 0, 0))
 		_region_layer()
 		terr_tex.update(terr_img)
+		_jphase = -1
 		return
-	for v: Village in villages:
+	_jterr = PackedInt32Array()
+	_jterr.resize(N)
+	_jterr.fill(-1)
+	_jinfl = PackedInt32Array()
+	_jinfl.resize(N)
+	_jinfl.fill(-1)
+	_jbest = PackedInt32Array()
+	_jbest.resize(N)
+	_jbest.fill(1 << 30)
+	_jinf_s = PackedInt32Array()
+	_jinf_s.resize(N)
+	_jvclan = PackedInt32Array()
+	_jvclan.resize(_jv.size())
+	for v: Village in _jv:
+		if v != null:
+			_jvclan[v.id] = v.clan
+	_jphase = 1
+	_jpos = 0
+
+
+## 1) Besitz: nächstes Dorf (Abstand / Radius); Einflusszone = stärkste Nähe außerhalb jedes Gebiets.
+func _job_claim(tend: int) -> void:
+	var tt: PackedInt32Array = _jterr
+	var best: PackedInt32Array = _jbest
+	var ii: PackedInt32Array = _jinfl
+	var iss: PackedInt32Array = _jinf_s
+	while _jpos < _jv.size():
+		var v: Village = _jv[_jpos]
+		_jpos += 1
 		if v == null or not v.alive:
 			continue
-		var r: int = mini(30, int(13 + v.houses * 1.4 + v.towers * 3))
-		var cx: int = int(v.cx)
-		var cy: int = int(v.cy)
+		var r: int = terr_radius(v)
+		var R: int = r + INF_R
+		var r2: int = r * r
+		var R2: int = R * R
+		var cx: int = clampi(int(v.cx), 0, W - 1)
+		var cy: int = clampi(int(v.cy), 0, H - 1)
 		var rg: int = region[cy * W + cx]
-		for dy: int in range(-r, r + 1):
-			for dx: int in range(-r, r + 1):
-				if dx * dx + dy * dy > r * r:
+		var vid: int = v.id
+		var vcl: int = v.clan
+		var kinf: float = 255.0 / INF_R
+		for dy: int in range(maxi(-R, -cy), mini(R, H - 1 - cy) + 1):
+			var dy2: int = dy * dy
+			var span: int = int(sqrt(float(R2 - dy2)))
+			var row: int = (cy + dy) * W + cx
+			for dx: int in range(maxi(-span, -cx), mini(span, W - 1 - cx) + 1):
+				var i: int = row + dx
+				if region[i] != rg:
 					continue
-				var x: int = cx + dx
-				var y: int = cy + dy
-				if not in_map(x, y):
+				var tl: int = tile[i]
+				if tl <= GuData.SHAL or tl == GuData.WALL:
 					continue
-				var i: int = y * W + x
-				if terr[i] < 0 and tile[i] != GuData.DEEP and tile[i] != GuData.WALL and region[i] == rg:
-					terr[i] = v.id
-	var by_vil: bool = layer == 1
-	for y: int in range(H):
+				var d2: int = dx * dx + dy2
+				if d2 <= r2:
+					var sc: int = d2 * 1024 / r2
+					if sc < best[i]:
+						best[i] = sc
+						tt[i] = vid
+				else:
+					var s: int = 255 - int((sqrt(float(d2)) - r) * kinf)
+					if s > iss[i]:
+						iss[i] = s
+						ii[i] = vcl
+		if Time.get_ticks_usec() >= tend:
+			return
+	var nc: int = _jc.size()
+	_jK = PackedInt32Array()
+	_jK.resize(N)
+	_jK.fill(-1)
+	_jCL = PackedInt32Array()
+	_jCL.resize(N)
+	_jCL.fill(-1)
+	_jcsx = PackedFloat32Array()
+	_jcsx.resize(nc)
+	_jcsy = PackedFloat32Array()
+	_jcsy.resize(nc)
+	_jcn = PackedInt32Array()
+	_jcn.resize(nc)
+	_jphase = 2
+	_jpos = 0
+
+
+## 2) Schlüssel je Kachel (Ebene 0: Clan, 1: Dorf, 3: Vormacht), Clan je Kachel, Schwerpunkte.
+func _job_keys(tend: int) -> void:
+	var by_vil: bool = _jlayer == 1
+	var by_head: bool = _jlayer == 3
+	var tt: PackedInt32Array = _jterr
+	var ii: PackedInt32Array = _jinfl
+	var hd: PackedInt32Array = _jhd
+	var vc: PackedInt32Array = _jvclan
+	while _jpos < H:
+		var y: int = _jpos
+		_jpos += 1
+		var row: int = y * W
 		for x: int in range(W):
-			var i: int = y * W + x
-			var t: int = terr[i]
+			var i: int = row + x
+			var t: int = tt[i]
 			if t < 0:
+				var ik: int = ii[i]
+				if ik >= 0 and hd[ik] < 0:
+					ii[i] = -1
 				continue
-			var v: Village = villages[t]
-			var k: int = v.clan
-			var cl: Clan = clans[k]
-			var border: bool
-			if by_vil:
-				border = x == 0 or terr[i - 1] != t or x == W - 1 or terr[i + 1] != t or y == 0 or terr[i - W] != t or y == H - 1 or terr[i + W] != t
+			ii[i] = -1
+			var k: int = vc[t]
+			_jCL[i] = k
+			var key: int = t if by_vil else (hd[k] if by_head else k)
+			if key < 0:
+				key = k
+			_jK[i] = key
+			_jcsx[k] += x
+			_jcsy[k] += y
+			_jcn[k] += 1
+		if Time.get_ticks_usec() >= tend:
+			return
+	_jphase = 3
+
+
+## 3) Beschriftungspunkte und Farben je Schlüssel.
+func _job_colors() -> void:
+	var by_vil: bool = _jlayer == 1
+	var by_head: bool = _jlayer == 3
+	var nc: int = _jc.size()
+	var hd: PackedInt32Array = _jhd
+	terr_center.clear()
+	for ck2: int in range(nc):
+		if _jcn[ck2] == 0:
+			continue
+		var pos: Vector2i = _snap_own(int(_jcsx[ck2] / _jcn[ck2]), int(_jcsy[ck2] / _jcn[ck2]), ck2, _jCL)
+		terr_center[ck2] = Vector3(pos.x, pos.y, _jcn[ck2])
+	var nk: int = _jv.size() if by_vil else nc
+	_jc_fill = PackedInt32Array()
+	_jc_fill.resize(nk)
+	_jc_out = PackedInt32Array()
+	_jc_out.resize(nk)
+	_jc_in = PackedInt32Array()
+	_jc_in.resize(nk)
+	_jc_hatch = PackedInt32Array()
+	_jc_hatch.resize(nk)
+	_jc_soft = PackedInt32Array()
+	_jc_soft.resize(nk)
+	for key2: int in range(nk):
+		var cc: Clan
+		var col: Color
+		if by_vil:
+			var vv: Village = _jv[key2]
+			if vv == null:
+				continue
+			cc = _jc[vv.clan]
+			col = cc.col.lightened(0.22) if key2 % 2 == 0 else cc.col.darkened(0.18)
+		else:
+			cc = _jc[key2]
+			col = cc.col
+		col = vivid(col)
+		var outer: Color = col.darkened(0.55)
+		if not by_vil and not by_head and hd[key2] >= 0 and hd[key2] != key2:
+			outer = vivid((_jc[hd[key2]] as Clan).col).darkened(0.12)
+		if by_vil and cc.cap == key2:
+			outer = Color("#ffd24a")
+		_jc_fill[key2] = _rgba(col, 0.66 if by_head else 0.58)
+		_jc_hatch[key2] = _rgba(col.darkened(0.6), 0.62) if (by_head and cc.align == 1) else _jc_fill[key2]
+		_jc_out[key2] = _rgba(outer, 1.0)
+		_jc_in[key2] = _rgba(col.lightened(0.45), 0.92)
+		_jc_soft[key2] = _rgba(col.lightened(0.5), 0.6)
+	# herrenloses Land: leicht (Mächte-Ebene stärker) abgedunkelt; die Einflusszone geht in die Clanfarbe über
+	var veil_c: Color = Color(0.06, 0.08, 0.1)
+	var va: float = 0.42 if by_head else 0.16
+	_jveil = _rgba(veil_c, va)
+	_jc_csoft = PackedInt32Array()
+	_jc_csoft.resize(nc)
+	_jc_infl = PackedInt32Array()
+	_jc_infl.resize(nc * 8)
+	for k3: int in range(nc):
+		var cl3: Clan = _jc[k3]
+		_jc_csoft[k3] = _rgba(vivid(cl3.col).lightened(0.25), 0.8)
+		var ic: Color = vivid((_jc[hd[k3]] as Clan).col if (by_head and hd[k3] >= 0) else cl3.col)
+		for q: int in range(8):
+			var f: float = (q + 1) / 8.0
+			_jc_infl[k3 * 8 + q] = _rgba(veil_c.lerp(ic, f), lerpf(va, 0.34, f))
+	_jbk = PackedByteArray()
+	_jbk.resize(N)
+	_jany_war = false
+	_jphase = 4
+	_jpos = 0
+
+
+## 4) Rand-Art je Kachel: 1 Außenrand, 2 weiche Innengrenze (Clans derselben Macht bzw. Dörfer eines Clans), 3 Kriegsgrenze.
+func _job_borders(tend: int) -> void:
+	var by_vil: bool = _jlayer == 1
+	var by_head: bool = _jlayer == 3
+	var K: PackedInt32Array = _jK
+	var CL: PackedInt32Array = _jCL
+	while _jpos < H:
+		var y: int = _jpos
+		_jpos += 1
+		var row: int = y * W
+		for x: int in range(W):
+			var i: int = row + x
+			var key: int = K[i]
+			if key < 0:
+				continue
+			# vier Nachbarn; außerhalb der Karte zählt als fremd
+			var kl: int = K[i - 1] if x > 0 else -1
+			var kr: int = K[i + 1] if x < W - 1 else -1
+			var ku: int = K[i - W] if y > 0 else -1
+			var kd: int = K[i + W] if y < H - 1 else -1
+			if kl == key and kr == key and ku == key and kd == key:
+				if by_head:
+					var ki0: int = CL[i]
+					if CL[i - 1] != ki0 or CL[i + 1] != ki0 or CL[i - W] != ki0 or CL[i + W] != ki0:
+						_jbk[i] = 2
+				continue
+			var ki: int = CL[i]
+			var war: Dictionary = (_jc[ki] as Clan).war
+			var b: int = 0
+			for j: int in [i - 1 if x > 0 else -1, i + 1 if x < W - 1 else -1, i - W if y > 0 else -1, i + W if y < H - 1 else -1]:
+				var kj: int = K[j] if j >= 0 else -1
+				if kj == key:
+					continue
+				if kj < 0:
+					b = maxi(b, 1)
+					continue
+				var cj: int = CL[j]
+				if cj != ki and war.has(cj):
+					b = 3
+				elif by_vil and cj == ki:
+					b = maxi(b, 2)
+				else:
+					b = maxi(b, 1)
+			_jbk[i] = b
+			if b == 3:
+				_jany_war = true
+		if Time.get_ticks_usec() >= tend:
+			return
+	_jimg = PackedInt32Array()
+	_jimg.resize(N)
+	_jfill = PackedInt32Array()
+	_jfill.resize(N)
+	_jedge = PackedInt32Array()
+	_jedge.resize(N * EDGE_S * EDGE_S)
+	_jwar = PackedInt32Array()
+	if _jany_war:
+		_jwar.resize(N)
+	_jphase = 5
+	_jpos = 0
+
+
+## 5) Pixel: Rand, Innenlinie, Fläche (Mächte-Ebene: dämonische Mächte schraffiert), Einflusszone, Schleier.
+func _job_pixels(tend: int) -> void:
+	var by_head: bool = _jlayer == 3
+	var K: PackedInt32Array = _jK
+	var bk: PackedByteArray = _jbk
+	var img: PackedInt32Array = _jimg
+	var fl: PackedInt32Array = _jfill
+	var ii: PackedInt32Array = _jinfl
+	var w_on: int = _rgba(Color("#ff3b2a"), 1.0)
+	var w_off: int = _rgba(Color("#3a0806"), 0.85)
+	var w_glow: int = _rgba(Color("#ff5a3a"), 0.45)
+	while _jpos < H:
+		var y: int = _jpos
+		_jpos += 1
+		var row: int = y * W
+		for x: int in range(W):
+			var i: int = row + x
+			var key: int = K[i]
+			if key < 0:
+				var ik: int = ii[i]
+				if ik >= 0:
+					img[i] = _jc_infl[ik * 8 + mini(7, _jinf_s[i] >> 5)]
+				elif tile[i] > GuData.SHAL and tile[i] != GuData.WALL:
+					img[i] = _jveil
+				continue
+			var b: int = bk[i]
+			fl[i] = _jc_fill[key]
+			if b != 0:
+				_edge_tile(x, y, i, key, by_head)
+			if b == 1 or b == 3:
+				img[i] = _jc_out[key]
+				if b == 3:
+					_jwar[i] = w_on if (((x + y) >> 1) & 1) == 0 else w_off
+				continue
+			if b == 2:
+				img[i] = _jc_csoft[_jCL[i]] if by_head else _jc_soft[key]
+				continue
+			# Innenlinie neben einem Außenrand
+			var nb: int = 0
+			if x > 0:
+				nb = bk[i - 1]
+			if x < W - 1:
+				nb = maxi(nb, bk[i + 1])
+			if y > 0:
+				nb = maxi(nb, bk[i - W])
+			if y < H - 1:
+				nb = maxi(nb, bk[i + W])
+			if nb == 1 or nb == 3:
+				img[i] = _jc_in[key]
+				if nb == 3:
+					_jwar[i] = w_glow
+			elif by_head and (x + y) % 5 == 0:
+				img[i] = _jc_hatch[key]
 			else:
-				border = (x == 0 or _clan_of(i - 1, villages) != k) or (x == W - 1 or _clan_of(i + 1, villages) != k) or (y == 0 or _clan_of(i - W, villages) != k) or (y == H - 1 or _clan_of(i + W, villages) != k)
-			var col: Color = cl.col
-			if by_vil:
-				# Dörfer eines Clans abwechselnd heller und dunkler, die Hauptstadt golden umrandet
-				col = col.lightened(0.25) if t % 2 == 0 else col.darkened(0.2)
-				if border and cl.cap == t:
-					col = Color("#ffd24a")
-			col.a = 0.9 if border else (0.3 if by_vil else 0.13)
-			terr_img.set_pixel(x, y, col)
+				img[i] = _jc_fill[key]
+		if Time.get_ticks_usec() >= tend:
+			return
+	_jphase = 6
+
+
+## Feine Grenzlinien einer Randkachel in edge_img: je fremder Seite außen dunkel (Krieg: rot gestrichelt),
+## innen in Clanfarbe; Grenzen innerhalb einer Macht bzw. eines Clans nur als zarte Farblinie.
+func _edge_tile(x: int, y: int, i: int, key: int, by_head: bool) -> void:
+	var by_vil: bool = _jlayer == 1
+	var K: PackedInt32Array = _jK
+	var ki: int = _jCL[i]
+	var war: Dictionary = (_jc[ki] as Clan).war
+	var ES: int = EDGE_S
+	var EW: int = W * ES
+	var X0: int = x * ES
+	var Y0: int = y * ES
+	var c_o: int = _jc_out[key]
+	var c_i: int = _jc_in[key]
+	var c_s: int = _jc_csoft[ki] if by_head else _jc_soft[key]
+	var w_on: int = _rgba(Color("#ff3b2a"), 1.0)
+	var w_off: int = _rgba(Color("#2a0604"), 1.0)
+	for side: int in 4:
+		var j: int = -1
+		if side == 0 and x > 0:
+			j = i - 1
+		elif side == 1 and x < W - 1:
+			j = i + 1
+		elif side == 2 and y > 0:
+			j = i - W
+		elif side == 3 and y < H - 1:
+			j = i + W
+		var kj: int = K[j] if j >= 0 else -1
+		var kind: int = 0  # 0 nichts, 1 Außengrenze, 2 zart, 3 Krieg
+		if kj != key:
+			kind = 1
+			if kj >= 0:
+				var cj: int = _jCL[j]
+				if cj != ki and war.has(cj):
+					kind = 3
+				elif by_vil and cj == ki:
+					kind = 2
+		elif by_head and _jCL[j] != ki:
+			kind = 2
+		if kind == 0:
+			continue
+		for k: int in ES:
+			# o: äußerste Linie an der Kante, n: Linie eine Stufe nach innen
+			var o: int
+			var n: int
+			if side == 0:
+				o = (Y0 + k) * EW + X0
+				n = o + 1
+			elif side == 1:
+				o = (Y0 + k) * EW + X0 + ES - 1
+				n = o - 1
+			elif side == 2:
+				o = Y0 * EW + X0 + k
+				n = o + EW
+			else:
+				o = (Y0 + ES - 1) * EW + X0 + k
+				n = o - EW
+			if kind == 2:
+				_jedge[o] = c_s
+				continue
+			if kind == 3:
+				_jedge[o] = w_on if (((X0 + Y0 + k) >> 1) & 1) == 0 else w_off
+			else:
+				_jedge[o] = c_o
+			if _jedge[n] == 0:
+				_jedge[n] = c_i
+
+
+func _job_finish() -> void:
+	terr = _jterr
+	infl = _jinfl
+	terr_img.set_data(W, H, false, Image.FORMAT_RGBA8, _jimg.to_byte_array())
 	terr_tex.update(terr_img)
+	fill_img.set_data(W, H, false, Image.FORMAT_RGBA8, _jfill.to_byte_array())
+	fill_tex.update(fill_img)
+	edge_img.set_data(W * EDGE_S, H * EDGE_S, false, Image.FORMAT_RGBA8, _jedge.to_byte_array())
+	edge_tex.update(edge_img)
+	if _jany_war:
+		war_img.set_data(W, H, false, Image.FORMAT_RGBA8, _jwar.to_byte_array())
+	else:
+		war_img.fill(Color(0, 0, 0, 0))
+	war_tex.update(war_img)
+	# Arbeitskopien freigeben
+	_jv = []
+	_jc = []
+	_jbest = PackedInt32Array()
+	_jinf_s = PackedInt32Array()
+	_jK = PackedInt32Array()
+	_jCL = PackedInt32Array()
+	_jbk = PackedByteArray()
+	_jimg = PackedInt32Array()
+	_jfill = PackedInt32Array()
+	_jedge = PackedInt32Array()
+	_jwar = PackedInt32Array()
+	_jphase = -1
+
+
+## Kräftigere Fassung einer Clanfarbe für die Gebietsfläche (blasse und dunkle Farben gehen sonst im Gelände unter).
+static func vivid(c: Color) -> Color:
+	return Color.from_hsv(c.h, clampf(c.s * 1.25, 0.0, 1.0) if c.s > 0.12 else c.s, clampf(c.v, 0.62, 0.98))
+
+
+## Gebietsradius eines Dorfs in Kacheln (wächst mit Hütten, Türmen und Ahnenhalle).
+static func terr_radius(v: Village) -> int:
+	return clampi(int(16 + v.houses * 1.5 + v.towers * 3 + v.lvl * 3), 16, 34)
+
+
+## Farbe als RGBA8-Wert für PackedInt32Array.to_byte_array() (Bytes r, g, b, a).
+static func _rgba(c: Color, a: float) -> int:
+	var v: int = int(c.r8) | (int(c.g8) << 8) | (int(c.b8) << 16) | (clampi(int(a * 255.0), 0, 255) << 24)
+	if v >= 0x80000000:
+		v -= 0x100000000
+	return v
+
+
+## Nächste Kachel mit owner[i] == key um (px, py) (Spirale bis 40 Kacheln), sonst (px, py).
+func _snap_own(px: int, py: int, key: int, owner: PackedInt32Array) -> Vector2i:
+	px = clampi(px, 0, W - 1)
+	py = clampi(py, 0, H - 1)
+	if owner[py * W + px] == key:
+		return Vector2i(px, py)
+	for rr: int in range(1, 40):
+		for k: int in range(-rr, rr + 1):
+			for p: Vector2i in [Vector2i(px + k, py - rr), Vector2i(px + k, py + rr), Vector2i(px - rr, py + k), Vector2i(px + rr, py + k)]:
+				if in_map(p.x, p.y) and owner[p.y * W + p.x] == key:
+					return p
+	return Vector2i(px, py)
 
 
 ## Ebene „Regionen“: die fünf Regionen in eigenen Farben mit Rand.
@@ -699,10 +1219,3 @@ func _region_px(x0: int, y0: int, x1: int, y1: int) -> void:
 			var col: Color = REG_COL[r]
 			col.a = 0.95 if border else (0.12 if GuData.is_water(tile[i]) else 0.42)
 			terr_img.set_pixel(x, y, col)
-
-
-func _clan_of(i: int, villages: Array) -> int:
-	var t: int = terr[i]
-	if t < 0:
-		return -1
-	return (villages[t] as Village).clan

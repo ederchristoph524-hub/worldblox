@@ -1178,6 +1178,7 @@ func village_lines(v: Village) -> String:
 	var s: String = ""
 	var capv: Village = sim.villages[c.cap] if c.cap >= 0 and c.cap < sim.villages.size() else null
 	s += mt + "Hauptstadt[/color]  " + ("[color=#ffd24a]dieses Dorf[/color]" if c.cap == v.id else (capv.name if capv != null else "–")) + "\n"
+	s += mt + "Einfluss[/color]  " + Influence.text(sim, c) + "\n"
 	var L: Unit = c.lead
 	if L != null and L.hp > 0.0:
 		s += mt + "Clan-Oberhaupt[/color]  [color=#%s]■[/color] %s, %s\n" % [GuData.ESS_COL[L.rank].to_html(false), L.pname(), GuData.rank_title(L.rank)]
