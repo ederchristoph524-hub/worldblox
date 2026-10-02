@@ -16,6 +16,9 @@ var world_root: Node2D
 var far_spr: Sprite2D
 var near_spr: Sprite2D
 var terr_spr: Sprite2D
+var terr_ov: TerrOverlay  ## Herrschaftsgebiete der Ehrwürdigen, Kriegsgrenzen (über terr_spr)
+var legend: PowerLegend  ## Legende der Mächte oben links
+var infl_t: float = 0.0
 var ents: EntityLayer
 var clouds: CloudLayer
 var screen: ScreenLayer
@@ -108,6 +111,8 @@ func _ready() -> void:
 			_dev_blanktest()
 		if a.begins_with("--blankshots="):
 			_dev_blankshots(a.substr(13))
+		if a.begins_with("--terrshots="):
+			_dev_terrshots(a.substr(12))
 
 
 func _build_scene() -> void:
@@ -147,6 +152,9 @@ func _build_scene() -> void:
 	terr_spr.centered = false
 	terr_spr.texture = sim.world.terr_tex
 	world_root.add_child(terr_spr)
+	terr_ov = TerrOverlay.new()
+	terr_ov.m = self
+	world_root.add_child(terr_ov)
 	ents = EntityLayer.new()
 	ents.m = self
 	world_root.add_child(ents)
@@ -177,6 +185,14 @@ func _build_scene() -> void:
 		hud.set_brush(i))
 	hud.meta_clicked.connect(_on_meta)
 	hud.show_ui_pressed.connect(func() -> void: _set_ui_hidden(false))
+	legend = PowerLegend.new(hud)
+	legend.sim = sim
+	legend.position = Vector2(10, 26)
+	legend.visible = false
+	legend.pick.connect(_legend_pick)
+	hud.add_child(legend)
+	hud.move_child(legend, hud.insp.get_index())
+	hud.legend = legend
 	hud.set_brush(powers.brush_idx)
 
 
@@ -346,6 +362,8 @@ func _finish_start() -> void:
 	_clamp_cam()
 	sim.update_leaders()
 	sim.terr_dirty = true
+	terr_t = 0.0
+	infl_t = 0.0
 	sim.world.render_all()
 
 
@@ -405,12 +423,20 @@ func _process(delta: float) -> void:
 		sim.world.refresh_water()
 	sim.world.flush_dirty(4)
 	terr_t -= rdt
-	var tz: float = terr_zoom()
+	infl_t -= rdt
 	_region_view()
-	if sim.terr_dirty and (show_terr or reg_view) and terr_t <= 0.0 and (z < tz or reg_view):
+	if infl_t <= 0.0:
+		# Einflusssphären (Bünde, Vormächte, Ehrwürdige) – billig, auch ohne Gebietsanzeige für Inspektor und Auren
+		infl_t = 1.0
+		Influence.compute(sim)
+	if sim.terr_dirty and (show_terr or reg_view) and terr_t <= 0.0:
 		terr_t = 1.5
 		sim.terr_dirty = false
-		sim.world.update_territory(sim.villages, sim.clans)
+		Influence.compute(sim)
+		sim.world.begin_territory(sim.villages, sim.clans, Influence.head)
+	if sim.world.territory_busy():
+		# in Häppchen über mehrere Bilder (Web-Build ist Single-Threaded)
+		sim.world.territory_step(4000)
 	# Kamera-Wackeln
 	if sim.shake > 0.0:
 		sim.shake = maxf(0.0, sim.shake - rdt * 1.6)
@@ -422,8 +448,15 @@ func _process(delta: float) -> void:
 	var lod: float = clampf((z - 2.0) / 0.9, 0.0, 1.0)
 	near_spr.modulate.a = lod
 	near_spr.visible = lod > 0.0
-	terr_spr.visible = (show_terr and z < tz) or reg_view
-	terr_spr.modulate.a = maxf(clampf((tz - z) / 0.8, 0.0, 0.75), 0.6 if reg_view else 0.0)
+	# Gebiete in jeder Zoomstufe: in der Übersicht kräftig, nah nur noch Ränder und eine leichte Fläche
+	var cl: float = 0.0 if reg_view else terr_close()
+	terr_spr.visible = (show_terr or reg_view) and cl < 1.0
+	terr_spr.modulate.a = 0.75 if reg_view else 0.95 * (1.0 - cl)
+	terr_ov.tick(show_terr and not reg_view, cl)
+	legend.visible = show_terr and not reg_view and not ui_hidden and not hud.insp.visible and not hud.modal.visible and sim.world.layer != 2 and not sim.clans.is_empty()
+	if legend.visible:
+		legend.near = cl >= 1.0
+		legend.refresh()
 	ents.queue_redraw()
 	clouds.tick(rdt)
 	clouds.queue_redraw()
@@ -452,9 +485,32 @@ func _process(delta: float) -> void:
 		_save_game()
 
 
-## Bis zu dieser Zoomstufe sind Clan-Gebiete sichtbar (auf großen Bildschirmen entsprechend höher).
+## Bis zu dieser Zoomstufe gilt die Karte als Übersicht (Gebietsnamen, kräftige Gebietsfarben; auf großen Bildschirmen höher).
 func terr_zoom() -> float:
 	return 2.6 * maxf(1.0, min_z / 1.44)
+
+
+## Übergang Übersicht → Nahansicht der Gebiete (0 = kräftige Flächen mit Kachel-Rändern, 1 = zarte Fläche
+## mit feinen Doppel-Grenzlinien, siehe TerrOverlay).
+func terr_close() -> float:
+	var tz: float = terr_zoom()
+	return clampf((z - tz * 0.85) / (tz * 0.5), 0.0, 1.0)
+
+
+## Legende: zur Hauptstadt der Macht zoomen und das Dorf zeigen.
+func _legend_pick(cid: int) -> void:
+	if cid < 0 or cid >= sim.clans.size():
+		return
+	var c: Clan = sim.clans[cid]
+	var p: Vector2 = Influence.capital_pos(sim, c)
+	if p.x < 0.0:
+		return
+	zoom_to(p.x, p.y, 4.5)
+	var v: Village = sim.village_at(int(p.x), int(p.y))
+	if v != null:
+		sel_vil = v
+		sel_unit = null
+		_open_village()
 
 
 # ---------------- Eingabe ----------------
@@ -746,11 +802,7 @@ func _run_action(t: Dictionary) -> void:
 			_set_ui_hidden(true)
 		# Gottkräfte-Parität (Logik in Powers/Sim)
 		"layer":
-			sim.world.layer = (sim.world.layer + 1) % World.LAYER_NAME.size()
-			show_terr = true
-			sim.terr_dirty = true
-			terr_t = 0.0
-			hud.show_hint("Kartenebene", World.LAYER_NAME[sim.world.layer] + " (in der Übersicht sichtbar)")
+			_cycle_layer()
 		"plans":
 			_open_plans()
 		"brushshape":
@@ -1123,7 +1175,7 @@ func _open_tile(tx: int, ty: int) -> void:
 	var i: int = ty * W + tx
 	var f: int = sim.world.feat[i]
 	var title: String = GuData.TNAME[sim.world.tile[i]] + ((" · " + GuData.FNAME[f]) if f != 0 else "")
-	hud.open_insp(null, "", Color.WHITE, title, GuData.REGN[sim.world.region[i]] + " · Feld %d, %d" % [tx, ty] + (" · brennt" if sim.fire.has(i) else ""), "", [])
+	hud.open_insp(null, "", Color.WHITE, title, GuData.REGN[sim.world.region[i]] + " · Feld %d, %d" % [tx, ty] + (" · brennt" if sim.fire.has(i) else ""), Influence.tile_text(sim, tx, ty).strip_edges(), [])
 	hud.layout_floaters()
 
 
@@ -1300,6 +1352,9 @@ func _on_meta(m: String) -> void:
 		show_terr = not show_terr
 		sim.terr_dirty = true
 		_open_display()
+	elif m == "disp:layer":
+		_cycle_layer()
+		_open_display()
 	elif m == "disp:names":
 		show_names = not show_names
 		_open_display()
@@ -1334,13 +1389,30 @@ func _region_view() -> void:
 	terr_t = 0.0
 
 
+## Kartenebene weiterschalten (Clan-Gebiete → Dorf-Gebiete → Regionen → Einflusssphären) und Gebiete zeigen.
+func _cycle_layer() -> void:
+	sim.world.layer = (sim.world.layer + 1) % World.LAYER_NAME.size()
+	show_terr = true
+	sim.terr_dirty = true
+	terr_t = 0.0
+	hud.show_hint("Kartenebene: " + World.LAYER_NAME[sim.world.layer], LAYER_DESC[sim.world.layer])
+
+
+const LAYER_DESC: PackedStringArray = [
+	"Jeder Clan in seiner Farbe. Ein Rand in fremder Farbe zeigt die Vormacht, der der Clan folgt; rot gestrichelt sind Kriegsgrenzen.",
+	"Die Dörfer der Clans, die Hauptstadt golden umrandet.",
+	"Die fünf Regionen und ihre Wände.",
+	"Wer herrscht wo: Bünde in der Farbe ihrer Vormacht, dämonische Mächte schraffiert, Herrschaftsgebiete der Ehrwürdigen leuchten."]
+
+
 func _open_plans() -> void:
 	hud.open_modal(_h("Pläne und Kriege") + powers.plans_text())
 
 
 func _open_display() -> void:
 	var s: String = _h("Anzeige")
-	s += "[url=disp:terr]%s  [b]Clan-Gebiete[/b][/url]\n    [color=#9db09e]Grenzen der Clans in der Übersicht zeigen.[/color]\n" % _switch(show_terr)
+	s += "[url=disp:terr]%s  [b]Gebiete und Einfluss[/b][/url]\n    [color=#9db09e]Grenzen, Gebietsnamen und Legende der Mächte in jeder Zoomstufe.[/color]\n" % _switch(show_terr)
+	s += "[url=disp:layer][color=#9fd0ff][b]»[/b][/color]  [b]Kartenebene: %s[/b][/url]\n    [color=#9db09e]%s[/color]\n" % [World.LAYER_NAME[sim.world.layer], LAYER_DESC[sim.world.layer]]
 	s += "[url=disp:names]%s  [b]Dorfnamen[/b][/url]\n    [color=#9db09e]Banner mit Clan-Siegel und Einwohnerzahl.[/color]\n" % _switch(show_names)
 	hud.open_modal(s)
 
@@ -1783,6 +1855,7 @@ class ScreenLayer:
 	extends Control
 	var m: GuMain
 	var wparts: Array[Vector3] = []
+	var rects: Array[Rect2] = []  ## belegte Schild-Rechtecke dieses Bildes (Gebietsnamen weichen aus)
 
 	func _ready() -> void:
 			mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1810,9 +1883,11 @@ class ScreenLayer:
 			if e["k"] == "flash":
 				draw_rect(Rect2(Vector2.ZERO, vs), Color(1, 0.98, 0.9, float(e["l"]) / float(e["ml"]) * 0.35))
 		_weather(vs)
+		rects.clear()
 		if m.show_names:
 			_landmarks(o, z, vs)
 			_labels(o, z, vs)
+		TerrOverlay.draw_labels(self, m, o, z, vs, rects)
 		var font: Font = m.hud.font_bold
 		for e: Dictionary in sim.fx:
 			if e["k"] == "txt" and z > 2.5:
@@ -1875,15 +1950,20 @@ class ScreenLayer:
 		var sim: Sim = m.sim
 		var font: Font = m.hud.font_bold
 		var cjk: Font = m.hud.font_cjk
-		var rects: Array[Rect2] = []
 		var fs: int = 11
 		var h: float = 15.0
 		var sink: Callable = func(r: Rect2, c: Color) -> void: draw_rect(r, c)
 		Sprites.outline_col = Sprites.OUTLINE
+		# Übersicht mit Gebietsanzeige: nur die Hauptstädte tragen Schilder, die Gebietsnamen erledigen den Rest
+		# Ebene „Einflusssphären“ ist eine Machtkarte: dort stehen in der Übersicht nur die Namen der Mächte
+		var only_caps: bool = m.show_terr and not m.reg_view and sim.world.layer != 2 and z < m.terr_zoom() * 0.85
+		var no_banners: bool = only_caps and sim.world.layer == 3
 		for v: Village in sim.villages:
-			if not v.alive:
+			if not v.alive or no_banners:
 				continue
 			var c: Clan = sim.clans[v.clan]
+			if only_caps and c.cap >= 0 and c.cap != v.id:
+				continue
 			var X: float = v.cx * z + o.x
 			# Oberkante des Dorfzentrums (Lagerfeuer 7, Halle 10/13 Pixel hoch)
 			var th: float = 7.0 if v.lvl == 0 else (13.0 if Sprites.village_tier(v) == 2 else 10.0)
@@ -2187,6 +2267,111 @@ func _dev_shots(dir: String) -> void:
 	get_tree().quit()
 
 
+## Entwickler: -- --fresh --terrshots=<ordner> – Gebiete und Einfluss: Übersicht je Kartenebene (mit Krieg und
+## einem Ehrwürdigen), nah mit Grenzen, Legende zu/auf, Inspektor für Feld und Dorf.
+func _dev_terrshots(dir: String) -> void:
+	while loading or presim_on:
+		await get_tree().process_frame
+	await _wait(0.3)
+	# optional: -- --terryears=<n> lässt die Welt vorher n Jahre weiterlaufen (mehr Dörfer und Bünde)
+	for arg: String in OS.get_cmdline_user_args():
+		if arg.begins_with("--terryears="):
+			var steps: int = int(float(arg.substr(12)) * 12.0 / Sim.DT)
+			for k: int in range(steps):
+				sim.step(Sim.DT)
+				if k % 200 == 0:
+					await get_tree().process_frame
+			sim.update_leaders()
+	# Ehrwürdiger Urursprung beim Himmelshof bzw. bei der stärksten Macht
+	Influence.compute(sim)
+	var hc: Clan = sim.org_clan("heavenly_court")
+	if hc == null and not Influence.tops.is_empty():
+		hc = sim.clans[Influence.tops[0]]
+	if hc != null:
+		var cp: Vector2 = Influence.capital_pos(sim, hc)
+		print("venerable ", sim.spawn_venerable(Lore.VEN[0], cp.x + 6.0, cp.y + 4.0))
+	# Krieg zwischen zwei Nachbarn, die sich berühren
+	sim.world.layer = 0
+	Influence.compute(sim)
+	sim.world.update_territory(sim.villages, sim.clans, Influence.head)
+	var tr: PackedInt32Array = sim.world.terr
+	var war_at: Vector2 = Vector2(-1, -1)
+	var war_pair: Array[Clan] = []
+	for i: int in range(W * 40, GuData.N - W * 40):
+		var a0: int = tr[i]
+		var b0: int = tr[i + 1]
+		if a0 < 0 or b0 < 0:
+			continue
+		var ca: Clan = sim.clans[sim.villages[a0].clan]
+		var cb: Clan = sim.clans[sim.villages[b0].clan]
+		if ca != cb and (war_at.x < 0.0 or Influence.head[ca.id] != Influence.head[cb.id]):
+			war_at = Vector2(i % W, i / W)
+			war_pair = [ca, cb]
+			if Influence.head[ca.id] != Influence.head[cb.id]:
+				break
+	if not war_pair.is_empty():
+		sim.declare_war(war_pair[0], war_pair[1], true)
+		print("war ", war_pair[0].name, " vs ", war_pair[1].name, " at ", war_at)
+	sim.terr_dirty = true
+	terr_t = 0.0
+	infl_t = 0.0
+	z = min_z
+	cam = Vector2(W / 2.0, H / 2.0)
+	_clamp_cam()
+	for L: int in [0, 3, 1]:
+		sim.world.layer = L
+		sim.terr_dirty = true
+		terr_t = 0.0
+		await _wait(0.8)
+		print("layer ", L, " update ms ", snappedf(sim.world.terr_ms, 0.1), " tops ", Influence.tops.size(), " doms ", Influence.doms.size(), " centers ", sim.world.terr_center.size())
+		await _shot(dir + "/terr_L%d.png" % L)
+	sim.world.layer = 0
+	sim.terr_dirty = true
+	terr_t = 0.0
+	if war_at.x >= 0.0:
+		z = 4.0
+		cam = war_at
+		_clamp_cam()
+		await _wait(0.8)
+		await _shot(dir + "/terr_near4.png")
+		z = 9.0
+		_clamp_cam()
+		await _wait(0.6)
+		await _shot(dir + "/terr_near9.png")
+	z = 2.2
+	cam = Vector2(124, 150)
+	_clamp_cam()
+	sim.world.layer = 3
+	sim.terr_dirty = true
+	terr_t = 0.0
+	await _wait(0.8)
+	await _shot(dir + "/terr_L3_mid.png")
+	sim.world.layer = 0
+	sim.terr_dirty = true
+	terr_t = 0.0
+	z = min_z
+	cam = Vector2(W / 2.0, H / 2.0)
+	_clamp_cam()
+	legend.collapsed = true
+	legend.refresh()
+	await _wait(0.6)
+	await _shot(dir + "/terr_legend_zu.png")
+	legend.collapsed = false
+	legend.refresh()
+	if war_at.x >= 0.0:
+		_open_tile(int(war_at.x), int(war_at.y))
+		await _wait(0.4)
+		await _shot(dir + "/terr_insp_feld.png")
+		_close_insp()
+	if not Influence.tops.is_empty():
+		_legend_pick(Influence.tops[mini(1, Influence.tops.size() - 1)])
+		await _wait(0.6)
+		await _shot(dir + "/terr_insp_dorf.png")
+		_close_insp()
+	print("TERRSHOTS DONE")
+	get_tree().quit()
+
+
 ## Entwickler: Aufnahmen der Gottkräfte-Parität (Vulkan, Wirbel, Krater, Kartenebenen, Pläne und Kriege).
 func _dev_shots_parity(dir: String, c: Vector2) -> void:
 	paused = false
@@ -2233,7 +2418,7 @@ func _dev_shots_parity(dir: String, c: Vector2) -> void:
 	z = min_z
 	cam = Vector2(W / 2.0, H / 2.0)
 	_clamp_cam()
-	for L: int in range(3):
+	for L: int in range(World.LAYER_NAME.size()):
 		sim.world.layer = L
 		sim.terr_dirty = true
 		terr_t = 0.0
@@ -2750,6 +2935,7 @@ func _selftest() -> void:
 	_open_ages()
 	_on_meta("age:3")
 	_open_display()
+	_on_meta("disp:layer")
 	_gift()
 	# Höchster Großmeister: Auswahlfenster, Ehrwürdige im Inspektor, Gebiete
 	_click_tool(Powers.tool_by_id("s_v9"))
@@ -2763,6 +2949,26 @@ func _selftest() -> void:
 			powers.unit_lines(u4)
 	print("dominions ", sim.ven_dominions().size(), " era ", sim.era_text())
 	tool_id = ""
+	# Gebiete und Einfluss: alle Kartenebenen einmal auf einmal und in Häppchen, Inspektor-Texte
+	for L: int in range(World.LAYER_NAME.size()):
+		sim.world.layer = L
+		Influence.compute(sim)
+		sim.world.update_territory(sim.villages, sim.clans, Influence.head)
+		print("territory layer ", L, " ms ", snappedf(sim.world.terr_ms, 0.1), " centers ", sim.world.terr_center.size())
+	sim.world.layer = 3
+	sim.world.begin_territory(sim.villages, sim.clans, Influence.head)
+	var steps: int = 0
+	while not sim.world.territory_step(3000):
+		steps += 1
+	print("territory chunked steps ", steps, " tops ", Influence.tops.size(), " doms ", Influence.doms.size())
+	for c2: Clan in sim.clans:
+		Influence.text(sim, c2)
+	print("tile influence ", Influence.tile_text(sim, int(c.x), int(c.y)).length() > 0)
+	if not Influence.tops.is_empty():
+		_legend_pick(Influence.tops[0])
+		_close_insp()
+	sim.world.layer = 0
+	sim.terr_dirty = true
 	var t1: int = Time.get_ticks_msec()
 	for k: int in range(400):
 		sim.step(Sim.DT)
