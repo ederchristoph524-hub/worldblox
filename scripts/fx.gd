@@ -92,6 +92,8 @@ static func pxblob(ci: CanvasItem, c: Vector2, r: float, col: Color) -> void:
 
 ## Vier-Zacken-Stern (Funkeln).
 static func star4(ci: CanvasItem, p: Vector2, r: float, c: Color) -> void:
+	if r < 0.06 or c.a <= 0.003:
+		return
 	ci.draw_colored_polygon(PackedVector2Array([p + Vector2(0, -r), p + Vector2(r * 0.22, -r * 0.22), p + Vector2(r, 0), p + Vector2(r * 0.22, r * 0.22), p + Vector2(0, r), p + Vector2(-r * 0.22, r * 0.22), p + Vector2(-r, 0), p + Vector2(-r * 0.22, -r * 0.22)]), c)
 
 

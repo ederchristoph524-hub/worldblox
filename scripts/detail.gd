@@ -492,9 +492,10 @@ var _occ_built: int = -1
 
 
 ## Wie occluders, aber mit Zwischenspeicher je (auf ½ Kachel gerundetem) Rechteck – Wesen stehen oft still oder
-## laufen langsam. Verworfen, sobald ein Block neu gebacken wurde (Bäume gefällt/gewachsen) oder alle 2 s.
+## laufen langsam. Alle 60 Bilder verworfen (gefällte/gewachsene Bäume erscheinen höchstens so lange verspätet).
 func occluders_cached(x0: float, x1: float, top: float, foot: float, out: Dictionary) -> void:
-	if _occ_built != built or frame % 120 == 0 or _occ_cache.size() > 3000:
+	# nicht bei jedem neu gebackenen Block verwerfen (die laufende Welt backt ständig) – höchstens 1 s veraltet
+	if frame % 60 == 0 or _occ_cache.size() > 3000 or _occ_built < 0:
 		_occ_cache.clear()
 		_occ_built = built
 	var qx0: int = int(floorf(x0 * 2.0))
@@ -505,10 +506,13 @@ func occluders_cached(x0: float, x1: float, top: float, foot: float, out: Dictio
 	var res: Variant = _occ_cache.get(key)
 	if res == null:
 		var d: Dictionary = {}
-		occluders(qx0 * 0.5, qx1 * 0.5, float(qt), float(qf) + 0.001, d)
+		if occluded(qx0 * 0.5, qx1 * 0.5, float(qt), float(qf) + 0.001):
+			occluders(qx0 * 0.5, qx1 * 0.5, float(qt), float(qf) + 0.001, d)
 		_occ_cache[key] = d
 		res = d
 	var rd: Dictionary = res
+	if rd.is_empty():
+		return
 	for k: int in rd:
 		out[k] = rd[k]
 

@@ -1753,8 +1753,7 @@ class EntityLayer:
 					r = Rect2(bb.x - 0.5, bb.y - 2.0, bb.w + 1.0, bb.h + 2.0)
 				else:
 					continue
-				if det.occluded(r.position.x, r.end.x, r.position.y, r.end.y):
-					det.occluders_cached(r.position.x, r.end.x, r.position.y, r.end.y, occd)
+				det.occluders_cached(r.position.x, r.end.x, r.position.y, r.end.y, occd)
 			for e: Array in occd.values():
 				_add(float(e[2]) - 0.001, e)
 		_pm(2)
