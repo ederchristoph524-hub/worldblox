@@ -142,7 +142,7 @@ static func dominion_of(c: Clan) -> Dictionary:
 static func bloc_name(c: Clan) -> String:
 	var b: Dictionary = bloc.get(c.id, {})
 	if int(b.get("n", 1)) > 1:
-		return "Bund " + c.name
+		return "Alliance of " + c.name
 	return c.name
 
 
@@ -151,13 +151,13 @@ static func text(sim: Sim, c: Clan) -> String:
 	var parts: PackedStringArray = []
 	var o: Clan = overlord(sim, c)
 	if o != null:
-		parts.append("[color=#%s]■[/color] %s (Vormacht)" % [o.col.to_html(false), o.name])
+		parts.append("[color=#%s]■[/color] %s (overlord)" % [o.col.to_html(false), o.name])
 	else:
 		var b: Dictionary = bloc.get(c.id, {})
 		if int(b.get("n", 1)) > 1:
-			parts.append("führt einen Bund aus %d Clans" % int(b["n"]))
+			parts.append("leads an alliance of %d clans" % int(b["n"]))
 		else:
-			parts.append("unabhängig")
+			parts.append("independent")
 	var d: Dictionary = dominion_of(c)
 	if not d.is_empty():
 		parts.append("[color=#%s]%s[/color]" % [(d["col"] as Color).lightened(0.2).to_html(false), ven_name(d)])
@@ -183,12 +183,12 @@ static func tile_text(sim: Sim, tx: int, ty: int) -> String:
 	if t >= 0 and t < sim.villages.size():
 		var v: Village = sim.villages[t]
 		var c: Clan = sim.clans[v.clan]
-		return mt + "Gebiet[/color]  [color=#%s]■[/color] %s (%s)\n" % [c.col.to_html(false), c.name, v.name] + mt + "Einfluss[/color]  " + text(sim, c) + "\n"
+		return mt + "Territory[/color]  [color=#%s]■[/color] %s (%s)\n" % [c.col.to_html(false), c.name, v.name] + mt + "Influence[/color]  " + text(sim, c) + "\n"
 	var ic: int = sim.world.infl[i] if i < sim.world.infl.size() else -1
 	if ic >= 0 and ic < sim.clans.size():
 		var c2: Clan = sim.clans[ic]
-		return mt + "Gebiet[/color]  herrenlos, im Einflussbereich von [color=#%s]■[/color] %s\n" % [c2.col.to_html(false), c2.name] + mt + "Einfluss[/color]  " + text(sim, c2) + "\n"
+		return mt + "Territory[/color]  unclaimed, within the sphere of influence of [color=#%s]■[/color] %s\n" % [c2.col.to_html(false), c2.name] + mt + "Influence[/color]  " + text(sim, c2) + "\n"
 	for d: Dictionary in doms:
 		if Vector2(float(d["x"]) - tx, float(d["y"]) - ty).length() < float(d["r"]):
-			return mt + "Gebiet[/color]  herrenlos\n" + mt + "Einfluss[/color]  [color=#%s]%s[/color]\n" % [(d["col"] as Color).lightened(0.2).to_html(false), ven_name(d)]
-	return mt + "Gebiet[/color]  herrenlos\n"
+			return mt + "Territory[/color]  unclaimed\n" + mt + "Influence[/color]  [color=#%s]%s[/color]\n" % [(d["col"] as Color).lightened(0.2).to_html(false), ven_name(d)]
+	return mt + "Territory[/color]  unclaimed\n"

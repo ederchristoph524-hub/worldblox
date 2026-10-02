@@ -68,7 +68,7 @@ func refresh() -> void:
 	_stamp = Influence.stamp
 	_lay = sim.world.layer
 	var lay: String = World.LAYER_NAME[sim.world.layer] if sim.world.layer < World.LAYER_NAME.size() else ""
-	head_btn.text = ("+  " if fold else "−  ") + "Mächte · " + lay
+	head_btn.text = ("+  " if fold else "−  ") + "Powers · " + lay
 	rows.visible = not fold
 	if fold:
 		return
@@ -80,11 +80,11 @@ func refresh() -> void:
 		var c: Clan = sim.clans[h]
 		var b: Dictionary = Influence.bloc.get(h, {})
 		var nm: int = int(b.get("n", 1))
-		var sub: String = "%d Dörfer" % int(b.get("v", 0)) if int(b.get("v", 0)) != 1 else "1 Dorf"
+		var sub: String = "%d villages" % int(b.get("v", 0)) if int(b.get("v", 0)) != 1 else "1 village"
 		if nm > 1:
-			sub += " · Bund aus %d" % nm
+			sub += " · alliance of %d" % nm
 		if not c.war.is_empty():
-			sub += " · Krieg"
+			sub += " · war"
 		var dm: Dictionary = Influence.dominion_of(c)
 		var ven: String = str(dm.get("name", ""))
 		var vcol: Color = dm.get("col", Color.WHITE)
@@ -102,7 +102,7 @@ func refresh() -> void:
 		rows.add_child(_row(it))
 	if items.is_empty():
 		var l: Label = Label.new()
-		l.text = "Noch keine Mächte"
+		l.text = "No powers yet"
 		l.add_theme_font_size_override("font_size", 10)
 		l.add_theme_color_override("font_color", Hud.C_MUTED)
 		rows.add_child(l)
@@ -119,7 +119,7 @@ func _row(it: Array) -> Button:
 	b.add_theme_stylebox_override("hover", hov)
 	b.add_theme_stylebox_override("pressed", hov)
 	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	b.tooltip_text = "Zur Hauptstadt"
+	b.tooltip_text = "Go to capital"
 	var id: int = int(it[0])
 	b.pressed.connect(func() -> void: pick.emit(id))
 	b.draw.connect(func() -> void: _draw_row(b, it))

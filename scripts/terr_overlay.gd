@@ -191,19 +191,19 @@ static func draw_labels(ci: CanvasItem, m: GuMain, o: Vector2, z: float, vs: Vec
 			var b: Dictionary = Influence.bloc.get(key, {})
 			var nmem: int = int(b.get("n", 1))
 			var bv: int = int(b.get("v", 0))
-			sub = ("%d Clans · " % nmem if nmem > 1 else "") + ("%d Dörfer" % bv if bv != 1 else "1 Dorf")
+			sub = ("%d clans · " % nmem if nmem > 1 else "") + ("%d villages" % bv if bv != 1 else "1 village")
 			var dm: Dictionary = Influence.dominion_of(c)
 			if not dm.is_empty():
 				sub += " · " + str(dm["name"])
 		else:
 			var L: Unit = c.lead
-			sub = ("R%d · " % L.rank if L != null and L.hp > 0.0 and L.rank > 0 else "") + ("%d Dörfer" % nvk if nvk != 1 else "1 Dorf")
+			sub = ("R%d · " % L.rank if L != null and L.hp > 0.0 and L.rank > 0 else "") + ("%d villages" % nvk if nvk != 1 else "1 village")
 			var ov: Clan = Influence.overlord(sim, c)
 			if ov != null:
-				sub = "folgt " + ov.name
+				sub = "follows " + ov.name
 				sub_col = ov.col.lightened(0.5)
 			if not c.war.is_empty():
-				sub += " · Krieg"
+				sub += " · war"
 		var fs: int = clampi(int(6.0 + sqrt(c3.z) * z * 0.11), 11, 19)
 		var fs2: int = maxi(9, fs - 4)
 		var gs: float = fs + 3.0  # Siegel-Kästchen
