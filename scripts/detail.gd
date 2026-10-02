@@ -342,7 +342,7 @@ void fragment() {
 	float dith = ((BAY[(ti.y & 3) * 4 + (ti.x & 3)] + 0.5) / 16.0 - 0.5) * mix(0.12, 0.4, clamp(fw * 1.4, 0.0, 1.0));
 
 	// verwackelte Abtastung: organische Grenzen zwischen den Kacheln
-	vec2 jt = vec2(vn(pc * 0.85, 1), vn(pc * 0.85 + 17.3, 2)) - 0.5;
+	vec2 jt = texture(nz, (pc * 0.85 + vec2(17.31, 9.73)) / 64.0).rg - 0.5;
 	vec2 pj = pc + jt * 0.8;
 	vec2 q = pj - 0.5;
 	ivec2 b = ivec2(floor(q));

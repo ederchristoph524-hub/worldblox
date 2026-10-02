@@ -2715,6 +2715,10 @@ func _dev_gfx(dir: String) -> void:
 			best = v
 	if best != null:
 		spots["dorf"] = Vector2(best.cx, best.cy + 3.0)
+	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with("--gfxat="):
+			var xy: PackedStringArray = a.substr(8).split(",")
+			spots["dorf"] = Vector2(float(xy[0]), float(xy[1]))
 	# Suche nach typischen Stellen über eine Bewertung in einem Fenster
 	var bestv: Dictionary = {}
 	for y: int in range(12, H - 12, 5):
@@ -2748,23 +2752,6 @@ func _dev_gfx(dir: String) -> void:
 				if not bestv.has(key) or int(sc[key]) > int(bestv[key]):
 					bestv[key] = sc[key]
 					spots[key] = Vector2(x, y)
-	# Straßen-Probe: ein gewundener Weg neben dem Dorf (nur Entwickler-Welt)
-	var nroad: int = 0
-	for i2: int in range(GuData.N):
-		if f[i2] == GuData.F_ROAD:
-			nroad += 1
-	if spots.has("dorf"):
-		var rp: Vector2 = spots["dorf"] + Vector2(-14, 10)
-		for k2: int in range(28):
-			var rx: int = int(rp.x) + k2
-			var ry: int = int(rp.y + sin(k2 * 0.3) * 3.0)
-			for ddy: int in range(2):
-				var ii: int = (ry + ddy) * W + rx
-				if sim.world.in_map(rx, ry + ddy) and GuData.buildable(t[ii]):
-					f[ii] = GuData.F_ROAD
-					sim.world.mark_area(rx, ry + ddy)
-		spots["strasse"] = rp + Vector2(14, 0)
-	printerr("GFX roads in world ", nroad)
 	printerr("GFX spots ", spots)
 	paused = true
 	for key: String in spots:
@@ -2781,6 +2768,22 @@ func _dev_gfx(dir: String) -> void:
 			await _wait(0.8)
 			await _shot(dir + "/%s_z%s.png" % [key, str(zz).replace(".0", "")])
 			printerr("GFX shot ", key, " ", zz)
+	# Straßen-Probe nach den Vergleichsbildern: ein gewundener Weg neben dem Dorf (nur Entwickler-Welt)
+	if spots.has("dorf"):
+		var rp: Vector2 = spots["dorf"] + Vector2(-14, 10)
+		for k2: int in range(28):
+			var rx: int = int(rp.x) + k2
+			var ry: int = int(rp.y + sin(k2 * 0.3) * 3.0)
+			for ddy: int in range(2):
+				var ii: int = (ry + ddy) * W + rx
+				if sim.world.in_map(rx, ry + ddy) and GuData.buildable(t[ii]):
+					f[ii] = GuData.F_ROAD
+					sim.world.mark_area(rx, ry + ddy)
+		z = 10.0
+		cam = rp + Vector2(14, 0)
+		_clamp_cam()
+		await _wait(0.8)
+		await _shot(dir + "/strasse_z10.png")
 	# Kameraschwenk: Bildzeiten messen (Simulation angehalten), einmal mit und einmal ohne Nahansicht
 	paused = true
 	for pass_i: int in range(2):
