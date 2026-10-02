@@ -1,7 +1,7 @@
 class_name PowerLegend
 extends PanelContainer
 ## Zuklappbare Legende der stärksten Mächte (oben links unter der Zeitalter-Zeile), sichtbar solange die
-## Gebietsanzeige an ist. Je Macht: Farbe mit Siegel, Name, Dörfer, Bund und beherrschender Ehrwürdiger.
+## Gebietsanzeige an ist. Standard: zugeklappt als kleine Zeile „▸ Powers“, damit die Karte frei bleibt. Je Macht: Farbe mit Siegel, Name, Dörfer, Bund und beherrschender Ehrwürdiger.
 ## Tippen auf einen Eintrag meldet pick(Clan-Id) – GuMain zoomt zur Hauptstadt.
 
 signal pick(clan_id: int)
@@ -11,7 +11,7 @@ const WIDTH: float = 200.0
 
 var hud: Hud
 var sim: Sim
-var collapsed: bool = false  ## in der Übersicht zugeklappt
+var collapsed: bool = true  ## in der Übersicht zugeklappt (Standard)
 var open_near: bool = false  ## nah herangezoomt aufgeklappt (sonst dort automatisch zu)
 var near: bool = false  ## Kamera ist nah (von GuMain gesetzt)
 var head_btn: Button
@@ -29,7 +29,7 @@ func _init(h: Hud) -> void:
 	st.content_margin_top = 2
 	st.content_margin_bottom = 3
 	add_theme_stylebox_override("panel", st)
-	custom_minimum_size = Vector2(WIDTH, 0)
+	custom_minimum_size = Vector2(0, 0)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	var v: VBoxContainer = VBoxContainer.new()
 	v.add_theme_constant_override("separation", 1)
@@ -46,7 +46,16 @@ func _init(h: Hud) -> void:
 	head_btn.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
 	head_btn.custom_minimum_size = Vector2(0, 20)
 	for k: String in ["normal", "hover", "pressed", "focus"]:
-		head_btn.add_theme_stylebox_override(k, StyleBoxEmpty.new())
+		var e: StyleBoxEmpty = StyleBoxEmpty.new()
+		e.content_margin_left = 13
+		e.content_margin_right = 4
+		head_btn.add_theme_stylebox_override(k, e)
+	head_btn.draw.connect(func() -> void:
+		# Dreieck: ▸ zu, ▾ offen
+		var cy: float = roundf(head_btn.size.y / 2.0)
+		var open: bool = rows.visible
+		var pts: PackedVector2Array = PackedVector2Array([Vector2(2, cy - 4), Vector2(10, cy - 4), Vector2(6, cy + 2)]) if open else PackedVector2Array([Vector2(3, cy - 5), Vector2(3, cy + 3), Vector2(8, cy - 1)])
+		head_btn.draw_colored_polygon(pts, Hud.C_YELLOW))
 	head_btn.pressed.connect(func() -> void:
 		if near:
 			open_near = not open_near
@@ -68,8 +77,11 @@ func refresh() -> void:
 	_stamp = Influence.stamp
 	_lay = sim.world.layer
 	var lay: String = World.LAYER_NAME[sim.world.layer] if sim.world.layer < World.LAYER_NAME.size() else ""
-	head_btn.text = ("+  " if fold else "−  ") + "Powers · " + lay
+	head_btn.text = "Powers" if fold else "Powers · " + lay
 	rows.visible = not fold
+	custom_minimum_size.x = 0.0 if fold else WIDTH
+	head_btn.queue_redraw()
+	reset_size()
 	if fold:
 		return
 	var sig: String = ""
