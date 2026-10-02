@@ -59,6 +59,9 @@ static func _make(id: String) -> Px:
 	var par: Px = _make_parity(id)
 	if par != null:
 		return par
+	var sb: Px = _make_sandbox(id)
+	if sb != null:
+		return sb
 	match id:
 		"t_deep":
 			return _tile(GuData.DEEP)
@@ -1205,6 +1208,156 @@ static func _make_parity(id: String) -> Px:
 			q.p(10, 10, 4, 4, "#3a2a10")
 			q.p(6, 5, 3, 2, "#fff6c0")
 			q.p(16, 16, 3, 2, "#a87010")
+		_:
+			return null
+	return q.outline()
+
+
+# ---------------- Sandkasten (Regionen, Welt-Aktionen) ----------------
+
+## Aufwärts- (dir = -1) oder Abwärtspfeil (dir = 1), Spitze bei (cx, tip).
+static func _arrow(q: Px, cx: int, tip: int, dir: int, shaft: int, col: Variant) -> void:
+	for k: int in range(4):
+		q.p(cx - k, tip - dir * k, k * 2 + 1, 1, col)
+	var y0: int = tip - dir * 4
+	if dir < 0:
+		q.p(cx - 1, y0, 3, shaft, col)
+	else:
+		q.p(cx - 1, y0 - shaft + 1, 3, shaft, col)
+
+
+## Gefaltete Karte in der Farbe der Region mit einem Zeichen.
+static func _region_icon(r: int) -> Px:
+	var q: Px = Px.new(24, 24)
+	var col: Color = World.REG_COL[r]
+	for k: int in range(3):
+		var x0: int = 3 + k * 6
+		var top: int = 4 if k % 2 == 0 else 6
+		for y: int in range(top, top + 15):
+			for x: int in range(x0, x0 + 6):
+				var n: float = GuData.hash2(x, y, r * 13 + 3)
+				var c: Color = col.lightened(0.12) if n < 0.3 else (col.darkened(0.1) if n > 0.8 else col)
+				if k == 1:
+					c = c.darkened(0.18)
+				q.p(x, y, 1, 1, c)
+		q.p(x0, top, 6, 1, col.lightened(0.35))
+	var lt: String = "#fffaf0"
+	var dk: String = "#2a2418"
+	match r:
+		0:
+			# Jurte der Steppenstämme
+			q.p(8, 12, 9, 5, "#8a5a30")
+			q.p(9, 10, 7, 2, "#a8743c")
+			q.p(11, 8, 3, 2, "#a8743c")
+			q.p(11, 13, 3, 4, dk)
+			q.p(8, 11, 9, 1, "#c84a3a")
+		1:
+			# Berge der Südgrenze
+			for y: int in range(7, 17):
+				var w: int = roundi((y - 6) * 0.75)
+				q.p(11 - w, y, w * 2 + 1, 1, "#2e6a2e")
+			q.p(10, 7, 3, 2, lt)
+			q.p(9, 9, 5, 1, lt)
+		2:
+			# Sonne über der Düne
+			q.d(14, 9, 3, "#fff2a0")
+			q.d(14, 9, 2, "#ffe060")
+			for x: int in range(4, 20):
+				var hh: int = roundi(2.0 + sin((x - 4) * 0.45) * 1.6)
+				q.p(x, 16 - hh, 1, hh + 2, "#c86a20")
+		3:
+			# Wellen des Ostmeers
+			for row: int in range(2):
+				for x: int in range(5, 19):
+					var yy: int = 9 + row * 5 + roundi(sin(x * 0.9) * 1.2)
+					q.p(x, yy, 1, 2, lt)
+		4:
+			# Pagode des Zentralkontinents
+			q.p(7, 8, 11, 2, "#ffd24a")
+			q.p(6, 9, 2, 1, "#ffd24a")
+			q.p(17, 9, 2, 1, "#ffd24a")
+			q.p(9, 10, 7, 3, "#c23a2e")
+			q.p(6, 13, 13, 2, "#ffd24a")
+			q.p(9, 15, 7, 3, "#c23a2e")
+			q.p(11, 15, 3, 3, dk)
+			q.p(12, 6, 1, 2, "#ffd24a")
+	return q.outline()
+
+
+static func _make_sandbox(id: String) -> Px:
+	if id.begins_with("rg_") and id.substr(3).is_valid_int():
+		return _region_icon(int(id.substr(3)))
+	var q: Px = Px.new(24, 24)
+	match id:
+		"t_unwall":
+			q.p(8, 5, 8, 17, "#b8a6ee")
+			q.p(8, 5, 3, 17, "#e0d6ff")
+			q.p(14, 5, 2, 17, "#8a76c8")
+			q.p(8, 3, 3, 2, "#b8a6ee")
+			q.p(13, 2, 3, 3, "#b8a6ee")
+			q.p(11, 9, 2, 1, "#5a4a90")
+			q.p(10, 10, 2, 2, "#5a4a90")
+			q.p(11, 12, 2, 3, "#5a4a90")
+			q.p(4, 20, 3, 2, "#9a88d0")
+			q.p(17, 19, 3, 3, "#9a88d0")
+			q.p(6, 21, 12, 1, "#7a68b0")
+			for k: int in range(15):
+				q.p(4 + k, 4 + k, 2, 2, "#e4503a")
+				q.p(18 - k, 4 + k, 2, 2, "#e4503a")
+		"w_wipe":
+			q.d(12, 12, 10, "#2f7ad8")
+			q.d(12, 12, 9, "#3a8ae0")
+			q.p(4, 7, 5, 4, "#5ab84a")
+			q.p(15, 15, 6, 4, "#5ab84a")
+			q.p(16, 5, 3, 3, "#5ab84a")
+			q.p(5, 16, 3, 2, "#5ab84a")
+			# Totenschädel
+			q.d(12, 10, 6, "#f4f0e0")
+			q.p(8, 14, 9, 3, "#f4f0e0")
+			q.p(9, 17, 7, 2, "#d8d0b8")
+			q.p(8, 9, 3, 3, "#1a1010")
+			q.p(14, 9, 3, 3, "#1a1010")
+			q.p(12, 13, 1, 2, "#1a1010")
+			q.p(10, 17, 1, 2, "#6a6050")
+			q.p(12, 17, 1, 2, "#6a6050")
+			q.p(14, 17, 1, 2, "#6a6050")
+			q.p(9, 5, 3, 1, "#ffffff")
+		"w_flat":
+			for y: int in range(3, 13):
+				var w: int = roundi((y - 2) * 0.8)
+				for x: int in range(12 - w, 12 + w + 1):
+					if x == 12 - w or x == 12 + w:
+						q.p(x, y, 1, 1, "#c8ccd0" if y % 3 != 0 else "#8a8e94")
+					elif y < 6:
+						q.p(x, y, 1, 1, "#eef2f4")
+					elif (x + y) % 3 == 0:
+						q.p(x, y, 1, 1, Color(0.6, 0.62, 0.66, 0.6))
+			_arrow(q, 12, 13, 1, 6, "#ffffff")
+			q.p(2, 15, 20, 3, "#6aaa44")
+			q.p(2, 15, 20, 1, "#8ad05a")
+			q.p(2, 18, 20, 4, "#8a6a42")
+			q.p(2, 21, 20, 1, "#6a4a2a")
+		"w_flood":
+			q.p(3, 9, 7, 7, "#6aaa44")
+			q.p(4, 8, 5, 1, "#8ad05a")
+			q.p(5, 4, 3, 5, "#2e6a2e")
+			q.p(6, 3, 1, 1, "#2e6a2e")
+			q.p(2, 13, 20, 9, "#2f7ad8")
+			q.p(2, 18, 20, 4, "#2560b8")
+			for x: int in range(2, 22):
+				var yy: int = 12 + roundi(sin(x * 0.8) * 1.0)
+				q.p(x, yy, 1, 2, "#9ad8f8")
+				if (x % 5) == 1:
+					q.p(x, yy - 1, 2, 1, "#ffffff")
+			_arrow(q, 16, 2, -1, 6, "#9ad8f8")
+		"w_raise":
+			q.p(2, 16, 20, 6, "#2f7ad8")
+			q.p(2, 16, 20, 1, "#9ad8f8")
+			for y: int in range(7, 17):
+				var w2: int = roundi((y - 6) * 0.9)
+				q.p(9 - w2, y, w2 * 2 + 1, 1, "#6aaa44" if y < 14 else "#e8d890")
+			q.p(8, 7, 3, 2, "#8ad05a")
+			_arrow(q, 18, 2, -1, 8, Y)
 		_:
 			return null
 	return q.outline()

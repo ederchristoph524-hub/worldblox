@@ -115,7 +115,7 @@ static func _build_tools() -> Array:
 	# --- Reiter 0: Orte ---
 	for pt: String in Lore.PLACE_ORDER:
 		var D: Dictionary = Lore.PLACE[pt]
-		L.append({"id": "pl_" + pt, "tab": 0, "g": 3, "n": D["n"], "d": D["d"], "m": "tap", "pl": pt})
+		L.append({"id": "pl_" + pt, "tab": 0, "g": 5, "n": D["n"], "d": D["d"], "m": "tap", "pl": pt})
 	# --- Reiter 1: Organisationen ---
 	for o: Dictionary in Lore.ORGS:
 		var rg: int = int(o["reg"])
@@ -128,6 +128,7 @@ static func _build_tools() -> Array:
 	L.append({"id": "ev_war", "tab": 4, "g": 2, "n": "Rechtschaffen gegen Dämonisch", "d": "Alle rechtschaffenen Clans erklären allen dämonischen den Krieg.", "m": "act"})
 	L.append({"id": "ev_frag", "tab": 4, "g": 2, "n": "Himmelsfragment", "d": "Ein Trümmerstück eines zerstörten Himmels stürzt herab und bleibt als Schatz liegen.", "m": "tap"})
 	_parity_tools(L)
+	_sandbox_tools(L)
 	for k: int in range(L.size()):
 		L[k]["o"] = k
 	L.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
@@ -196,6 +197,19 @@ static func _parity_tools(L: Array) -> void:
 		{"id": "void", "tab": 4, "g": 3, "n": "Leere-Mordzug", "d": "Raum-Pfad: Alles im Umkreis wird vom Raum verschlungen – zurück bleibt nur Meer.", "m": "tap"},
 		{"id": "goo", "tab": 4, "g": 3, "n": "Verzehrender Gu-Schwarm", "d": "Ein Schwarm gefräßiger Gu breitet sich aus und frisst Land, Wälder, Gebäude und Wesen, bis er sich erschöpft.", "m": "tap"},
 		{"id": "coin", "tab": 4, "g": 3, "n": "Schicksals-Münze", "d": "Das Schicksals-Gu wirft eine Münze: Die Hälfte aller Lebewesen stirbt. Nur wer das Schicksal überlistet (Frühling-Herbst-Zikade), kehrt zurück.", "m": "act"},
+	])
+
+
+## Sandkasten-Werkzeuge: Regionen malen, Regionswände einreißen, Welt-Aktionen.
+static func _sandbox_tools(L: Array) -> void:
+	for r: int in range(GuData.REGN.size()):
+		L.append({"id": "rg_%d" % r, "tab": 0, "g": 3, "n": "Region: " + GuData.REGN[r], "d": "Malt das Land unter dem Pinsel zur Region %s – Völker, Bestien, wilde Gu, Gräser und Bäume richten sich danach. Beim Malen zeigt die Karte die Regionen." % GuData.REGN[r], "m": "paint", "reg": r})
+	L.append_array([
+		{"id": "t_unwall", "tab": 0, "g": 3, "n": "Regionswand entfernen", "d": "Reißt Regionswände ein: Dort entsteht Land der Region – oder Wasser, wenn ringsum Meer ist.", "m": "paint"},
+		{"id": "w_flat", "tab": 0, "g": 4, "n": "Welt einebnen", "d": "Alles Land wird flaches Grasland: Gebirge, Hügel, Wüsten, Schnee und Lava verschwinden. Wasser und Regionswände bleiben.", "m": "act"},
+		{"id": "w_flood", "tab": 0, "g": 4, "n": "Welt fluten", "d": "Der Meeresspiegel steigt um eine Stufe: Küsten versinken, Gebirge schrumpfen. Mehrmals tippen für eine Sintflut.", "m": "act"},
+		{"id": "w_raise", "tab": 0, "g": 4, "n": "Kontinente heben", "d": "Das Land hebt sich um eine Stufe: Flachwasser wird zu Land, hohe Ebenen zu Hügeln, Hügel zu Gebirgen.", "m": "act"},
+		{"id": "w_wipe", "tab": 4, "g": 4, "n": "Alles Leben auslöschen", "d": "Alle Wesen, Dörfer, Clans und Gebäude verschwinden – das Land bleibt. Für einen Neuanfang auf derselben Karte.", "m": "act"},
 	])
 
 
@@ -282,7 +296,7 @@ func apply_paint(t: Dictionary, wx: float, wy: float, stroke: Dictionary) -> voi
 	else:
 		_seg_from = Vector2(-1, -1)
 	stroke["lp"] = Vector2(tx, ty)
-	if paint_parity(t, wx, wy, stroke):
+	if paint_parity(t, wx, wy, stroke) or paint_sandbox(t, tx, ty):
 		return
 	var w: World = sim.world
 	if t.has("tt"):
@@ -959,6 +973,68 @@ func paint_parity(t: Dictionary, wx: float, wy: float, stroke: Dictionary) -> bo
 		_:
 			return false
 	return true
+
+
+## Pinsel-Werkzeuge des Sandkastens (Regionen, Regionswand entfernen). true = behandelt.
+func paint_sandbox(t: Dictionary, tx: int, ty: int) -> bool:
+	var w: World = sim.world
+	var bb: Array[int] = [W, H, -1, -1]
+	var grow: Callable = func(x: int, y: int) -> void:
+		bb[0] = mini(bb[0], x)
+		bb[1] = mini(bb[1], y)
+		bb[2] = maxi(bb[2], x)
+		bb[3] = maxi(bb[3], y)
+	if t.has("reg"):
+		var r: int = int(t["reg"])
+		_brush_tiles(tx, ty, func(i: int, x: int, y: int) -> void:
+			if sim.set_region(i, r):
+				grow.call(x, y))
+		if bb[2] >= 0:
+			sim.sync_village_regions()
+			w.region_layer_rect(bb[0] - 2, bb[1] - 2, bb[2] + 3, bb[3] + 3)
+		return true
+	if t["id"] == "t_unwall":
+		_brush_tiles(tx, ty, func(i: int, x: int, y: int) -> void:
+			if w.tile[i] != GuData.WALL:
+				return
+			var wet: int = 0
+			var dry: int = 0
+			for dy: int in range(-2, 3):
+				for dx: int in range(-2, 3):
+					if w.in_map(x + dx, y + dy):
+						var tn: int = w.tile[(y + dy) * W + x + dx]
+						if GuData.is_water(tn):
+							wet += 1
+						elif tn != GuData.WALL:
+							dry += 1
+			sim.set_tile(i, GuData.SHAL if wet > dry else sim.land_for(i))
+			grow.call(x, y))
+		if bb[2] >= 0:
+			w.region_layer_rect(bb[0] - 2, bb[1] - 2, bb[2] + 3, bb[3] + 3)
+		return true
+	return false
+
+
+## Welt-Aktionen des Sandkastens (Sofort-Knöpfe). Gibt einen Hinweistext zurück.
+func world_act(id: String) -> String:
+	match id:
+		"w_wipe":
+			if not held.is_empty():
+				held.clear()
+				held_off.clear()
+			pair_sel = null
+			var n: int = sim.wipe_life()
+			return "%d Wesen sind verschwunden. Setze im Reiter „Kreaturen“ neues Leben aus." % n
+		"w_flat":
+			sim.flatten_world()
+			return "Die Welt ist flach."
+		"w_flood":
+			var n2: int = sim.shift_sea(-1)
+			return "Das Meer steigt – %d Kacheln verändern sich. Noch einmal tippen für mehr." % n2
+		"w_raise":
+			var n3: int = sim.shift_sea(1)
+			return "Das Land hebt sich – %d Kacheln verändern sich." % n3
+	return ""
 
 
 ## Sonnenstrahl auf einer Kachel: Wasser verdampft, Eis schmilzt, Fels wird zu Lava, Land brennt.

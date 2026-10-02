@@ -29,13 +29,15 @@ var seed_val: int = 1
 var next_id: int = 1
 var log_entries: Array[Dictionary] = []
 var laws: Dictionary = {"war": true, "tide": true, "will": true, "trib": true, "immortal": true, "walls": true, "growth": true, "fire": true,
-	"hunger": true, "age": true, "rebel": true, "diplo": true, "expand": true, "animals": true, "grass": true, "trees": true, "disaster": true}
+	"hunger": true, "age": true, "rebel": true, "diplo": true, "expand": true, "animals": true, "grass": true, "trees": true, "disaster": true, "ages": true, "cult": true}
 ## Weitere Weltgesetze (WorldBox-Parität) für das Gesetze-Fenster: [Schlüssel, Name, Beschreibung].
 const LAWS_EXTRA: Array = [["hunger", "Hunger", "Dörfer ohne Nahrung verlieren Bewohner."], ["age", "Alter", "Sterbliche und Tiere sterben an Altersschwäche."],
 	["rebel", "Aufstände", "Dörfer mit geringer Loyalität sagen sich von ihrem Clan los."], ["diplo", "Diplomatie", "Clans planen und schließen Bündnisse."],
 	["expand", "Ausbreitung", "Volle Dörfer schicken Siedler aus – auch per Boot zu Inseln."], ["animals", "Tier-Spawn", "Wildtiere, wilde Gu, Bestien und Bestienkönige entstehen von selbst."],
 	["grass", "Grasausbreitung", "Erde und Asche ergrünen wieder."], ["trees", "Baumwachstum", "Wälder breiten sich aus."],
-	["disaster", "Katastrophen", "Von Zeit zu Zeit Erdbeben, Erdfeuer-Vulkane, Wirbel, Giftregen, Sternenfall, Seuchen und Dünenwanderung."]]
+	["disaster", "Katastrophen", "Von Zeit zu Zeit Erdbeben, Erdfeuer-Vulkane, Wirbel, Giftregen, Sternenfall, Seuchen und Dünenwanderung."],
+	["ages", "Zeitalter", "Die Welt wechselt alle %d Jahre das Zeitalter. Aus: das jetzige Zeitalter bleibt." % GuData.AGE_YEARS],
+	["cult", "Kultivierung", "Gu-Meister kultivieren und steigen von selbst auf. Aus: nur Gottkräfte lassen sie wachsen."]]
 var weather: Dictionary = {}           # {type, t}
 var shake: float = 0.0
 var terr_dirty: bool = true
@@ -54,6 +56,7 @@ var goo_left: int = 0                  # Kacheln, die der Schwarm noch fressen d
 var mines: PackedInt32Array = PackedInt32Array()   # Erdminen-Gu (Kachel-Indizes)
 var seeds: Array[Dictionary] = []      # Biom-Samen {x, y, tt, r, n}
 var possessed: Unit = null             # Seelenbesitz
+var age_off: int = 0                   # Jahre, die das Zeitalter angehalten war (Gesetz „Zeitalter“ aus) bzw. per Hand verschoben wurde
 var _nat_acc: float = 0.0
 
 # Wirkungen Unsterblicher Gu (Unit.igf)
@@ -88,8 +91,13 @@ func year() -> int:
 	return int(sim_time / 12.0) + 1
 
 
+## Jahr für die Zeitalter-Rechnung (ohne die angehaltenen bzw. verschobenen Jahre).
+func age_year() -> int:
+	return maxi(1, year() - age_off)
+
+
 func age_index() -> int:
-	return int((year() - 1) / GuData.AGE_YEARS) % GuData.AGES.size()
+	return int((age_year() - 1) / GuData.AGE_YEARS) % GuData.AGES.size()
 
 
 func age_data() -> Dictionary:
@@ -97,7 +105,7 @@ func age_data() -> Dictionary:
 
 
 func years_to_next_age() -> int:
-	return GuData.AGE_YEARS - ((year() - 1) % GuData.AGE_YEARS)
+	return GuData.AGE_YEARS - ((age_year() - 1) % GuData.AGE_YEARS)
 
 
 func uage(u: Unit) -> float:
@@ -915,7 +923,7 @@ func gain_gu(u: Unit) -> String:
 
 
 func cultivate(u: Unit) -> void:
-	if u.rank >= 9:
+	if u.rank >= 9 or not laws["cult"]:
 		return
 	var v: Village = villages[u.vil] if u.vil >= 0 else null
 	var am: float = APTM.get(u.apt, 1.0)
@@ -1667,8 +1675,10 @@ func count_sp(s: String) -> int:
 
 
 func yearly() -> void:
-	var y: int = year()
-	if (y - 1) % GuData.AGE_YEARS == 0 and y > 1:
+	if not laws["ages"]:
+		age_off += 1
+	var y: int = age_year()
+	if laws["ages"] and (y - 1) % GuData.AGE_YEARS == 0 and y > 1:
 		log_event("Das " + str(age_data()["n"]) + " beginnt.", "violet", true)
 	if laws["tide"] and randf() < 0.06:
 		var vs: Array[Village] = []
@@ -2532,6 +2542,7 @@ func reset_state() -> void:
 	mines = PackedInt32Array()
 	seeds.clear()
 	possessed = null
+	age_off = 0
 	next_pid = 1
 	sim_time = 0.0
 	last_month = 0
@@ -2697,7 +2708,7 @@ func serialize() -> Dictionary:
 	var lv: Array = []
 	for i: int in lava.keys():
 		lv.append([i, snappedf(float(lava[i]), 0.01)])
-	return {"v": 3, "lava": lv, "mines": Array(mines), "layer": world.layer, "seed": seed_val, "sim_time": sim_time, "next_id": next_id, "map_mode": world.map_mode, "places": ps, "next_pid": next_pid,
+	return {"v": 4, "age_off": age_off, "lava": lv, "mines": Array(mines), "layer": world.layer, "seed": seed_val, "sim_time": sim_time, "next_id": next_id, "map_mode": world.map_mode, "places": ps, "next_pid": next_pid,
 		"tile": Marshalls.raw_to_base64(world.tile), "feat": Marshalls.raw_to_base64(world.feat), "region": Marshalls.raw_to_base64(world.region),
 		"hgt": Marshalls.raw_to_base64(hb), "ts": Marshalls.raw_to_base64(world.temp_snow),
 		"units": us, "villages": vs, "clans": cs, "buildings": bs, "laws": laws, "log": log_entries.slice(0, 120), "fire": fr}
@@ -2705,7 +2716,7 @@ func serialize() -> Dictionary:
 
 func deserialize(d: Dictionary) -> bool:
 	var ver: int = int(d.get("v", 0))
-	if ver < 1 or ver > 3:
+	if ver < 1 or ver > 4:
 		return false
 	reset_state()
 	world.alloc()
@@ -2748,6 +2759,7 @@ func deserialize(d: Dictionary) -> bool:
 	for e: Variant in d.get("mines", []):
 		mines.append(int(e))
 	world.layer = int(d.get("layer", 0))
+	age_off = int(d.get("age_off", 0))
 	for i: int in range(N):
 		if world.tile[i] == GuData.LAVA and not lava.has(i):
 			lava[i] = 0.3
@@ -4521,3 +4533,254 @@ func dune_migration() -> void:
 				if GuData.is_tree(world.feat[i]) and randf() < 0.6:
 					world.feat[i] = GuData.F_SHRUB
 	log_event("Katastrophe: Die Unpassierbaren Dünen wandern und begraben eine Oase der Westwüste.", "war", true)
+
+
+# =====================================================================
+# Sandkasten: Regionen malen, Welt-Aktionen, Zeitalter frei wählen
+# =====================================================================
+
+## Meeresspiegel für „Welt fluten“ / „Kontinente heben“ (wie bei der Generierung: Höhe < 0,375 = Meer).
+const SEA_H: float = 0.375
+## Höhenänderung je Knopfdruck.
+const SEA_STEP: float = 0.045
+
+
+## Setzt die Region einer Kachel (Gras- und Baumfarben hängen davon ab). true = geändert.
+func set_region(i: int, r: int) -> bool:
+	if world.region[i] == r:
+		return false
+	world.region[i] = r
+	if world.feat[i] != 0:
+		world.mark_area(i % W, i / W)
+	else:
+		world.mark_dirty(i % W, i / W)
+	return true
+
+
+## Nach dem Umfärben von Regionen: Dörfer (und Clans über ihre Hauptstadt) gehören zur Region ihres Mittelpunkts.
+func sync_village_regions() -> void:
+	for v: Village in villages:
+		if not v.alive:
+			continue
+		var r: int = region_at(v.cx, v.cy)
+		if r == v.reg:
+			continue
+		v.reg = r
+		var c: Clan = clans[v.clan]
+		if c.cap == v.id:
+			c.region = r
+	terr_dirty = true
+
+
+## Setzt das aktuelle Zeitalter (Anfang des Zeitalters k).
+func set_age(k: int) -> void:
+	k = clampi(k, 0, GuData.AGES.size() - 1)
+	age_off = year() - 1 - k * GuData.AGE_YEARS
+	log_event("Der Himmel wendet das Zeitalter: Das " + str(age_data()["n"]) + " beginnt.", "violet", true)
+
+
+## Geländewechsel ohne Höhenänderung (für die Welt-Aktionen; die Bilder werden danach ganz neu gezeichnet).
+func _sb_set(i: int, t: int) -> void:
+	if world.tile[i] == t:
+		return
+	world.tile[i] = t
+	world.temp_snow[i] = 0
+	var f: int = world.feat[i]
+	if f != 0 and (GuData.is_water(t) or (t == GuData.MOUNT and GuData.is_tree(f))):
+		world.feat[i] = 0
+	if t != GuData.LAVA:
+		lava.erase(i)
+	_after_set_tile(i)
+
+
+## Nach einer Welt-Aktion: Wasser neu einteilen, alles neu zeichnen, Ertrinkende sterben.
+func _sb_finish() -> void:
+	world.refresh_water()
+	world.render_all()
+	var mi: int = mines.size() - 1
+	while mi >= 0:
+		if not GuData.is_land(world.tile[mines[mi]]):
+			mines.remove_at(mi)
+		mi -= 1
+	for u: Unit in units:
+		if u.hp <= 0.0 or u.held:
+			continue
+		var tx: int = clampi(int(u.x), 0, W - 1)
+		var ty: int = clampi(int(u.y), 0, H - 1)
+		if not passable(u, tx, ty) and world.tile[ty * W + tx] != GuData.WALL:
+			u.dreason = "in den Fluten ertrunken" if GuData.is_water(world.tile[ty * W + tx]) else "auf dem Trockenen gestrandet"
+			u.hp = 0.0
+	for v: Village in villages:
+		if v.alive:
+			recount(v)
+	terr_dirty = true
+
+
+## „Alles Leben auslöschen“: alle Wesen, Dörfer, Clans und Gebäude verschwinden; Land, Orte und Naturgewalten bleiben.
+func wipe_life() -> int:
+	var n: int = 0
+	for u: Unit in units:
+		if u.hp > 0.0:
+			n += 1
+			if n < 300:
+				spark(u.x, u.y - 1.0, Color.WHITE, 2, 3.0)
+		u.hp = 0.0
+		u.held = false
+		u.tgt = null
+		u.aggro = null
+		u.dreason = "göttliche Auslöschung"
+		unit_died.emit(u)
+	units.clear()
+	possessed = null
+	for v: Village in villages:
+		v.alive = false
+		v.lead = null
+	for c: Clan in clans:
+		c.alive = false
+		c.lead = null
+		c.war.clear()
+		c.ally.clear()
+		c.plans.clear()
+	villages.clear()
+	clans.clear()
+	buildings.clear()
+	world.bmap.fill(-1)
+	world.terr.fill(-1)
+	projs.clear()
+	sched.clear()
+	sp_count.clear()
+	wild_igu = 0
+	for p: Place in places:
+		p.owner = -1
+	rebuild_grid()
+	terr_dirty = true
+	flash(0.5)
+	shake = 0.5
+	log_event("Der Himmel löscht alles Leben aus: %d Wesen, alle Dörfer und Clans verschwinden. Die Welt ist leer." % n, "red", true)
+	return n
+
+
+## „Welt einebnen“: alles Land wird flaches Grasland (Nordebenen: Steppe); Wasser und Regionswände bleiben.
+func flatten_world() -> int:
+	var n: int = 0
+	for i: int in range(N):
+		var t: int = world.tile[i]
+		if t == GuData.WALL or GuData.is_water(t):
+			continue
+		if t == GuData.SNOW and world.temp_snow[i] > 0:
+			world.tile[i] = world.temp_snow[i] - 1
+			world.temp_snow[i] = 0
+			continue
+		var nt: int = GuData.STEP if world.region[i] == 0 else GuData.GRASS
+		if world.feat[i] == GuData.F_ROCK:
+			world.feat[i] = 0
+		# flach, aber Küsten bleiben etwas tiefer als das Landesinnere (damit „Welt fluten“ danach schrittweise wirkt)
+		world.hgt[i] = clampf(lerpf(world.hgt[i], 0.5, 0.6), 0.42, 0.62)
+		if t != nt:
+			_sb_set(i, nt)
+			n += 1
+	_sb_finish()
+	log_event("Die Welt wird eingeebnet: Gebirge, Hügel, Wüsten und Schnee weichen flachem Land.", "gold", true)
+	return n
+
+
+## Abstand jeder Kachel zur anderen Seite der Küste (Land: zum Wasser, Wasser: zum Land), höchstens 12.
+func _coast_dist() -> PackedByteArray:
+	var d: PackedByteArray = PackedByteArray()
+	d.resize(N)
+	d.fill(255)
+	var q: PackedInt32Array = PackedInt32Array()
+	q.resize(N)
+	var qt: int = 0
+	var wet: PackedByteArray = PackedByteArray()
+	wet.resize(N)
+	for i: int in range(N):
+		var t: int = world.tile[i]
+		wet[i] = 1 if GuData.is_water(t) or (t == GuData.SNOW and world.temp_snow[i] > 0) else 0
+	for i: int in range(N):
+		var x: int = i % W
+		var y: int = i / W
+		var c: int = wet[i]
+		if (x > 0 and wet[i - 1] != c) or (x < W - 1 and wet[i + 1] != c) or (y > 0 and wet[i - W] != c) or (y < H - 1 and wet[i + W] != c):
+			d[i] = 1
+			q[qt] = i
+			qt += 1
+	var qh: int = 0
+	while qh < qt:
+		var i2: int = q[qh]
+		qh += 1
+		var dd: int = d[i2]
+		if dd >= 12:
+			continue
+		var x2: int = i2 % W
+		var y2: int = i2 / W
+		for j: int in [i2 - 1 if x2 > 0 else -1, i2 + 1 if x2 < W - 1 else -1, i2 - W if y2 > 0 else -1, i2 + W if y2 < H - 1 else -1]:
+			if j >= 0 and d[j] == 255 and wet[j] == wet[i2]:
+				d[j] = dd + 1
+				q[qt] = j
+				qt += 1
+	return d
+
+
+## „Welt fluten“ (dir = -1) bzw. „Kontinente heben“ (dir = 1): Das Meer frisst einige Kacheln Küste bzw. gibt sie frei,
+## alle Höhen sinken bzw. steigen um eine Stufe; Gebirge werden zu Hügeln bzw. hohe Ebenen zu Hügeln und Hügel zu Gebirgen.
+func shift_sea(dir: int) -> int:
+	var n: int = 0
+	var dh: float = SEA_STEP * dir
+	var cd: PackedByteArray = _coast_dist()
+	var salt: int = randi() % 1000
+	for i: int in range(N):
+		var t: int = world.tile[i]
+		if t == GuData.WALL:
+			continue
+		var h: float = clampf(world.hgt[i] + dh, 0.0, 1.0)
+		world.hgt[i] = h
+		if t == GuData.SNOW and world.temp_snow[i] > 0:
+			continue
+		var band: bool = cd[i] <= 2 + int(GuData.hash2(i % W, i / W, salt) * 3.0)
+		var nt: int = t
+		if GuData.is_water(t):
+			if dir > 0 and (band or h >= SEA_H):
+				nt = GuData.SAND
+				world.hgt[i] = maxf(h, SEA_H + 0.03)
+		elif dir < 0:
+			if band or h < SEA_H:
+				nt = GuData.HILL if t == GuData.MOUNT else (GuData.SAND if t == GuData.HILL else GuData.SHAL)
+				if nt == GuData.SHAL:
+					world.hgt[i] = minf(h, SEA_H - 0.03)
+			elif t == GuData.MOUNT and h < 0.74:
+				nt = GuData.HILL
+			elif t == GuData.HILL and h < 0.56:
+				nt = land_for(i)
+		else:
+			if t == GuData.HILL and h >= 0.9:
+				nt = GuData.MOUNT
+			elif (t == GuData.GRASS or t == GuData.STEP or t == GuData.DES or t == GuData.SOIL) and h >= 0.8:
+				nt = GuData.HILL
+		if nt != t:
+			_sb_set(i, nt)
+			n += 1
+	# Küsten neu: Land am Wasser wird Strand, Strand ohne Wasser in der Nähe wird wieder Land
+	for i2: int in range(N):
+		var t2: int = world.tile[i2]
+		if not GuData.is_land(t2) or t2 == GuData.WALL:
+			continue
+		var x: int = i2 % W
+		var y: int = i2 / W
+		var coast: bool = (x > 0 and GuData.is_water(world.tile[i2 - 1])) or (x < W - 1 and GuData.is_water(world.tile[i2 + 1])) or (y > 0 and GuData.is_water(world.tile[i2 - W])) or (y < H - 1 and GuData.is_water(world.tile[i2 + W]))
+		if coast and (t2 == GuData.GRASS or t2 == GuData.STEP or t2 == GuData.SOIL or t2 == GuData.ASH):
+			_sb_set(i2, GuData.SAND)
+		elif not coast and t2 == GuData.SAND and dir > 0:
+			var near: bool = false
+			for dy: int in range(-2, 3):
+				for dx: int in range(-2, 3):
+					if world.in_map(x + dx, y + dy) and GuData.is_water(world.tile[(y + dy) * W + x + dx]):
+						near = true
+			if not near:
+				_sb_set(i2, land_for(i2))
+	_sb_finish()
+	if dir < 0:
+		log_event("Die Meere steigen und verschlingen die Küsten (%d Kacheln)." % n, "war", true)
+	else:
+		log_event("Die Kontinente heben sich aus dem Meer: %d Kacheln verändern sich." % n, "jade", true)
+	return n
