@@ -57,6 +57,7 @@ var mines: PackedInt32Array = PackedInt32Array()   # Erdminen-Gu (Kachel-Indizes
 var seeds: Array[Dictionary] = []      # Biom-Samen {x, y, tt, r, n}
 var possessed: Unit = null             # Seelenbesitz
 var age_off: int = 0                   # Jahre, die das Zeitalter angehalten war (Gesetz „Zeitalter“ aus) bzw. per Hand verschoben wurde
+var ven: Venerables                    # Rang-9-Ehrwürdige: Pfad-Blüte, Herrschaft, Blutlinien, Agenden, Schicksals-Gu (v5)
 var _nat_acc: float = 0.0
 
 # Wirkungen Unsterblicher Gu (Unit.igf)
@@ -72,6 +73,7 @@ const F_STEAL: int = 256
 const F_STONES: int = 512
 const F_REFINE: int = 1024
 const F_DREAM: int = 2048
+const F_FATE: int = 4096
 var _grid: Array = []
 var _fire_acc: float = 0.0
 var _sand: bool = false
@@ -80,6 +82,7 @@ const MOVE_OFFS: PackedFloat32Array = [0.0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9]
 
 func _init() -> void:
 	world = World.new()
+	ven = Venerables.new(self)
 	_grid.resize(GW * GH)
 	for k: int in range(GW * GH):
 		_grid[k] = []
@@ -294,6 +297,8 @@ func set_stats(u: Unit, full: bool) -> void:
 	u.aoe = GuData.AOE[u.rank]
 	u.hp = u.mhp if full else u.mhp * ratio
 	u.speed = GuData.RACE_SP[u.race] * (1.6 if u.rank >= 6 else 1.0 + u.rank * 0.04) * u.ig_sp * (1.1 if u.bless > 0 else (0.85 if u.bless < 0 else 1.0)) * (0.75 if u.undead else 1.0)
+	if u.rank >= 9:
+		u.speed *= 1.8   # Ehrwürdige durchqueren die Welt in wenigen Jahren
 	if u.rank >= 6 or GuData.RACE_FLY[u.race]:
 		u.fly = true
 
@@ -357,6 +362,21 @@ func apply_igu(u: Unit) -> void:
 				u.igf |= F_REFINE
 			"life":
 				u.ig_hp *= 1.1
+			"fate":
+				u.ig_cult *= 1.3
+				u.igf |= F_FATE
+			"tower":
+				u.ig_rng *= 1.5
+				u.ig_hp *= 1.4
+				u.ig_atk *= 1.2
+			"pool":
+				u.ig_hp *= 1.3
+				u.igf |= F_HEAL | F_REFINE
+			"chess":
+				u.ig_cult *= 1.6
+				u.ig_atk *= 1.2
+			"eternal":
+				u.ig_hp *= 1.1
 			_:
 				u.ig_atk *= 1.15
 				u.ig_hp *= 1.15
@@ -380,11 +400,24 @@ func give_igu(u: Unit, id: String) -> void:
 			return
 		"life":
 			u.life += 400.0
+		"eternal":
+			u.life = maxf(u.life, uage(u) + 100000.0)
+		"destiny":
+			if u.rank == 0:
+				awaken(u, true)
+			var top: int = mini(8, u.rank + 3)
+			for r: int in range(u.rank + 1, top + 1):
+				ascend(u, r)
+			u.luck = 1.0
+			u.life = maxf(u.life, uage(u) + GuData.LIFEB[u.rank])
+			log_event(u.pname() + " empfängt das Bestimmungs-Gu – sein Schicksal wird neu geschrieben: " + rank_title(u.rank) + ".", "gold", true)
+			pillar(u.x, u.y, GuData.PATH_COL[28], 1.2)
+			return
 	if u.igu.has(id):
 		return
 	u.igu.append(id)
 	if u.igu.size() > 6:
-		u.igu.remove_at(0)
+		u.igu.remove_at(1 if u.igu[0] == "fate_gu" else 0)
 	apply_igu(u)
 	set_stats(u, false)
 
@@ -893,6 +926,7 @@ func awaken(u: Unit, force: bool = false) -> void:
 	var r: int = villages[u.vil].reg if u.vil >= 0 else region_at(u.x, u.y)
 	var rp: Array = GuData.RACE_PATHS[u.race]
 	u.path = int(rp.pick_random()) if (not rp.is_empty() and randf() < 0.5) else int(GuData.REGPATH[r].pick_random())
+	u.path = ven.pick_path(u.path, u.x, u.y)   # Pfad-Blüte der Ehrwürdigen
 	u.align = 1 if randf() < 0.3 else 0
 	if u.clan >= 0 and clans[u.clan].align == 1 and randf() < 0.6:
 		u.align = 1
@@ -944,6 +978,7 @@ func cultivate(u: Unit) -> void:
 		rate *= u.pb
 	if u.ow:
 		rate *= 2.5
+	rate *= ven.cult_mul(u)
 	u.prog += rate * (0.7 + randf() * 0.6)
 	if u.prog >= 1.0:
 		u.prog = 0.0
@@ -988,12 +1023,13 @@ func rank_up(u: Unit) -> void:
 			if o.k == "p" and o.rank == 9 and o.hp > 0.0:
 				u.prog = 0.5
 				return
-		if randf() < 0.18 + (0.4 if u.luck > 0.0 else 0.0):
+		if randf() < (0.18 + (0.4 if u.luck > 0.0 else 0.0)) * ven.ascend_mul():
 			ascend(u, 9)
 			u.title = ("Dämonen-Ehrwürdiger" if u.align == 1 else "Unsterblicher Ehrwürdiger") + " des " + GuData.PATH_NAME[u.path] + "-Pfades"
 			log_event(nm + " wird zum Rang-9-" + u.title + "! Die Welt erzittert.", "gold", true)
 			pillar(u.x, u.y, GuData.ESS_COL[9])
 			shake = 1.0
+			ven.register(u, {})
 		else:
 			u.prog = 0.3
 		u.luck = 0.0
@@ -1203,6 +1239,8 @@ func fire_step() -> void:
 func hurt(t: Unit, dmg: float, src: Unit) -> void:
 	if t.hp <= 0.0:
 		return
+	if t.rank >= 9 and src != null and src.rank >= 9 and t.k == "p":
+		dmg *= 0.25   # Ehrwürdige töten einander nur selten
 	t.hp -= dmg
 	t.flash = 0.12
 	if t.hp > 0.0 and (t.igf & F_HEAL) != 0 and t.hp < t.mhp * 0.3 and sim_time >= t.heal_cd:
@@ -1419,6 +1457,7 @@ func monthly() -> void:
 			person_month(u)
 		else:
 			animal_month(u)
+	ven.month()
 	for c: Clan in clans:
 		if not c.alive:
 			continue
@@ -1581,7 +1620,7 @@ func person_month(u: Unit) -> void:
 		villages[u.vil].stones += 2.0
 	if u.rank >= 6 and u.rank < 9 and laws["trib"] and a >= u.next_trib:
 		tribulation(u)
-	if u.rank >= 2 and u.align == 1 and not u.rogue and randf() < 0.0014:
+	if u.rank >= 2 and u.rank < 9 and u.align == 1 and not u.rogue and randf() < 0.0014:
 		go_rogue(u)
 	if u.rank == 0 and a >= 14.0 and u.vil >= 0 and (u.job == "" or randf() < 0.03):
 		assign_job(u)
@@ -1658,7 +1697,7 @@ func spawn_wild_gu(x: float, y: float, pth: int) -> Unit:
 ## Wildes Unsterbliches Gu (id leer = zufällig).
 func spawn_wild_igu(x: float, y: float, id: String = "") -> Unit:
 	if id == "":
-		id = Lore.IGU.pick_random()["id"]
+		id = Lore.igu_random()
 	var g: Unit = mk_animal(x, y, "wildimm")
 	wild_igu += 1
 	g.gname = id
@@ -1687,10 +1726,11 @@ func yearly() -> void:
 				vs.append(v)
 		if not vs.is_empty():
 			beast_tide(vs.pick_random(), Vector2(-1, -1))
-	if laws["will"] and randf() < 0.04:
+	if laws["will"] and randf() < 0.04 * ven.will_mul():
 		var top: Array[Unit] = strongest(1)
 		if not top.is_empty() and top[0].rank >= 7:
 			heavens_will(top[0])
+	ven.yearly()
 	if laws["growth"] and laws["animals"] and randf() < 0.05:
 		wild_beast_king()
 	if laws["disaster"] and not presim and randf() < 0.14:
@@ -1755,6 +1795,11 @@ func beast_tide(v: Village, at: Vector2) -> void:
 
 func heavens_will(u: Unit) -> void:
 	var nm: String = u.pname()
+	if (u.igf & F_FATE) != 0:
+		ring(u.x, u.y - 2.0, 6.0, GuData.PATH_COL[28], 1.0)
+		float_txt(u, "Schicksals-Gu", GuData.PATH_COL[28])
+		log_event("Der Himmelswille verschont " + nm + " – den Hüter des Schicksals-Gu.", "violet", true)
+		return
 	if u.prot > sim_time:
 		bolt(u.x + 3.0, u.y - 2.0, 0.0, false)
 		ring(u.x, u.y - 2.0, 6.0, Color("#bfe8ff"), 1.0)
@@ -1771,7 +1816,7 @@ func heavens_will(u: Unit) -> void:
 			return
 		bolt(u.x, u.y, 0.0, true)
 		ring(u.x, u.y, 12.0, Color("#b98cff"), 1.0)
-		var ch: float = 0.12 if u.rank >= 9 else (0.3 if u.rank >= 8 else 0.45)
+		var ch: float = (0.12 if u.rank >= 9 else (0.3 if u.rank >= 8 else 0.45)) * ven.will_kill_mul()
 		var dies: bool = randf() < ch
 		if dies and use_fortune(u):
 			dies = false
@@ -1923,6 +1968,8 @@ func finish_work(u: Unit) -> void:
 func think_p(u: Unit) -> void:
 	if u.undead:
 		undead_think(u)
+		return
+	if u.rank >= 9 and ven.think(u):
 		return
 	var v: Village = villages[u.vil] if u.vil >= 0 else null
 	var a: float = uage(u)
@@ -2427,6 +2474,7 @@ func step(dt: float) -> void:
 
 func on_death(u: Unit) -> void:
 	unit_died.emit(u)
+	ven.on_death(u)
 	if u.k == "a" and u.rank >= 6 and not presim and randf() < 0.35:
 		var g: Unit = spawn_wild_igu(u.x, u.y)
 		log_event("Aus dem Leib von " + u.pname() + " entweicht das Unsterbliche Gu " + g.pname() + ".", "violet", true)
@@ -2543,6 +2591,7 @@ func reset_state() -> void:
 	seeds.clear()
 	possessed = null
 	age_off = 0
+	ven.reset()
 	next_pid = 1
 	sim_time = 0.0
 	last_month = 0
@@ -2708,7 +2757,7 @@ func serialize() -> Dictionary:
 	var lv: Array = []
 	for i: int in lava.keys():
 		lv.append([i, snappedf(float(lava[i]), 0.01)])
-	return {"v": 4, "age_off": age_off, "lava": lv, "mines": Array(mines), "layer": world.layer, "seed": seed_val, "sim_time": sim_time, "next_id": next_id, "map_mode": world.map_mode, "places": ps, "next_pid": next_pid,
+	return {"v": 5, "ven": ven.to_dict(), "age_off": age_off, "lava": lv, "mines": Array(mines), "layer": world.layer, "seed": seed_val, "sim_time": sim_time, "next_id": next_id, "map_mode": world.map_mode, "places": ps, "next_pid": next_pid,
 		"tile": Marshalls.raw_to_base64(world.tile), "feat": Marshalls.raw_to_base64(world.feat), "region": Marshalls.raw_to_base64(world.region),
 		"hgt": Marshalls.raw_to_base64(hb), "ts": Marshalls.raw_to_base64(world.temp_snow),
 		"units": us, "villages": vs, "clans": cs, "buildings": bs, "laws": laws, "log": log_entries.slice(0, 120), "fire": fr}
@@ -2716,7 +2765,7 @@ func serialize() -> Dictionary:
 
 func deserialize(d: Dictionary) -> bool:
 	var ver: int = int(d.get("v", 0))
-	if ver < 1 or ver > 4:
+	if ver < 1 or ver > 5:
 		return false
 	reset_state()
 	world.alloc()
@@ -2760,6 +2809,7 @@ func deserialize(d: Dictionary) -> bool:
 		mines.append(int(e))
 	world.layer = int(d.get("layer", 0))
 	age_off = int(d.get("age_off", 0))
+	ven.from_dict(d.get("ven", {}))
 	for i: int in range(N):
 		if world.tile[i] == GuData.LAVA and not lava.has(i):
 			lava[i] = 0.3
@@ -2917,7 +2967,7 @@ func spawn_immortal(x: float, y: float, rank: int) -> Unit:
 	u.life = uage(u) + GuData.LIFEB[rank] * 0.8 + randf() * 200.0
 	u.next_trib = uage(u) + 8.0 + randf() * 10.0
 	if randf() < 0.15 + 0.2 * (rank - 6):
-		give_igu(u, Lore.IGU.pick_random()["id"])
+		give_igu(u, Lore.igu_random())
 	pillar(x, y, GuData.ESS_COL[rank])
 	log_event("Ein wandernder %s erscheint: %s (%s-Pfad)." % [rank_title(rank), u.pname(), GuData.PATH_NAME[u.path]], "violet", true)
 	return u
@@ -2941,14 +2991,62 @@ func spawn_venerable(vd: Dictionary, x: float, y: float) -> String:
 		ascend(u, r)
 	u.title = vd["t"]
 	u.fig = key
-	u.life = uage(u) + 3000.0 + randf() * 2000.0
+	u.life = uage(u) + (float(vd["life"]) * (0.8 + randf() * 0.5) if vd.has("life") else 3000.0 + randf() * 2000.0)
 	give_igu(u, vd["igu"])
 	u.hp = u.mhp
-	log_event("Der " + u.title + " steigt herab! Die Welt erzittert.", "gold", true)
+	log_event(("Die " if key == "star_constellation" else "Der ") + u.title + " steigt herab! Die Welt erzittert.", "gold", true)
 	pillar(x, y, GuData.ESS_COL[9], 1.6)
 	ring(x, y, 16.0, Color(str(vd["col"])), 1.2)
 	shake = 1.0
+	ven.register(u, vd)
 	return ""
+
+
+## Höchster Großmeister nach Wahl: Rang-9-Ehrwürdiger eines beliebigen Pfades (einer je Pfad), Sitz und Blutlinie nahe (x, y).
+func spawn_custom_venerable(p: int, al: int, x: float, y: float) -> String:
+	p = clampi(p, 0, GuData.PATH_NAME.size() - 1)
+	var key: String = "ven9_%d" % p
+	var pn: String = GuData.PATH_NAME[p]
+	var title: String = pn + ("-Dämonen-Ehrwürdiger" if al == 1 else "-Unsterblicher-Ehrwürdiger")
+	if fig_alive(key) != null:
+		return "Der " + title + " lebt bereits."
+	var u: Unit = mk_person(x, y, 0, 600.0 + randf() * 900.0)
+	u.sur = ""
+	u.given = pn + Venerables.EPITHET[randi() % Venerables.EPITHET.size()]
+	u.awk = true
+	awaken(u, true)
+	u.path = p
+	u.align = al
+	u.apt = "A"
+	u.gus = PackedStringArray([Lore.start_gu(p)])
+	for r: int in range(2, 10):
+		ascend(u, r)
+	u.title = title
+	u.fig = key
+	u.life = uage(u) + 3000.0 + randf() * 2000.0
+	var own: Array[String] = []
+	for e: Dictionary in Lore.IGU:
+		if int(e["p"]) == p and int(e["r"]) >= 7 and not e.get("norand", false):
+			own.append(str(e["id"]))
+	if not own.is_empty():
+		give_igu(u, own.pick_random())
+	u.hp = u.mhp
+	log_event("%s, der %s, steigt herab – Höchster Großmeister des %s-Pfades! Die Welt erzittert." % [u.given, title, pn], "gold", true)
+	pillar(x, y, GuData.ESS_COL[9], 1.6)
+	ring(x, y, 16.0, GuData.PATH_COL[p], 1.2)
+	shake = 1.0
+	ven.register(u, {})
+	return ""
+
+
+## Einflussgebiete der Ehrwürdigen für die Gebietsanzeige: [{name, title, col, x, y, r (Kacheln), region, path, clan, uid}].
+func ven_dominions() -> Array:
+	return ven.dominions()
+
+
+## „Ära des <Pfad>-Pfades – <Name>“ des Höchsten (leer ohne Ehrwürdige).
+func era_text() -> String:
+	return ven.era_text()
 
 
 ## Benannte Figur aus der Geschichte (einzigartig). Gibt einen Hinweis zurück oder "".
@@ -3388,7 +3486,7 @@ func _place_tick(p: Place) -> void:
 						gain_gu(u)
 						gain_gu(u)
 					else:
-						give_igu(u, Lore.IGU.pick_random()["id"])
+						give_igu(u, Lore.igu_random())
 					log_event(u.pname() + " öffnet das " + p.name + " und erhält sein Vermächtnis.", "gold", true)
 					pillar(p.x, p.y, Color("#ffe27a"), 0.8)
 					p.alive = false

@@ -669,8 +669,115 @@ static func _gu_icon(c: Color) -> Px:
 	return q.outline()
 
 
-## Unsterbliches Gu: goldener Kranz, Strahlen, Insekt in Pfadfarbe und ein Zeichen seiner Wirkung.
+## Unsterbliches Gu: Grundbild, ab Rang 9 mit eigenem Emblem; Gu-Häuser als Gebäude.
 static func _igu_icon(id: String) -> Px:
+	var e: Dictionary = Lore.igu(id)
+	var fx: String = str(e.get("fx", "?"))
+	if fx == "tower" or fx == "pool" or fx == "chess":
+		return _gu_house_icon(fx)
+	var q: Px = _igu_core(id)
+	if int(e.get("r", 0)) >= 9:
+		_r9_mark(q, id, int(e["r"]))
+	return q.outline()
+
+
+## Emblem der Rang-9- und Rang-10-Gu (5 × 5 im Kästchen unten rechts; a/b = Farben).
+const R9_EMBLEM: Dictionary = {
+	"spring_autumn_cicada": [["aa.bb", "aaabb", ".aab.", ".aab.", "..b.."], "#6fd24a", "#ff9a3a"],
+	"wisdom_gu": [[".....", ".aaa.", "abbba", ".aaa.", "....."], "#ffffff", "#2ad0f0"],
+	"love_gu": [[".a.a.", "aaaaa", "aaaaa", ".aaa.", "..a.."], "#ff5a8a", "#ff5a8a"],
+	"sovereign_immortal_fetus": [[".aaa.", "aabaa", "abbba", "aabaa", ".aaa."], "#ffe8d0", "#f0b030"],
+	"derivation_gu": [["a.a.a", ".aaa.", "..a..", "..a..", "..a.."], "#8a9aff", "#8a9aff"],
+	"hatred_gu": [["a...a", ".a.a.", "..a..", ".a.a.", "a...a"], "#e02a3a", "#e02a3a"],
+	"heavenly_secret": [[".bbb.", ".b.b.", ".bbb.", "..b..", "..bb."], "#ffffff", "#ffd23a"],
+	"heavenly_web": [["a.a.a", ".aaa.", "aa.aa", ".aaa.", "a.a.a"], "#dfe8ec", "#dfe8ec"],
+	"light_gu": [["a.a.a", ".bbb.", "abbba", ".bbb.", "a.a.a"], "#fff27a", "#ffffff"],
+	"fire_gu": [["..a..", ".aa..", ".aba.", "abbba", ".aaa."], "#ff5a1a", "#ffd23a"],
+	"strength_gu": [[".....", "aaaa.", "aaaaa", "aaaaa", ".aaa."], "#e0904a", "#e0904a"],
+	"lightning_gu": [["...aa", "..aa.", ".aaa.", ".aa..", "aa..."], "#fff27a", "#fff27a"],
+	"advance_refinement": [["b...b", "bbbbb", "baaab", "baaab", "bbbbb"], "#ff7043", "#b0bec5"],
+	"change_form": [["a.a.a", ".....", ".aaa.", "aaaaa", ".aaa."], "#9ccc65", "#9ccc65"],
+	"heavenly_essence_imperial_lotus": [["..a..", "a.a.a", "aaaaa", ".aaa.", "bbbbb"], "#ff8ac0", "#5ad86a"],
+	"dog_shit_luck": [["aa.aa", "aa.aa", "..b..", "aa.aa", "aa.aa"], "#5ad86a", "#ffd23a"],
+	"fate_gu": [[".aaa.", "a...a", "a.b.a", "a...a", ".aa.a"], "#ff3a3a", "#ffd23a"],
+	"destiny_gu": [["..a..", ".aaa.", "aaaaa", ".b.b.", "b...b"], "#ffffff", "#c890ff"],
+	"eternal_gu": [[".....", "aa.aa", "a.a.a", "aa.aa", "....."], "#7ef0ff", "#7ef0ff"],
+}
+
+
+static func _r9_mark(q: Px, id: String, r: int) -> void:
+	var x0: int = 16
+	var y0: int = 16
+	q.p(x0, y0, 8, 8, Color("#c890ff") if r >= 10 else Color("#ffd23a"))
+	q.p(x0 + 1, y0 + 1, 6, 6, Color("#141a16"))
+	if not R9_EMBLEM.has(id):
+		var rows: Array = DIGITS[r % 10]
+		for yy: int in range(5):
+			for xx: int in range(3):
+				if str(rows[yy])[xx] == "1":
+					q.p(x0 + 2 + xx, y0 + 1 + yy, 1, 1, Color("#ffd23a"))
+		return
+	var em: Array = R9_EMBLEM[id]
+	var ca: Color = Color(str(em[1]))
+	var cb: Color = Color(str(em[2]))
+	for yy2: int in range(5):
+		var row: String = em[0][yy2]
+		for xx2: int in range(5):
+			var ch: String = row[xx2]
+			if ch == "a":
+				q.p(x0 + 1 + xx2, y0 + 1 + yy2, 1, 1, ca)
+			elif ch == "b":
+				q.p(x0 + 1 + xx2, y0 + 1 + yy2, 1, 1, cb)
+
+
+## Gu-Häuser (Rang 9): Himmelsaufsichtsturm, Blutveredelungsbecken, Sternbild-Schachbrett.
+static func _gu_house_icon(fx: String) -> Px:
+	var q: Px = Px.new(24, 24)
+	match fx:
+		"tower":
+			q.p(3, 20, 18, 3, Color("#8a8478"))
+			q.p(3, 20, 18, 1, Color("#b8b0a0"))
+			q.p(7, 14, 10, 6, Color("#c0392b"))
+			q.p(11, 16, 2, 4, Color("#3a1a10"))
+			q.p(5, 12, 14, 2, Color("#ffd23a"))
+			q.p(8, 8, 8, 4, Color("#c0392b"))
+			q.p(9, 9, 2, 2, Color("#ffe8a0"))
+			q.p(13, 9, 2, 2, Color("#ffe8a0"))
+			q.p(6, 6, 12, 2, Color("#ffd23a"))
+			q.p(9, 3, 6, 3, Color("#c0392b"))
+			q.p(11, 4, 2, 1, Color("#7ef0ff"))
+			q.p(8, 2, 8, 1, Color("#ffd23a"))
+			q.p(11, 0, 2, 2, Color("#fff27a"))
+		"pool":
+			q.p(2, 8, 20, 13, Color("#8a8478"))
+			q.p(2, 8, 20, 1, Color("#b8b0a0"))
+			q.p(4, 10, 16, 9, Color("#a01c3a"))
+			q.p(5, 11, 6, 1, Color("#e8506a"))
+			q.p(12, 14, 5, 1, Color("#e8506a"))
+			q.p(8, 16, 2, 2, Color("#ff8aa0"))
+			q.p(14, 11, 2, 2, Color("#ff8aa0"))
+			for k: int in range(4):
+				var cx: int = 1 if k % 2 == 0 else 19
+				var cy: int = 4 if k < 2 else 17
+				q.p(cx, cy, 4, 5, [Color("#ff7a2e"), Color("#4fb0ff"), Color("#6fd24a"), Color("#caa46a")][k])
+				q.p(cx, cy, 4, 1, Color(1, 1, 1, 0.45))
+		"chess":
+			q.p(2, 3, 20, 20, Color("#ffd23a"))
+			q.p(3, 4, 18, 18, Color("#2a2440"))
+			for k2: int in range(7):
+				q.p(3 + k2 * 3, 4, 1, 18, Color("#6a4ab8"))
+				q.p(3, 4 + k2 * 3, 18, 1, Color("#6a4ab8"))
+			for pt: Vector2i in [Vector2i(6, 7), Vector2i(15, 7), Vector2i(9, 13), Vector2i(18, 16), Vector2i(6, 19)]:
+				q.p(pt.x - 1, pt.y - 1, 2, 2, Color("#ffffff"))
+			q.p(11, 15, 3, 3, Color("#7ef0ff"))
+			q.p(12, 14, 1, 5, Color("#7ef0ff"))
+			q.p(10, 16, 5, 1, Color("#7ef0ff"))
+	_badge(q, 9, Color("#ffd23a"))
+	return q.outline()
+
+
+## Grundbild eines Unsterblichen Gu (ohne Kontur): goldener Kranz, Strahlen, Insekt in Pfadfarbe und ein Zeichen seiner Wirkung.
+static func _igu_core(id: String) -> Px:
 	var q: Px = Px.new(24, 24)
 	var e: Dictionary = Lore.igu(id)
 	var c: Color = GuData.PATH_COL[int(e.get("p", 0))] if not e.is_empty() else Color("#ffd24a")
@@ -693,7 +800,7 @@ static func _igu_icon(id: String) -> Px:
 		q.p(10, 6, 4, 3, c)
 		q.p(10, 10, 4, 1, Color("#5a4428"))
 		q.p(10, 13, 4, 1, Color("#5a4428"))
-		return q.outline()
+		return q
 	q.p(5, 6, 6, 5, Color(1, 1, 0.92, 0.9))
 	q.p(13, 6, 6, 5, Color(1, 1, 0.92, 0.9))
 	q.d(12, 13, 4, c)
@@ -751,7 +858,7 @@ static func _igu_icon(id: String) -> Px:
 			q.p(sx + 3, sy, 3, 4, Color("#c890ff"))
 		_:
 			q.p(sx + 1, sy + 1, 4, 4, Color("#ffd23a"))
-	return q.outline()
+	return q
 
 
 ## Organisation: Gebäude ihrer Art in der Organisationsfarbe (das Siegel legt die Leiste darüber).
@@ -803,6 +910,23 @@ static func _place_icon(type: String) -> Px:
 
 
 static func _make_generated(id: String) -> Px:
+	if id == "s_v9":
+		# Höchster Großmeister nach Wahl: goldener Ehrwürdiger in einem Kranz aus Pfadfarben
+		var qv: Px = _person_fit(0, 9, Color("#ffd24a"))
+		for k: int in range(48):
+			var a: float = k / 48.0 * TAU
+			var pc: Color = GuData.PATH_COL[[2, 3, 6, 5, 9, 24, 11, 17][(k / 6) % 8]]
+			for rr: float in [10.5, 11.0]:
+				var x: int = 12 + roundi(cos(a) * rr)
+				var y: int = 12 + roundi(sin(a) * rr)
+				if x >= 0 and y >= 0 and x < 24 and y < 24 and qv.img.get_pixel(x, y).a < 0.1:
+					qv.img.set_pixel(x, y, pc)
+		qv.p(0, 0, 2, 2, GuData.PATH_COL[2])
+		qv.p(2, 0, 2, 2, GuData.PATH_COL[3])
+		qv.p(0, 2, 2, 2, GuData.PATH_COL[6])
+		qv.p(2, 2, 2, 2, GuData.PATH_COL[24])
+		_badge(qv, 9, GuData.ESS_COL[9])
+		return qv.outline()
 	if id.begins_with("s_") and id.substr(2).is_valid_int():
 		var r: int = int(id.substr(2))
 		return _person_fit(r, 0, [Color("#3d6fd0"), Color("#b8562e"), Color("#7a8a2a"), Color("#2a9ab0"), Color("#d8a040"), Color("#5a8ae8"), Color("#2a8a9a"), Color("#8a5a2a"), Color("#c84a6a"), Color("#6a7a3a"), Color("#4e8a3a")][r]).outline()

@@ -135,13 +135,21 @@ const IGU: Array = [
 	{"id": "star_thought", "n": "Sternengedanken-Gu", "r": 8, "p": 11, "fx": "wis", "d": "Sternenlicht-Schwarm aus Gedanken: schnellere Kultivierung."},
 	{"id": "dark_limit", "n": "Dunkelgrenze-Gu", "r": 6, "p": 18, "fx": "gen", "d": "Blockiert gegnerische Wahrsagung."},
 	{"id": "crescent_moon", "n": "Sichelmond-Gu", "r": 7, "p": 1, "fx": "range", "d": "Mondsichel-Klingen über große Distanz."},
+	# Rang 9: Schicksals-Gu und Gu-Häuser; Rang 10: Legenden, die nie verfeinert wurden (norand = nie zufällig)
+	{"id": "fate_gu", "n": "Schicksals-Gu", "r": 9, "p": 28, "fx": "fate", "norand": true, "d": "Werkzeug des Himmelswillens: Solange es existiert, liegen alle Schicksale fest – der Himmelswille schlägt härter zu, Rang 8 steigt kaum noch auf. Wird es zerstört, beginnt eine Ära des Chaos."},
+	{"id": "heaven_overseeing_tower", "n": "Himmelsaufsichtsturm", "r": 9, "p": 28, "fx": "tower", "d": "Gu-Haus des Himmelshofs: überwacht die ganze Welt – große Reichweite und starker Schutz."},
+	{"id": "blood_refinement_pool", "n": "Vier-Elemente-Reue-Blutveredelungsbecken", "r": 9, "p": 8, "fx": "pool", "d": "Gu-Haus des Blutpfades: veredelt Blut zu Kraft – Heilung, Lebenskraft und Gu-Veredelung."},
+	{"id": "star_chessboard", "n": "Sternbild-Schachbrett", "r": 9, "p": 11, "fx": "chess", "d": "Gu-Haus der Sternbild-Ehrwürdigen: Jeder Zug eine Ableitung – schnellere Kultivierung und klügere Angriffe."},
+	{"id": "destiny_gu", "n": "Bestimmungs-Gu", "r": 10, "p": 28, "fx": "destiny", "norand": true, "d": "Legende von Rang 10, nie verfeinert: Schreibt einmalig das Schicksal des Trägers neu – bis zu drei große Ränge auf einmal und Großes Glück."},
+	{"id": "eternal_gu", "n": "Ewigkeits-Gu", "r": 10, "p": 10, "fx": "eternal", "norand": true, "d": "Legende von Rang 10, nie verfeinert: Der Träger altert nicht mehr."},
 ]
 ## Unsterbliche Gu mit eigenem Knopf (die übrigen über "Zufälliges Unsterbliches Gu").
 const IGU_BTN: PackedStringArray = ["spring_autumn_cicada", "wisdom_gu", "strength_gu", "fixed_immortal_travel", "man_as_before", "time_anchor", "dog_shit_luck",
 	"fortune_rivalling_heaven", "years_flow_like_water", "fire_gu", "lightning_gu", "resurrection_from_the_dead", "great_thief", "sovereign_immortal_fetus", "crescent_moon", "dream_wings"]
 const FX_TEXT: Dictionary = {"revive": "Wiedergeburt", "rez": "Auferstehung", "fortune": "Drangsal-Schutz", "str": "Schaden +60 %", "str2": "Schaden ×2", "hp": "Leben +50 %",
 	"move": "Tempo ×1,8", "life": "+400 Jahre", "wis": "Kultivierung ×2,2", "cult": "Kultivierung ×2", "dream": "Traum-Schutz", "range": "Reichweite +40 %",
-	"fire": "Brand", "bolt": "Blitze", "luck": "Dauerglück", "heal": "Heilung", "thief": "Gu-Raub", "steal": "Lebensraub", "stones": "Ursteine", "refine": "Veredelung", "fetus": "Unsterblichkeit", "gen": "Macht +15 %"}
+	"fire": "Brand", "bolt": "Blitze", "luck": "Dauerglück", "heal": "Heilung", "thief": "Gu-Raub", "steal": "Lebensraub", "stones": "Ursteine", "refine": "Veredelung", "fetus": "Unsterblichkeit", "gen": "Macht +15 %",
+	"fate": "Schicksal", "tower": "Reichweite +50 %, Schutz", "pool": "Blutveredelung", "chess": "Kultivierung ×1,6", "destiny": "Neues Schicksal", "eternal": "Alterslos"}
 
 static var _igu_idx: Dictionary = {}
 
@@ -153,6 +161,24 @@ static func igu(id: String) -> Dictionary:
 	return _igu_idx.get(id, {})
 
 
+## Zufälliges Unsterbliches Gu (ohne Schicksals-Gu und Rang-10-Legenden).
+static func igu_random() -> String:
+	for k: int in range(20):
+		var e: Dictionary = IGU.pick_random()
+		if not e.get("norand", false):
+			return e["id"]
+	return "strong_gu"
+
+
+## Alle Unsterblichen Gu ab Rang 9 (Knopfgruppe „Rang-9-Gu“), in Tabellenreihenfolge.
+static func igu_top() -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	for e: Dictionary in IGU:
+		if int(e["r"]) >= 9:
+			out.append(e["id"])
+	return out
+
+
 static func igu_name(id: String) -> String:
 	var e: Dictionary = igu(id)
 	return str(e["n"]) if not e.is_empty() else id
@@ -160,18 +186,29 @@ static func igu_name(id: String) -> String:
 
 # ---------------- Ehrwürdige (Rang 9) ----------------
 ## fig ist der Schlüssel für "nur einer zur selben Zeit" (Fang Yuan teilt ihn mit seiner Figur).
+## Agenda (Venerables): goal = Zielregion (-1 = wandert umher), seat = Orientierungspunkt (World.LANDMARKS) für den Sitz,
+## lin = Organisation der Blutlinie (leer = eigene Linie), court = zweite Organisation, ag = Agenda-Schlüssel, life = Restlebenszeit in Jahren.
 const VEN: Array = [
-	{"id": "primordial_origin", "fig": "primordial_origin", "n": "Urursprung", "t": "Urursprung-Unsterblicher-Ehrwürdiger", "p": 30, "al": 0, "col": "#9fd8e8", "igu": "heavenly_birth", "d": "Erster Ehrwürdiger; gründete den Himmelshof."},
-	{"id": "star_constellation", "fig": "star_constellation", "n": "Sternbild", "t": "Sternbild-Unsterbliche-Ehrwürdige", "p": 11, "al": 0, "col": "#7e57c2", "igu": "star_thought", "d": "Einzige weibliche Ehrwürdige; Weisheitspfad."},
-	{"id": "limitless", "fig": "limitless", "n": "Grenzenlos", "t": "Grenzenloser Dämonen-Ehrwürdiger", "p": 25, "al": 1, "col": "#3f51b5", "igu": "derivation_gu", "d": "Plante über eine Million Jahre; Regelpfad."},
-	{"id": "reckless_savage", "fig": "reckless_savage", "n": "Rücksichtsloser Wilder", "t": "Rücksichtsloser-Wilder-Dämonen-Ehrwürdiger", "p": 0, "al": 1, "col": "#8d6e63", "igu": "strength_gu", "d": "Stärkster Körper aller Ehrwürdigen; Kraftpfad."},
-	{"id": "red_lotus", "fig": "red_lotus", "n": "Roter Lotus", "t": "Roter-Lotus-Dämonen-Ehrwürdiger", "p": 10, "al": 1, "col": "#d32f2f", "igu": "spring_autumn_cicada", "d": "Schuf die Frühling-Herbst-Zikade; Zeitpfad."},
-	{"id": "genesis_lotus", "fig": "genesis_lotus", "n": "Ursprungslotus", "t": "Ursprungslotus-Unsterblicher-Ehrwürdiger", "p": 6, "al": 0, "col": "#43a047", "igu": "heavenly_essence_imperial_lotus", "d": "Gründer der Himmelslotus-Sekte; Holzpfad."},
-	{"id": "thieving_heaven", "fig": "thieving_heaven", "n": "Himmelsdieb", "t": "Himmelsdieb-Dämonen-Ehrwürdiger", "p": 41, "al": 1, "col": "#455a64", "igu": "great_thief", "d": "Stahl Gegnern im Kampf die Gu aus der Blende."},
-	{"id": "giant_sun", "fig": "giant_sun", "n": "Riesensonne", "t": "Riesensonnen-Unsterblicher-Ehrwürdiger", "p": 24, "al": 0, "col": "#ffc107", "igu": "dog_shit_luck", "d": "Goldäugiger Riese des Glückspfads; gründete den Langlebigkeitshimmel."},
-	{"id": "spectral_soul", "fig": "spectral_soul", "n": "Geisterseele", "t": "Geisterseelen-Dämonen-Ehrwürdiger", "p": 9, "al": 1, "col": "#6a1b9a", "igu": "change_soul", "d": "Grausamster Ehrwürdiger; Gründer der Schattensekte."},
-	{"id": "paradise_earth", "fig": "paradise_earth", "n": "Paradieserde", "t": "Paradieserde-Unsterblicher-Ehrwürdiger", "p": 7, "al": 0, "col": "#a1887f", "igu": "earth_prison", "d": "Der Friedvolle aus der Südgrenze; Erdpfad."},
-	{"id": "fang_yuan_venerable", "fig": "fang_yuan", "n": "Fang Yuan", "t": "Himmelsschmiede-Dämonen-Ehrwürdiger", "p": 33, "al": 1, "col": "#ff7043", "igu": "advance_refinement", "d": "Der elfte Ehrwürdige; zerstörte das Schicksals-Gu."},
+	{"id": "primordial_origin", "fig": "primordial_origin", "n": "Urursprung", "t": "Urursprung-Unsterblicher-Ehrwürdiger", "p": 30, "al": 0, "col": "#9fd8e8", "igu": "heavenly_birth", "d": "Erster Ehrwürdiger; gründete den Himmelshof.", "goal": 4, "seat": "Himmlischer Hof", "lin": "heavenly_court", "ag": "humans", "agenda": "Gründet den Himmelshof im Zentralkontinent und verhilft den Menschen zur Herrschaft über die Variant-Menschen."},
+	{"id": "star_constellation", "fig": "star_constellation", "n": "Sternbild", "t": "Sternbild-Unsterbliche-Ehrwürdige", "p": 11, "al": 0, "col": "#7e57c2", "igu": "star_thought", "d": "Einzige weibliche Ehrwürdige; Weisheitspfad.", "goal": 4, "seat": "Himmlischer Hof", "lin": "heavenly_court", "ag": "fate_guard", "agenda": "Führt den Himmelshof, hütet das Schicksals-Gu, stärkt Weisheit und Wahrsagung und bekämpft dämonische Ehrwürdige."},
+	{"id": "limitless", "fig": "limitless", "n": "Grenzenlos", "t": "Grenzenloser Dämonen-Ehrwürdiger", "p": 25, "al": 1, "col": "#3f51b5", "igu": "derivation_gu", "d": "Plante über eine Million Jahre; Regelpfad.", "goal": 2, "seat": "Unpassierbare Dünen", "lin": "", "ag": "order", "agenda": "Plant zurückgezogen in der Westwüste; in seinem Reich herrschen Regel und Ordnung – Fehden enden."},
+	{"id": "reckless_savage", "fig": "reckless_savage", "n": "Rücksichtsloser Wilder", "t": "Rücksichtsloser-Wilder-Dämonen-Ehrwürdiger", "p": 0, "al": 1, "col": "#8d6e63", "igu": "strength_gu", "d": "Stärkster Körper aller Ehrwürdigen; Kraftpfad.", "goal": -1, "seat": "", "lin": "", "ag": "hunt", "agenda": "Zieht umher, jagt die stärksten Wesen und Ehrwürdigen der Welt und verwandelt sich im Kampf."},
+	{"id": "red_lotus", "fig": "red_lotus", "n": "Roter Lotus", "t": "Roter-Lotus-Dämonen-Ehrwürdiger", "p": 10, "al": 1, "col": "#d32f2f", "igu": "spring_autumn_cicada", "d": "Schuf die Frühling-Herbst-Zikade; Zeitpfad.", "goal": 1, "seat": "Qing-Mao-Berg", "lin": "gu_yue_clan", "ag": "inherit", "life": 70.0, "agenda": "Ahnherr des Gu-Yue-Clans auf dem Qing-Mao-Berg; hinterlässt dort ein wahres Erbe. Kurzes, tragisches Leben."},
+	{"id": "genesis_lotus", "fig": "genesis_lotus", "n": "Ursprungslotus", "t": "Ursprungslotus-Unsterblicher-Ehrwürdiger", "p": 6, "al": 0, "col": "#43a047", "igu": "heavenly_essence_imperial_lotus", "d": "Gründer der Himmelslotus-Sekte; Holzpfad.", "goal": 4, "seat": "", "lin": "heavenly_lotus_sect", "ag": "forest", "agenda": "Gründet die Himmelslotus-Sekte im Zentralkontinent; um ihn herum breiten sich Wälder aus."},
+	{"id": "thieving_heaven", "fig": "thieving_heaven", "n": "Himmelsdieb", "t": "Himmelsdieb-Dämonen-Ehrwürdiger", "p": 41, "al": 1, "col": "#455a64", "igu": "great_thief", "d": "Stahl Gegnern im Kampf die Gu aus der Blende.", "goal": 3, "seat": "", "lin": "fang_clan", "ag": "steal", "agenda": "Begründet die Linie des Fang-Clans im Ostmeer und stiehlt anderen Unsterblichen ihre Unsterblichen Gu."},
+	{"id": "giant_sun", "fig": "giant_sun", "n": "Riesensonne", "t": "Riesensonnen-Unsterblicher-Ehrwürdiger", "p": 24, "al": 0, "col": "#ffc107", "igu": "dog_shit_luck", "d": "Goldäugiger Riese des Glückspfads; gründete den Langlebigkeitshimmel.", "goal": 0, "seat": "", "lin": "huang_jin_tribes", "court": "longevity_heaven", "ag": "descend", "agenda": "Zieht in die Nordebenen, gründet den Huang-Jin-Stamm und den Langlebigkeitshimmel, zeugt viele glückliche Nachkommen und eint die Stämme unter sich."},
+	{"id": "spectral_soul", "fig": "spectral_soul", "n": "Geisterseele", "t": "Geisterseelen-Dämonen-Ehrwürdiger", "p": 9, "al": 1, "col": "#6a1b9a", "igu": "change_soul", "d": "Grausamster Ehrwürdiger; Gründer der Schattensekte.", "goal": 1, "seat": "", "lin": "shadow_sect", "ag": "farm", "agenda": "Gründet die Schattensekte in der Südgrenze; Dörfer in seinem Reich wachsen als Menschenfarmen – bis er ihre Seelen verschlingt."},
+	{"id": "paradise_earth", "fig": "paradise_earth", "n": "Paradieserde", "t": "Paradieserde-Unsterblicher-Ehrwürdiger", "p": 7, "al": 0, "col": "#a1887f", "igu": "earth_prison", "d": "Der Friedvolle aus der Südgrenze; Erdpfad.", "goal": 1, "seat": "", "lin": "", "ag": "bless", "agenda": "Segnet das Land der Südgrenze: Fruchtbarkeit, Blüte, Heilung und Hilfe für die Dörfer."},
+	{"id": "fang_yuan_venerable", "fig": "fang_yuan", "n": "Fang Yuan", "t": "Himmelsschmiede-Dämonen-Ehrwürdiger", "p": 33, "al": 1, "col": "#ff7043", "igu": "advance_refinement", "d": "Der elfte Ehrwürdige; zerstörte das Schicksals-Gu.", "goal": 4, "seat": "", "lin": "heaven_earth_great_love_alliance", "ag": "refine", "agenda": "Gründet die Allianz der Großen Liebe, veredelt Unsterbliche Gu und zerstört das Schicksals-Gu, wo immer es ist."},
+]
+
+## Pfad-Gruppen für die Auswahl „Höchster Großmeister / Rang 9 nach Wahl“ (alle 48 Pfade).
+const PATH_GROUPS: Array = [
+	["Elemente", [2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 17, 18, 1]],
+	["Körper und Leben", [0, 8, 12, 32, 29, 35, 42, 43]],
+	["Geist und Seele", [9, 11, 39, 40, 26, 22, 23, 45, 46, 44]],
+	["Himmel und Gesetz", [10, 21, 20, 28, 24, 25, 27, 30, 34, 19]],
+	["Kampf und Kunst", [36, 37, 38, 47, 41, 31, 33]],
 ]
 
 # ---------------- Figuren ----------------

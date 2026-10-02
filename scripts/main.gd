@@ -100,6 +100,8 @@ func _ready() -> void:
 			_selftest()
 		if a == "--sandboxtest":
 			_dev_sandbox()
+		if a == "--ventest":
+			_dev_ventest()
 		if a.begins_with("--sheets="):
 			_dev_sheets(a.substr(9))
 		if a == "--blanktest":
@@ -438,7 +440,11 @@ func _process(delta: float) -> void:
 		hud.age_lbl.text = "Vorgeschichte … %d %%" % int(clampf(sim.sim_time / (PRESIM_YEARS * 12.0), 0.0, 0.99) * 100.0)
 	else:
 		var ad: Dictionary = sim.age_data()
-		hud.age_lbl.text = "%s · Jahr %d · %s" % [ad["n"], sim.year(), ("nächstes in %d Jahren" % sim.years_to_next_age()) if sim.laws["ages"] else "angehalten"]
+		var era: String = sim.era_text()
+		if era != "":
+			hud.age_lbl.text = "%s · Jahr %d" % [era, sim.year()]
+		else:
+			hud.age_lbl.text = "%s · Jahr %d · %s" % [ad["n"], sim.year(), ("nächstes in %d Jahren" % sim.years_to_next_age()) if sim.laws["ages"] else "angehalten"]
 	hud.tick_layout()
 	auto_t += rdt
 	if auto_t > 60.0 and not presim_on:
@@ -665,6 +671,35 @@ func _click_tool(t: Dictionary) -> void:
 	hud.refresh_tools(tool_id, sim.weather.get("type", ""))
 	if tool_id != "":
 		hud.show_hint(t["n"], t.get("d", ""))
+	if tool_id == "s_v9":
+		_open_ven9_picker()
+
+
+## Auswahl für „Höchster Großmeister (Rang 9 nach Wahl)“: Gesinnung und Pfad (Links p9:/al9: in _on_meta).
+func _open_ven9_picker() -> void:
+	var s: String = _h("Höchster Großmeister") + "Wähle die Gesinnung und tippe dann auf einen Pfad. Danach tippst du auf die Karte: Dort erscheint der Ehrwürdige, errichtet seinen Sitz, gründet seine Blutlinie und lässt seinen Pfad in der ganzen Welt erblühen.\n\n"
+	for al: int in [0, 1]:
+		var on: bool = powers.v9_al == al
+		s += "[url=al9:%d]%s [b]%s[/b][/url]    " % [al, "[color=#ffd24a]●[/color]" if on else "[color=#9db09e]○[/color]", "Rechtschaffen (Unsterblicher Ehrwürdiger)" if al == 0 else "Dämonisch (Dämonen-Ehrwürdiger)"]
+	s += "\n\n[url=p9:-1]%s [b]Zufälliger Pfad[/b][/url]\n" % ("[color=#ffd24a]●[/color]" if powers.v9_path < 0 else "[color=#9db09e]○[/color]")
+	for g: Array in Lore.PATH_GROUPS:
+		s += "\n[color=#e8c70a][b]%s[/b][/color]\n" % str(g[0]).to_upper()
+		var items: PackedStringArray = PackedStringArray()
+		for p: int in g[1]:
+			var mark: String = "[b][u]%s[/u][/b]" if p == powers.v9_path else "%s"
+			items.append("[url=p9:%d][color=#%s]■[/color] %s[/url]" % [p, GuData.PATH_COL[p].to_html(false), mark % GuData.PATH_NAME[p]])
+		s += "   ".join(items) + "\n"
+	var live: PackedStringArray = PackedStringArray()
+	for d: Dictionary in sim.ven_dominions():
+		live.append("%s (%s-Pfad)" % [str(d["name"]), GuData.PATH_NAME[clampi(int(d["path"]), 0, GuData.PATH_NAME.size() - 1)]])
+	if not live.is_empty():
+		s += "\n[color=#9db09e]Lebende Ehrwürdige: %s[/color]" % ", ".join(live)
+	hud.open_modal(s, [["Fertig", func() -> void: hud.close_modal(), "jade"]])
+
+
+func _ven9_hint() -> void:
+	var t: Dictionary = Powers.tool_by_id("s_v9")
+	hud.show_hint(t["n"], powers.v9_text() + ". Tippe auf die Karte.")
 
 
 func _run_action(t: Dictionary) -> void:
@@ -1155,7 +1190,9 @@ func _open_world_info() -> void:
 	for b: Building in sim.buildings:
 		if b != null:
 			bl += 1
-	var rows: Array = [["Jahr", sim.year()], ["Zeitalter", sim.age_data()["n"]], ["Seelen", ps], ["Gu-Meister", gm], ["Gu-Unsterbliche", imm], ["Clans und Sekten", cl], ["Dörfer", vl], ["Tiere", an], ["Wilde Gu", gu], ["Besondere Orte", sim.places.size()], ["Bäume", trees], ["Gebäude", bl]]
+	var era: String = sim.era_text()
+	var rows: Array = [["Jahr", sim.year()], ["Zeitalter", sim.age_data()["n"]], ["Ära", era if era != "" else "–"], ["Ehrwürdige", sim.ven.st.size()],
+		["Schicksals-Gu", "existiert" if sim.ven.fate_on else ("zerstört" if sim.ven.fate_broken else "–")], ["Seelen", ps], ["Gu-Meister", gm], ["Gu-Unsterbliche", imm], ["Clans und Sekten", cl], ["Dörfer", vl], ["Tiere", an], ["Wilde Gu", gu], ["Besondere Orte", sim.places.size()], ["Bäume", trees], ["Gebäude", bl]]
 	var s: String = _h("Weltinfo") + "[table=2]"
 	for r: Array in rows:
 		s += "[cell][color=#9db09e]%s[/color]   [/cell][cell][b]%s[/b][/cell]" % [r[0], str(r[1])]
@@ -1249,6 +1286,16 @@ func _on_meta(m: String) -> void:
 	elif m.begins_with("age:"):
 		sim.set_age(int(m.substr(4)))
 		_open_ages()
+	elif m.begins_with("al9:"):
+		powers.v9_al = clampi(int(m.substr(4)), 0, 1)
+		_open_ven9_picker()
+		_ven9_hint()
+	elif m.begins_with("p9:"):
+		powers.v9_path = clampi(int(m.substr(3)), -1, GuData.PATH_NAME.size() - 1)
+		if tool_id != "s_v9":
+			_click_tool(Powers.tool_by_id("s_v9"))
+		hud.close_modal()
+		_ven9_hint()
 	elif m == "disp:terr":
 		show_terr = not show_terr
 		sim.terr_dirty = true
@@ -2526,6 +2573,103 @@ func _dev_sandbox() -> void:
 	get_tree().quit()
 
 
+## Entwickler-Test Ehrwürdige (-- --fresh --ventest): Riesensonne im Zentralkontinent und ein Rang 9 nach Wahl, ~30 Jahre.
+func _dev_ventest() -> void:
+	while loading or presim_on:
+		await get_tree().process_frame
+	var t0: int = Time.get_ticks_msec()
+	sim.ven.awk_paths.clear()
+	var hc: Vector2 = sim._landmark("Himmlischer Hof")
+	if hc.x < 0.0:
+		hc = Vector2(128, 128)
+	var gs: Dictionary = {}
+	for vd: Dictionary in Lore.VEN:
+		if vd["id"] == "giant_sun":
+			gs = vd
+	print("spawn giant_sun: '", sim.spawn_venerable(gs, hc.x + 14.0, hc.y + 10.0), "' region ", GuData.REGN[sim.region_at(hc.x + 14.0, hc.y + 10.0)])
+	var sp: Vector2 = sim._landmark("Shang-Clan-Stadt")
+	powers.v9_path = 2
+	powers.v9_al = 1
+	print("spawn custom: '", powers.spawn_at(Powers.tool_by_id("s_v9"), sp.x + 20.0, sp.y - 12.0), "' ", powers.v9_text())
+	var report: Callable = func(tag: String) -> void:
+		var gu: Unit = sim.fig_alive("giant_sun")
+		if gu == null:
+			print(tag, " Riesensonne tot")
+			return
+		var s: Dictionary = sim.ven.state(gu)
+		var lc: Clan = sim.clans[int(s["clan"])] if int(s.get("clan", -1)) >= 0 else null
+		print("%s Jahr %d · Riesensonne in %s (%.0f, %.0f) · Phase %s · Ziel: %s · Blutlinie %s %d Mitglieder · Vasallen %d · Kriege %d · Dorf %d" % [tag, sim.year(), GuData.REGN[sim.region_at(gu.x, gu.y)], gu.x, gu.y, str(s.get("ph", "?")), str(s.get("doing", "")), lc.name if lc != null else "-", sim.ven.lineage_size(s), (s.get("vas", []) as Array).size(), lc.war.size() if lc != null else 0, gu.vil])
+	for yr: int in range(30):
+		for k: int in range(120):
+			sim.step(0.1)
+		if yr % 5 == 4 or yr < 3:
+			report.call("[%2d]" % (yr + 1))
+	print("era: ", sim.era_text())
+	for d: Dictionary in sim.ven_dominions():
+		var c: Clan = sim.clans[int(d["clan"])] if int(d["clan"]) >= 0 else null
+		print("dominion ", d["name"], " · ", d["title"], " · ", GuData.REGN[int(d["region"])], " r=", snappedf(float(d["r"]), 0.1), " at (", int(d["x"]), ",", int(d["y"]), ") clan=", c.name if c != null else "-", " path=", GuData.PATH_NAME[int(d["path"])])
+	var tot: int = 0
+	for p: int in sim.ven.awk_paths.keys():
+		tot += int(sim.ven.awk_paths[p])
+	var ks: Array = sim.ven.awk_paths.keys()
+	ks.sort_custom(func(a: int, b: int) -> bool: return int(sim.ven.awk_paths[a]) > int(sim.ven.awk_paths[b]))
+	var line: String = "new gu masters %d:" % tot
+	for k2: int in range(mini(6, ks.size())):
+		line += " %s %d%%" % [GuData.PATH_NAME[int(ks[k2])], roundi(100.0 * int(sim.ven.awk_paths[ks[k2]]) / maxf(1.0, tot))]
+	print(line)
+	print("chronicle:")
+	var lines: PackedStringArray = PackedStringArray()
+	for e: Dictionary in sim.log_entries:
+		var t: String = str(e["t"])
+		if t.contains("erreicht Rang") or t.contains("birgt einen Schatz") or t.contains("zeugt neue Nachkommen") and lines.size() > 3:
+			continue
+		if t.contains("Riesensonne") or t.contains("Huang") or t.contains("Langlebig") or t.contains("Feuerweiser") or t.contains("Feuer-") or t.contains("unterw") or t.contains("Vasall") or t.contains("beug") or t.contains("Ära") or t.contains("Ehrwürdig"):
+			lines.append("  J%d %s" % [int(e["y"]), t])
+	lines.reverse()
+	print("\n".join(lines.slice(0, 50)))
+	var nst: int = sim.ven.st.size()
+	var js: String = JSON.stringify(sim.serialize())
+	var d2: Variant = JSON.parse_string(js)
+	print("load v", int(d2["v"]), " ", sim.deserialize(d2), " ven states ", sim.ven.st.size(), " / ", nst)
+	report.call("[load]")
+	for k3: int in range(240):
+		sim.step(0.1)
+	report.call("[+2y]")
+	# Teil 2: alle bekannten Ehrwürdigen und ein Schicksals-Gu
+	var fg: Unit = sim.spawn_wild_igu(hc.x - 10.0, hc.y + 6.0, "fate_gu")
+	print("fate gu wild ", fg.pname(), " fate_on(next month)")
+	for vd2: Dictionary in Lore.VEN:
+		var p2: Vector2 = sim.random_tile(func(i: int) -> bool: return GuData.buildable(sim.world.tile[i]), 400)
+		var msg: String = sim.spawn_venerable(vd2, p2.x, p2.y)
+		if msg != "":
+			print("  ", vd2["n"], ": ", msg)
+	var ls0: int = sim.log_entries.size()
+	for yr2: int in range(25):
+		for k4: int in range(120):
+			sim.step(0.1)
+	for vd3: Dictionary in Lore.VEN:
+		var vu: Unit = sim.fig_alive(str(vd3["fig"]))
+		if vu == null or vu.rank < 9:
+			print("  %-24s tot" % str(vd3["n"]))
+			continue
+		var s3: Dictionary = sim.ven.state(vu)
+		var lc3: Clan = sim.clans[int(s3["clan"])] if int(s3.get("clan", -1)) >= 0 else null
+		print("  %-24s %s · %s · %s · Linie %s (%d) · Vasallen %d" % [str(vd3["n"]), GuData.REGN[sim.region_at(vu.x, vu.y)], str(s3.get("ph", "")), str(s3.get("doing", "")), lc3.name if lc3 != null and lc3.alive else "-", sim.ven.lineage_size(s3), (s3.get("vas", []) as Array).size()])
+	print("fate_on ", sim.ven.fate_on, " fate_broken ", sim.ven.fate_broken, " era ", sim.era_text())
+	var n2: int = 0
+	for e2: Dictionary in sim.log_entries.slice(0, maxi(0, sim.log_entries.size() - ls0 + 260)):
+		var t2: String = str(e2["t"])
+		if t2.contains("Gesegnetes-Land"):
+			continue
+		if t2.contains("Ehrwürdige") or t2.contains("Ära") or t2.contains("Himmelswille") or t2.contains("Schicksals") or t2.contains("Erbe des") or t2.contains("Seelen von") or t2.contains("Ordnung") or t2.contains("stiehlt") or t2.contains("segnet") or t2.contains("Wälder") or t2.contains("Variant") or t2.contains("weichen") or t2.contains("stellt") or t2.contains("veredelt") or t2.contains("gründet") or t2.contains("begründet"):
+			print("  J", e2["y"], " ", t2)
+			n2 += 1
+			if n2 > 70:
+				break
+	print("VENTEST DONE ms ", Time.get_ticks_msec() - t0)
+	get_tree().quit()
+
+
 func _selftest() -> void:
 	while loading or presim_on:
 		await get_tree().process_frame
@@ -2607,6 +2751,18 @@ func _selftest() -> void:
 	_on_meta("age:3")
 	_open_display()
 	_gift()
+	# Höchster Großmeister: Auswahlfenster, Ehrwürdige im Inspektor, Gebiete
+	_click_tool(Powers.tool_by_id("s_v9"))
+	_on_meta("al9:1")
+	_on_meta("p9:24")
+	hud.close_modal()
+	print("v9 ", powers.v9_text(), " · ", powers.spawn_at(Powers.tool_by_id("s_v9"), c.x - 20.0, c.y))
+	for u4: Unit in sim.units:
+		if u4.k == "p" and u4.rank >= 9:
+			_unit_body(u4)
+			powers.unit_lines(u4)
+	print("dominions ", sim.ven_dominions().size(), " era ", sim.era_text())
+	tool_id = ""
 	var t1: int = Time.get_ticks_msec()
 	for k: int in range(400):
 		sim.step(Sim.DT)

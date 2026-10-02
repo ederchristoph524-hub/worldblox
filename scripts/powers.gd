@@ -102,6 +102,7 @@ static func _build_tools() -> Array:
 	L.append({"id": "s_gi8", "tab": 6, "g": 1, "n": "Rang-8-Gu-Unsterblicher", "d": "Fast ein Ehrwürdiger – vom Himmelswillen beobachtet.", "m": "spawn", "sp": "gi", "r": 8})
 	for vd: Dictionary in Lore.VEN:
 		L.append({"id": "s_v_" + str(vd["id"]), "tab": 6, "g": 2, "n": vd["t"], "d": str(vd["d"]) + " %s-Pfad, %s. Nur einer zur selben Zeit." % [GuData.PATH_NAME[int(vd["p"])], "dämonisch" if int(vd["al"]) == 1 else "rechtschaffen"], "m": "spawn", "sp": "ven", "ven": vd["id"]})
+	L.append({"id": "s_v9", "tab": 6, "g": 2, "n": "Höchster Großmeister (Rang 9 nach Wahl)", "d": "Wähle Pfad und Gesinnung, dann tippe auf die Karte: Ein Rang-9-Ehrwürdiger mit Höchster-Großmeister-Errungenschaft erscheint, errichtet nahe dem Ort seinen Sitz und seine Blutlinie, unterwirft die Clans ringsum – und sein Pfad blüht in der ganzen Welt. Einer je Pfad.", "m": "spawn", "sp": "ven9"})
 	for fd: Dictionary in Lore.FIG:
 		L.append({"id": "s_f_" + str(fd["id"]), "tab": 6, "g": 3, "n": (str(fd["sur"]) + " " + str(fd["given"])).strip_edges(), "d": str(fd["d"]) + " (" + GuData.rank_title(int(fd["r"])) + ")", "m": "spawn", "sp": "fig", "fig": fd["id"]})
 	# --- Reiter 5: wilde Gu und Unsterbliche Gu ---
@@ -110,7 +111,13 @@ static func _build_tools() -> Array:
 		L.append({"id": "s_gu%d" % pth, "tab": 5, "g": 2, "n": "Wilde %s-Gu" % GuData.PATH_NAME[pth], "d": "z. B. %s. Gu-Meister fangen sie und nehmen sie in ihre Sammlung auf." % ", ".join(Lore.mgu(pth).slice(0, 3)), "m": "spawn", "sp": "gu", "path": pth})
 	for gid: String in Lore.IGU_BTN:
 		var e: Dictionary = Lore.igu(gid)
+		if int(e["r"]) >= 9:
+			continue   # steht in der Gruppe „Rang-9-Gu“
 		L.append({"id": "s_ig_" + gid, "tab": 5, "g": 3, "n": e["n"], "d": str(e["d"]) + " Rang %d. Nur Gu-Unsterbliche können es fangen." % int(e["r"]), "m": "spawn", "sp": "igu", "igu": gid})
+	# Gruppe „Rang-9-Gu“: alle bekannten Gu ab Rang 9 (inkl. Gu-Häuser, Schicksals-Gu und Rang-10-Legenden)
+	for gid2: String in Lore.igu_top():
+		var e2: Dictionary = Lore.igu(gid2)
+		L.append({"id": "s_ig_" + gid2, "tab": 5, "g": 4, "n": e2["n"], "d": str(e2["d"]) + " Rang %d · %s-Pfad. Nur Gu-Unsterbliche können es fangen." % [int(e2["r"]), GuData.PATH_NAME[int(e2["p"])]], "m": "spawn", "sp": "igu", "igu": gid2})
 	L.append({"id": "s_ig_rand", "tab": 5, "g": 3, "n": "Zufälliges Unsterbliches Gu", "d": "Eines von %d Unsterblichen Gu der Enzyklopädie." % Lore.IGU.size(), "m": "spawn", "sp": "igu", "igu": ""})
 	# --- Reiter 0: Orte ---
 	for pt: String in Lore.PLACE_ORDER:
@@ -154,6 +161,9 @@ var _seg_from: Vector2 = Vector2(-1, -1)
 ## Göttliche Hand: gehaltene Wesen und ihr Abstand zum Finger
 var held: Array[Unit] = []
 var held_off: Array[Vector2] = []
+## Auswahl für „Höchster Großmeister (Rang 9 nach Wahl)“: Pfad (-1 = zufällig) und Gesinnung (1 = dämonisch)
+var v9_path: int = -1
+var v9_al: int = 0
 
 
 func _init(s: Sim) -> void:
@@ -445,6 +455,11 @@ func spawn_at(t: Dictionary, wx: float, wy: float) -> String:
 				if vd["id"] == t["ven"]:
 					return sim.spawn_venerable(vd, wx, wy)
 			return ""
+		"ven9":
+			if tt == GuData.WALL:
+				return "Hier kann kein Ehrwürdiger seinen Sitz errichten."
+			var p9: int = v9_path if v9_path >= 0 else randi() % GuData.PATH_NAME.size()
+			return sim.spawn_custom_venerable(p9, v9_al, wx, wy)
 		"fig":
 			if not land:
 				return "Hier kann niemand leben."
@@ -1175,7 +1190,7 @@ static func _bar(frac: float, col: Color, width: int = 12) -> String:
 func village_lines(v: Village) -> String:
 	var c: Clan = sim.clans[v.clan]
 	var mt: String = "[color=#9db09e]"
-	var s: String = ""
+	var s: String = sim.ven.village_line(c.id)
 	var capv: Village = sim.villages[c.cap] if c.cap >= 0 and c.cap < sim.villages.size() else null
 	s += mt + "Hauptstadt[/color]  " + ("[color=#ffd24a]dieses Dorf[/color]" if c.cap == v.id else (capv.name if capv != null else "–")) + "\n"
 	var L: Unit = c.lead
@@ -1192,9 +1207,16 @@ func village_lines(v: Village) -> String:
 	return s
 
 
-## Zusatzzeilen für den Wesen-Inspektor (Segen, Fluch, Himmelsschutz, Seuche, Besessenheit, Boot).
+## Text der aktuellen Auswahl für „Höchster Großmeister“.
+func v9_text() -> String:
+	if v9_path < 0:
+		return "Pfad: zufällig · " + ("dämonisch" if v9_al == 1 else "rechtschaffen")
+	return "%s-Pfad · %s – %s" % [GuData.PATH_NAME[v9_path], "dämonisch" if v9_al == 1 else "rechtschaffen", GuData.PATH_NAME[v9_path] + ("-Dämonen-Ehrwürdiger" if v9_al == 1 else "-Unsterblicher-Ehrwürdiger")]
+
+
+## Zusatzzeilen für den Wesen-Inspektor (Ehrwürdige, Segen, Fluch, Himmelsschutz, Seuche, Besessenheit, Boot).
 func unit_lines(u: Unit) -> String:
-	var s: String = ""
+	var s: String = sim.ven.unit_lines(u) if u.k == "p" and u.rank >= 9 else ""
 	if u.undead:
 		s += "\n[color=#86e04a]Wandelnde Leiche – zerfällt in wenigen Jahren[/color]"
 	elif u.zin > 0.0:
