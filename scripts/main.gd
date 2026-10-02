@@ -148,6 +148,11 @@ func _ready() -> void:
 		if a.begins_with("--hdsheet="):
 			Sprites.hd_sheet(a.substr(10), Sprites.hd_sheet_extra())
 			get_tree().quit()
+		if a.begins_with("--fxshots="):
+			_dev_fxshots(a.substr(10))
+		if a.begins_with("--beastsheet="):
+			Beasts.sheet(a.substr(13))
+			get_tree().quit()
 
 
 func _build_scene() -> void:
@@ -192,6 +197,9 @@ func _build_scene() -> void:
 	terr_ov = TerrOverlay.new()
 	terr_ov.m = self
 	world_root.add_child(terr_ov)
+	# Objekte der Nahansicht (Bäume, Felsen) über den Gebietsfarben – die Fläche tönt nur den Boden
+	detail.feat.reparent(world_root)
+	world_root.move_child(detail.feat, terr_ov.get_index() + 1)
 	ents = EntityLayer.new()
 	ents.m = self
 	ents.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
@@ -1605,7 +1613,18 @@ class EntityLayer:
 	func _ready() -> void:
 		sink = func(r: Rect2, c: Color) -> void: draw_rect(r, c)
 
+	## Entwickler: CPU-Zeit von _draw (FXPERF/GFXPERF)
+	var draw_us_sum: int = 0
+	var draw_n: int = 0
+
 	func _draw() -> void:
+		var t_us: int = Time.get_ticks_usec()
+		_draw_all()
+		_pm(6)
+		draw_us_sum += Time.get_ticks_usec() - t_us
+		draw_n += 1
+
+	func _draw_all() -> void:
 		var sim: Sim = m.sim
 		var z: float = m.z
 		var vs: Vector2 = m.get_viewport_rect().size
@@ -1615,6 +1634,7 @@ class EntityLayer:
 		var vx1: float = (vs.x - o.x) / z + 16.0
 		var vy1: float = (vs.y - o.y) / z + 20.0
 		var tnow: float = Time.get_ticks_msec() / 1000.0
+		_pt = Time.get_ticks_usec()
 		# Feuer
 		for i: int in sim.fire.keys():
 			var x: float = i % GuData.W
@@ -1674,78 +1694,31 @@ class EntityLayer:
 					else:
 						draw_rect(Rect2(x0, a.y, x1 - x0 + 1.0, 1.0), Color(road, ra))
 						draw_rect(Rect2(d2.x, y0, 1.0, y1 - y0 + 1.0), Color(road, ra))
-		# Gebäude (von hinten nach vorne)
-		var vis: Array[Building] = []
+		_pm(0)
+		# Gebäude, Orte, Wesen und verdeckende Bäume der Nahansicht: gemeinsam nach der Fußzeile sortiert
+		# (Schlüssel = Fußzeile · 256 << 20 | Index, native Sortierung)
+		items.clear()
+		keys.clear()
 		for b: Building in sim.buildings:
 			if b == null:
 				continue
 			if b.x > vx1 or b.y > vy1 or b.x + 16 < vx0 or b.y + 16 < vy0:
 				continue
-			vis.append(b)
-		vis.sort_custom(func(p: Building, q: Building) -> bool: return p.y + p.h < q.y + q.h)
-		for b: Building in vis:
-			var v: Village = sim.villages[b.v]
-			var c: Clan = sim.clans[v.clan]
-			# Nahansicht: Gebäude mit 4 Texeln je Kachel, Fußpunkt (Meta „foot“) auf Mitte der Grundfläche-Unterkante;
-			# im Fernblick (oder solange das Bild noch entsteht) das grobe Bild mit einem Pixel je Kachel
-			var key: String = Sprites.building_key(b, v)
-			# schon ab z 1,8 anfordern, damit die Bilder beim Umschalten fertig sind
-			var hdt: ImageTexture = Sprites.hd_building(c.col, v.race, key) if z >= 1.8 else null
-			var tex: Texture2D = hdt if z >= Detail.Z_ON else null
-			var dx: float
-			var dy: float
-			var tw: float
-			var th: float
-			if tex != null:
-				var foot: Vector2 = tex.get_meta("foot")
-				var tsz: Vector2 = tex.get_size() / float(Detail.DS)
-				dx = b.x + b.w * 0.5 - foot.x / Detail.DS
-				dy = b.y + b.h - foot.y / Detail.DS
-				tw = tsz.x
-				th = tsz.y
-				draw_texture_rect(tex, Rect2(dx, dy, tsz.x, tsz.y), false)
-			else:
-				tex = Sprites.clan_textures(c.col, v.race)[key]
-				tw = tex.get_width() - 1
-				th = tex.get_height() - 1
-				dx = b.x - floori((tw - b.w) / 2.0)
-				dy = b.y + b.h - th
-				draw_texture(tex, Vector2(dx, dy))
-			if key == "fire":
-				# Flammen in Viertelkacheln über dem Holzstoß
-				var fx: float = b.x + b.w * 0.5
-				var fy: float = dy + 2.4
-				for k: int in range(5):
-					var ph: float = tnow * 9.0 + k * 1.7
-					var fh: float = 0.9 + 0.5 * absf(sin(ph))
-					var ox: float = (k - 2) * 0.32
-					draw_rect(Rect2(fx + ox - 0.16, fy - fh * (1.0 - absf(k - 2) * 0.25), 0.36, fh), Color("#e0402a") if k % 2 == 0 else Color("#ff7a2a"))
-				draw_rect(Rect2(fx - 0.4, fy - 0.9 - 0.25 * sin(tnow * 11.0), 0.8, 0.9), Color("#ffb43a"))
-				draw_rect(Rect2(fx - 0.2, fy - 0.6 - 0.2 * sin(tnow * 13.0), 0.4, 0.6), Color("#ffe27a"))
-				draw_circle(Vector2(fx, fy - 0.4), 2.4, Color(1.0, 0.6, 0.2, 0.08 + 0.03 * sin(tnow * 7.0)))
-				if randf() < 0.03:
-					sim.parts.append({"x": fx, "y": fy - 1.4, "vx": (randf() - 0.5) * 0.6, "vy": -2.0, "l": 1.6, "ml": 1.6, "c": Color(0.55, 0.53, 0.5, 0.5), "s": 0.5, "g": 0.0})
-			elif key == "pen" and z > 1.6:
-				Sprites.draw_pen_animals(sink, b.x, b.y, tnow, b.id)
-			if b.type == "forge" and randf() < 0.04:
-				sim.parts.append({"x": dx + 7.2, "y": dy + 0.2, "vx": (randf() - 0.5) * 0.6, "vy": -2.4, "l": 1.4, "ml": 1.4, "c": Color(0.59, 0.94, 0.78, 0.55), "s": 1.0, "g": 0.0})
-			if insp_open and m.sel_vil != null and b.v == m.sel_vil.id:
-				draw_rect(Rect2(dx - 0.5, dy - 0.5, tw + 1.0, th + 1.0), Color(1, 0.9, 0.47, 0.9), false, 1.5 / z)
-		# Orte (Gesegnete Länder, Himmelshof, Traumreiche …)
+			_add(b.y + b.h, b)
 		for p: Place in sim.places:
 			if not p.alive:
 				continue
 			var ps: float = Sprites.place_size(p.type)
 			if p.x < vx0 - ps or p.x > vx1 + ps or p.y < vy0 - ps or p.y > vy1 + ps:
 				continue
-			_draw_place(p, tnow, insp_open and m.sel_place == p)
+			_add(p.y + (40.0 if p.type in Sprites.PLACE_FLOAT else 0.0), p)
 		# Wesen (Kontur etwa 1 Bildschirmpixel breit, im Fernblick keine)
-		var ol: float = 0.0 if z * GuMain.PS < 0.5 else clampf(0.9 / (z * GuMain.PS), 0.4, 0.9)
+		ol = 0.0 if z * GuMain.PS < 0.5 else clampf(0.9 / (z * GuMain.PS), 0.4, 0.9)
 		Sprites.outline_col = Color(Sprites.OUTLINE, clampf((z * GuMain.PS - 0.6) / 1.0, 0.0, 0.92))
 		# Übersicht großer Karten (eine Figur kleiner als etwa ein Bildschirmpixel): gewöhnliche Wesen nur als Farbtupfen
 		var dots: bool = z * GuMain.PS < 0.33
 		# Ränge: Himmelsverdunkelung der Ehrwürdigen und Glanz der Unsterblichen unter allen Wesen
-		var pipz: bool = z * GuMain.PS > 0.55
+		pipz = z * GuMain.PS > 0.55
 		var v9: bool = false
 		for u: Unit in sim.units:
 			if u.k == "p" and u.rank >= 6 and u.hp > 0.0 and u.x > vx0 - 50.0 and u.x < vx1 + 50.0 and u.y > vy0 - 50.0 and u.y < vy1 + 50.0:
@@ -1754,6 +1727,7 @@ class EntityLayer:
 					v9 = true
 					draw_rect(Rect2(vx0, vy0, vx1 - vx0, vy1 - vy0), Color(0.08, 0.04, 0.1, 0.1 + 0.03 * sin(tnow * 1.1)))
 				_draw_imm_aura(u, tnow)
+		var close: bool = z >= 2.4
 		for u: Unit in sim.units:
 			if u.x < vx0 or u.x > vx1 or u.y < vy0 or u.y > vy1:
 				continue
@@ -1763,36 +1737,66 @@ class EntityLayer:
 				var dc: Color = (sim.clans[u.clan].col if u.clan >= 0 else Color("#8e8676")) if u.k == "p" else Color(0.5, 0.42, 0.32)
 				draw_rect(Rect2(u.x - 0.7, u.y - 2.0, 1.4, 2.0), dc)
 				continue
-			if u.k == "p":
-				var cl: Color = sim.clans[u.clan].col if u.clan >= 0 else (Color("#3a2a3a") if u.rogue else Color("#8e8676"))
-				if u.fig != "" or u.ow:
-					cl = m.unit_col(u)
-				if u.rank > 0 and u.rank < 6:
-					# Essenz-Schein am Boden: wächst mit dem Rang
-					var ec0: Color = GuData.ESS_COL[u.rank]
-					draw_circle(Vector2(u.x, u.y - 0.2), 0.45 + u.rank * 0.22 + u.stage * 0.05, Color(ec0, 0.10 + 0.03 * u.rank))
-				Sprites.draw_person(sink, u.x, u.y, GuMain.PS, u.race, u.rank, cl, u.face, sim.uage(u) >= 14.0, u.moving, u.anim, u.flash > 0.0, u.st == "work", u.rogue, u.sick > 0.0, u.luck > 0.0, ol, tnow, u.ow)
-				if pipz and u.rank > 0:
-					_draw_pips(u)
+			if close:
+				gf.track(u, GuMain.PS * ((2.1 if u.rank >= 9 else 1.45) if (u.k == "p" and u.rank >= 6) else 1.0), sim)
+			_add(u.y, u)
+		if close:
+			gf.flush()
+		_pm(1)
+		# Bäume, die vor einem Wesen oder Gebäude stehen und es überdecken, darüber nachzeichnen
+		var det: Detail = m.detail
+		if det.visible and det.amt > 0.0:
+			occd.clear()
+			var n0: int = items.size()
+			for k: int in range(n0):
+				var it: Variant = items[k]
+				var r: Rect2
+				if it is Unit:
+					var uu: Unit = it
+					var hs: float = 2.8 * (2.1 if uu.rank >= 9 else (1.45 if uu.rank >= 6 else 1.0)) if uu.k == "p" else 2.4 * float(GuData.SPEC[uu.sp].get("ss", 1.0))
+					r = Rect2(uu.x - hs * (0.3 if uu.k == "p" else 0.45), uu.y - hs, hs * (0.6 if uu.k == "p" else 0.9), hs)
+				elif it is Building:
+					var bb: Building = it
+					r = Rect2(bb.x - 0.5, bb.y - 2.0, bb.w + 1.0, bb.h + 2.0)
+				else:
+					continue
+				det.occluders_cached(r.position.x, r.end.x, r.position.y, r.end.y, occd)
+			for e: Array in occd.values():
+				_add(float(e[2]) - 0.001, e)
+		_pm(2)
+		var srt: PackedInt64Array = keys.duplicate()
+		srt.sort()
+		var insp_sel: bool = insp_open and m.sel_vil != null
+		var tm: Color = Color(1, 1, 1, det.amt)
+		for key: int in srt:
+			var it2: Variant = items[key & 0xFFFFF]
+			if it2 is Unit:
+				_draw_unit(it2 as Unit, tnow)
+			elif it2 is Building:
+				_draw_building(it2 as Building, tnow, insp_sel)
+			elif it2 is Place:
+				var pl: Place = it2
+				_draw_place(pl, tnow, insp_open and m.sel_place == pl)
 			else:
-				Sprites.draw_animal(sink, u.x, u.y, GuMain.PS, u.sp, u.face, u.moving or u.fly, u.anim, u.flash > 0.0, u.tide, u.id, ol, u.path)
+				var ea: Array = it2
+				draw_texture_rect(ea[0], ea[1], false, tm)
+		_pm(3)
 		var su: Unit = m.sel_unit
 		if su != null and su.hp > 0.0:
 			draw_arc(Vector2(su.x, su.y), 2.4, 0.0, TAU, 24, Color("#ffe27a"), maxf(0.15, 1.5 / z))
+		var rdt: float = get_process_delta_time()
+		# Umgebung: Vögel, springende Fische (nur nah)
+		if z >= 3.2 and m.detail.amt > 0.5:
+			gf.ambient(self, sim, Rect2(vx0 + 16.0, vy0 + 8.0, vx1 - vx0 - 32.0, vy1 - vy0 - 28.0), rdt, z, tnow)
+		# Hiebe und Treffer
+		if close:
+			gf.draw_local(self, rdt, z)
+		_pm(4)
 		# Geschosse
 		for p: Dictionary in sim.projs:
-			var c2: Color = p["c"]
-			var big2: bool = p["big"]
-			var pos: Vector2 = Vector2(p["x"], p["y"])
-			if int(p["path"]) == 1:
-				draw_arc(pos, 2.2 if big2 else 1.3, float(p["a"]) - 1.3, float(p["a"]) + 1.3, 8, c2, 0.8 if big2 else 0.5)
-			else:
-				var r: float = 1.4 if big2 else 0.7
-				draw_rect(Rect2(pos - Vector2(r, r), Vector2(r * 2, r * 2)), Color(c2, 0.5))
-				draw_rect(Rect2(pos - Vector2(0.3, 0.3), Vector2(0.6, 0.6)), Color.WHITE)
+			GfxFx.proj(self, p, z, tnow)
 		# Partikel
 		var pi: int = sim.parts.size() - 1
-		var rdt: float = get_process_delta_time()
 		while pi >= 0:
 			var q: Dictionary = sim.parts[pi]
 			q["l"] -= rdt
@@ -1808,6 +1812,7 @@ class EntityLayer:
 			pi -= 1
 		if sim.parts.size() > 1800:
 			sim.parts = sim.parts.slice(sim.parts.size() - 1800)
+		_pm(5)
 		# Effekte
 		var fi: int = sim.fx.size() - 1
 		while fi >= 0:
@@ -1820,29 +1825,246 @@ class EntityLayer:
 			var t: float = 1.0 - e["l"] / e["ml"]
 			match str(e["k"]):
 				"ring":
-					draw_arc(Vector2(e["x"], e["y"]), maxf(0.1, float(e["r"]) * (0.3 + t * 0.8)), 0.0, TAU, 40, Color(e["c"], 1.0 - t), maxf(0.5, 2.0 / z))
+					GfxFx.ring(self, e, t, z)
 				"bolt":
-					var pts: PackedVector2Array = e["pts"]
-					draw_polyline(pts, Color(1, 0.97, 0.78, e["l"] / e["ml"]), maxf(0.7, 2.4 / z))
-					draw_polyline(pts, Color(0.73, 0.55, 1.0, e["l"] / e["ml"]), maxf(0.3, 1.0 / z))
+					GfxFx.bolt(self, e, z)
 				"pillar":
-					var w: float = 3.0 * float(e["w"])
-					draw_rect(Rect2(float(e["x"]) - w / 2.0, float(e["y"]) - 70.0, w, 70.0), Color(e["c"], (1.0 - t) * 0.7))
-					draw_rect(Rect2(float(e["x"]) - w / 6.0, float(e["y"]) - 70.0, w / 3.0, 70.0), Color(1, 1, 1, (1.0 - t) * 0.9))
+					GfxFx.pillar(self, e, t, z)
 				"cres":
 					var a: float = e["a"]
-					draw_arc(Vector2(e["x"], e["y"]), float(e["r"]) * (0.6 + t * 0.4), a - 1.1, a + 1.1, 32, Color(0.91, 0.96, 1.0, 1.0 - t), 4.0 * (1.0 - t) + 1.0)
+					var cc: Vector2 = Vector2(e["x"], e["y"])
+					draw_arc(cc, float(e["r"]) * (0.6 + t * 0.4), a - 1.1, a + 1.1, 32, Color(0.6, 0.8, 1.0, (1.0 - t) * 0.4), 9.0 * (1.0 - t) + 2.0)
+					draw_arc(cc, float(e["r"]) * (0.6 + t * 0.4), a - 1.1, a + 1.1, 32, Color(0.91, 0.96, 1.0, 1.0 - t), 4.0 * (1.0 - t) + 1.0)
 				"met":
 					var sx0: float = float(e["x"]) - 60.0
 					var sy0: float = float(e["y"]) - 80.0
 					var px: float = sx0 + (float(e["x"]) - sx0) * t
 					var py: float = sy0 + (float(e["y"]) - sy0) * t
-					draw_line(Vector2(px - 12, py - 16), Vector2(px, py), Color("#ff9a3a"), 4.0 if e["big"] else 2.0)
-					var rr: float = 3.0 if e["big"] else 1.5
+					var bigm: bool = e["big"]
+					draw_line(Vector2(px - 18, py - 24), Vector2(px, py), Color(1.0, 0.45, 0.15, 0.35), 7.0 if bigm else 3.5)
+					draw_line(Vector2(px - 12, py - 16), Vector2(px, py), Color("#ff9a3a"), 4.0 if bigm else 2.0)
+					var rr: float = 3.0 if bigm else 1.5
+					draw_circle(Vector2(px, py), rr * 1.8, Color(1.0, 0.7, 0.3, 0.35))
 					draw_rect(Rect2(px - rr, py - rr, rr * 2, rr * 2), Color("#ffe4a0"))
 				"km":
-					_draw_km(e, t)
+					GfxFx.km(self, e, t, z, sim)
 			fi -= 1
+
+	## Entwickler: Zeit je Abschnitt von _draw (µs, aufsummiert)
+	var prof: PackedInt64Array = PackedInt64Array([0, 0, 0, 0, 0, 0, 0])
+	var _pt: int = 0
+
+	func _pm(k: int) -> void:
+		var now: int = Time.get_ticks_usec()
+		prof[k] += now - _pt
+		_pt = now
+
+	var items: Array = []
+	var keys: PackedInt64Array = PackedInt64Array()
+	var occd: Dictionary = {}
+	var gf: GfxFx = GfxFx.new()
+	var ol: float = 0.0
+	var pipz: bool = false
+	var _circ: PackedVector2Array = PackedVector2Array()
+
+	func _add(y: float, it: Variant) -> void:
+		keys.append((int(clampf(y + 64.0, 0.0, 4000.0) * 256.0) << 20) | items.size())
+		items.append(it)
+
+	## Gebäude der Nahansicht (4 Texel je Kachel) bzw. grobes Bild im Fernblick; Gehege-Tiere, Feuer, Rauch, Felder im Wind.
+	func _draw_building(b: Building, tnow: float, insp_sel: bool) -> void:
+		var sim: Sim = m.sim
+		var z: float = m.z
+		var v: Village = sim.villages[b.v]
+		var c: Clan = sim.clans[v.clan]
+		# Nahansicht: Gebäude mit 4 Texeln je Kachel, Fußpunkt (Meta „foot“) auf Mitte der Grundfläche-Unterkante;
+		# im Fernblick (oder solange das Bild noch entsteht) das grobe Bild mit einem Pixel je Kachel
+		var key: String = Sprites.building_key(b, v)
+		# schon ab z 1,8 anfordern, damit die Bilder beim Umschalten fertig sind
+		var hdt: ImageTexture = Sprites.hd_building(c.col, v.race, key) if z >= 1.8 else null
+		var tex: Texture2D = hdt if z >= Detail.Z_ON else null
+		var dx: float
+		var dy: float
+		var tw: float
+		var th: float
+		if tex != null:
+			var foot: Vector2 = tex.get_meta("foot")
+			var tsz: Vector2 = tex.get_size() / float(Detail.DS)
+			dx = b.x + b.w * 0.5 - foot.x / Detail.DS
+			dy = b.y + b.h - foot.y / Detail.DS
+			tw = tsz.x
+			th = tsz.y
+			draw_texture_rect(tex, Rect2(dx, dy, tsz.x, tsz.y), false)
+		else:
+			tex = Sprites.clan_textures(c.col, v.race)[key]
+			tw = tex.get_width() - 1
+			th = tex.get_height() - 1
+			dx = b.x - floori((tw - b.w) / 2.0)
+			dy = b.y + b.h - th
+			draw_texture(tex, Vector2(dx, dy))
+		var hd: bool = hdt != null and z >= Detail.Z_ON
+		if key == "fire":
+			# Flammen in Viertelkacheln über dem Holzstoß
+			var fx: float = b.x + b.w * 0.5
+			var fy: float = dy + 2.4
+			for k: int in range(5):
+				var ph: float = tnow * 9.0 + k * 1.7
+				var fh: float = 0.9 + 0.5 * absf(sin(ph))
+				var ox: float = (k - 2) * 0.32
+				draw_rect(Rect2(fx + ox - 0.16, fy - fh * (1.0 - absf(k - 2) * 0.25), 0.36, fh), Color("#e0402a") if k % 2 == 0 else Color("#ff7a2a"))
+			draw_rect(Rect2(fx - 0.4, fy - 0.9 - 0.25 * sin(tnow * 11.0), 0.8, 0.9), Color("#ffb43a"))
+			draw_rect(Rect2(fx - 0.2, fy - 0.6 - 0.2 * sin(tnow * 13.0), 0.4, 0.6), Color("#ffe27a"))
+			draw_circle(Vector2(fx, fy - 0.4), 2.4, Color(1.0, 0.6, 0.2, 0.08 + 0.03 * sin(tnow * 7.0)))
+			if randf() < 0.03:
+				sim.parts.append({"x": fx, "y": fy - 1.4, "vx": (randf() - 0.5) * 0.6, "vy": -2.0, "l": 1.6, "ml": 1.6, "c": Color(0.55, 0.53, 0.5, 0.5), "s": 0.5, "g": 0.0})
+		elif key == "pen" and z > 1.6:
+			_pen_animals(b, tnow)
+		elif (key == "farm") and hd and z >= 4.0:
+			GfxFx.field_wind(self, Rect2(b.x + 0.8, b.y + 0.8, b.w - 1.6, b.h - 1.6), tnow)
+		if hd and z >= 4.0 and (key == "house" or key == "house_b" or key == "hall1" or key == "hall2" or key == "hall" or key == "hut"):
+			GfxFx.smoke(self, dx + tw * 0.68, dy + th * 0.18, b.id, tnow)
+		if b.type == "forge" and randf() < 0.04:
+			sim.parts.append({"x": dx + 7.2, "y": dy + 0.2, "vx": (randf() - 0.5) * 0.6, "vy": -2.4, "l": 1.4, "ml": 1.4, "c": Color(0.59, 0.94, 0.78, 0.55), "s": 1.0, "g": 0.0})
+		if insp_sel and b.v == m.sel_vil.id:
+			draw_rect(Rect2(dx - 0.5, dy - 0.5, tw + 1.0, th + 1.0), Color(1, 0.9, 0.47, 0.9), false, 1.5 / z)
+
+	## Schafe, Schweine und Hühner im Gehege (HD-Bilder, sobald fertig).
+	func _pen_animals(b: Building, tnow: float) -> void:
+		if m.z < Detail.Z_ON:
+			Sprites.draw_pen_animals(sink, b.x, b.y, tnow, b.id)
+			return
+		var kinds: Array[String] = ["sheep", "pig", "chicken"]
+		var ok: bool = true
+		for kd: String in kinds:
+			if Beasts.get_set(kd).is_empty():
+				ok = false
+		if not ok:
+			Sprites.draw_pen_animals(sink, b.x, b.y, tnow, b.id)
+			return
+		var list: Array[Vector3] = []
+		for k: int in range(4):
+			var ph: float = tnow * (0.18 + 0.05 * k) + b.id * 1.7 + k * 2.1
+			list.append(Vector3(b.x + 4.0 + k * 2.2 + sin(ph) * 2.0, b.y + 6.0 + (k % 2) * 1.8 + cos(ph * 0.7) * 1.2, k))
+		# nach y ordnen (vier Tiere: einfache Einfügesortierung statt sort_custom)
+		for i: int in range(1, list.size()):
+			var j: int = i
+			while j > 0 and list[j - 1].y > list[j].y:
+				var tmp: Vector3 = list[j]
+				list[j] = list[j - 1]
+				list[j - 1] = tmp
+				j -= 1
+		for e: Vector3 in list:
+			var k2: int = int(e.z)
+			var ph2: float = tnow * (0.18 + 0.05 * k2) + b.id * 1.7 + k2 * 2.1
+			var bs: Dictionary = Beasts.get_set(kinds[(b.id + k2) % 3])
+			var mv: bool = absf(cos(ph2)) > 0.3
+			var fi: int = int(tnow * 8.0 + k2) % 4 if mv else 4
+			_beast_tex(bs, fi, false, e.x, e.y, 1 if cos(ph2) > 0.0 else -1, 0.0, Color.WHITE, false)
+
+	## Ein Bild aus einem Tier-Satz zeichnen (Fußpunkt auf x, y; f = Blickrichtung, lift = Flughöhe in Kacheln).
+	func _beast_tex(bs: Dictionary, fi: int, fly: bool, x: float, y: float, f: int, lift: float, mod: Color, flash: bool) -> void:
+		var arr: Array = bs["fly"] if fly else bs["walk"]
+		var tex: Texture2D = arr[fi]
+		var px: float = float(bs["px"]) * GuMain.PS
+		var foot: Vector2 = bs["foot"]
+		var sz: Vector2 = tex.get_size() * px
+		var r: Rect2
+		if f >= 0:
+			r = Rect2(x - foot.x * px, y - foot.y * px - lift, sz.x, sz.y)
+		else:
+			r = Rect2(x + foot.x * px, y - foot.y * px - lift, -sz.x, sz.y)
+		draw_texture_rect(tex, r, false, mod)
+		if flash:
+			var wa: Array = bs["fwhite"] if fly else bs["white"]
+			draw_texture_rect(wa[fi], r, false, Color(1, 1, 1, 0.85))
+
+	## Wesen zeichnen: Menschen als Figuren (mit Boot, Banner), Tiere als HD-Bilder mit Stufen-Schein.
+	func _draw_unit(u: Unit, tnow: float) -> void:
+		var sim: Sim = m.sim
+		var z: float = m.z
+		if u.k == "p":
+			var cl: Color = sim.clans[u.clan].col if u.clan >= 0 else (Color("#3a2a3a") if u.rogue else Color("#8e8676"))
+			if u.fig != "" or u.ow:
+				cl = m.unit_col(u)
+			var on_boat: bool = false
+			if u.boat and z >= 2.0:
+				var ti: int = clampi(int(u.y), 0, GuData.H - 1) * GuData.W + clampi(int(u.x), 0, GuData.W - 1)
+				on_boat = GuData.is_water(sim.world.tile[ti])
+			if on_boat:
+				GfxFx.boat(self, u.x, u.y, u.face, cl, tnow, true)
+			elif u.rank > 0 and u.rank < 6:
+				# Essenz-Schein am Boden: wächst mit dem Rang
+				var ec0: Color = GuData.ESS_COL[u.rank]
+				draw_circle(Vector2(u.x, u.y - 0.2), 0.45 + u.rank * 0.22 + u.stage * 0.05, Color(ec0, 0.10 + 0.03 * u.rank))
+			var fy: float = u.y + (0.7 if on_boat else 0.0)
+			Sprites.draw_person(sink, u.x, fy, GuMain.PS, u.race, u.rank, cl, u.face, sim.uage(u) >= 14.0, u.moving and not on_boat, u.anim, u.flash > 0.0, u.st == "work", u.rogue, u.sick > 0.0, u.luck > 0.0, ol, tnow, u.ow)
+			if on_boat:
+				GfxFx.boat(self, u.x, u.y, u.face, cl, tnow, false)
+			elif z >= 3.0 and u.clan >= 0 and u.moving and (u.militia or (u.rank > 0 and u.rank < 6)) and u.id % 3 == 0 and not sim.clans[u.clan].war.is_empty():
+				GfxFx.banner(self, u.x, fy, u.face, cl, tnow, GuMain.PS)
+			if pipz and u.rank > 0:
+				_draw_pips(u)
+			return
+		var S: Dictionary = GuData.SPEC[u.sp]
+		var bs: Dictionary = Beasts.get_set(u.sp) if z >= 1.6 else {}
+		if bs.is_empty():
+			Sprites.draw_animal(sink, u.x, u.y, GuMain.PS, u.sp, u.face, u.moving or u.fly, u.anim, u.flash > 0.0, u.tide, u.id, ol, u.path)
+			return
+		var tier: int = int(S.get("tier", 0))
+		var ss: float = float(S.get("ss", 1.0))
+		var arch: String = S.get("arch", "wolf")
+		if tier >= 3:
+			_tier_glow(u, S, tier, ss, tnow)
+		var fly: bool = false
+		var fi: int = 4
+		if arch == "bat":
+			fly = true
+			fi = int(u.anim * 11.0 + u.id) % 4
+		elif arch == "dragon" or arch == "whale":
+			fi = int(u.anim * (6.0 if arch == "dragon" else 3.0) + u.id) % 4
+		elif u.moving and (u.fly or u.air > 0.0) and not (bs["fly"] as Array).is_empty():
+			fly = true
+			fi = int(u.anim * 13.0 + u.id) % 4
+		elif u.moving:
+			fi = int(u.anim * 10.0 + u.id * 0.37) % 4
+		var lift: float = 0.0
+		if fly or arch == "dragon" or (S.get("fly", false) and u.moving and arch != "crane"):
+			lift = (1.6 + 0.5 * ss) * (1.0 + 0.12 * sin(tnow * 2.0 + u.id))
+			# Schatten am Boden
+			GfxFx.ell(self, Vector2(u.x, u.y), 0.9 * ss, 0.3 * ss, Color(0, 0, 0, 0.2))
+		var mod: Color = Color(0.82, 0.8, 0.86) if u.tide else Color.WHITE
+		_beast_tex(bs, fi, fly, u.x, u.y, u.face, lift, mod, u.flash > 0.0)
+		if S.get("smoke", false) and GfxFx.RNG.randf() < 0.06:
+			sim.parts.append({"x": u.x + (GfxFx.RNG.randf() - 0.5) * 2.0 * ss, "y": u.y - 1.5 * ss, "vx": (GfxFx.RNG.randf() - 0.5) * 0.6, "vy": -1.6, "l": 1.6, "ml": 1.6, "c": Color(0.85, 0.87, 0.9, 0.4), "s": 0.9, "g": 0.0})
+		if arch == "whale" and int(u.anim * 1.5 + u.id) % 4 == 0:
+			var sx: float = u.x + u.face * 0.8 * ss
+			for k: int in range(4):
+				var a: float = -PI * 0.5 + (k - 1.5) * 0.35
+				draw_line(Vector2(sx, u.y - 1.6 * ss), Vector2(sx, u.y - 1.6 * ss) + Vector2(cos(a), sin(a)) * 1.6 * ss, Color(0.9, 0.97, 1.0, 0.7), 0.25)
+
+	## Bestienkönige und Ödbestien: Bodenschein und Aura je Stufe (3–5 Gold, 6 Violett/Pfadfarbe, 7 Rot, 8 Glut).
+	func _tier_glow(u: Unit, S: Dictionary, tier: int, ss: float, tnow: float) -> void:
+		var col: Color
+		if S.has("pc"):
+			col = Color(str(S["pc"]))
+		elif tier <= 5:
+			col = Color(1.0, 0.85, 0.35)
+		elif tier == 6:
+			col = Color(0.75, 0.45, 1.0)
+		elif tier == 7:
+			col = Color(1.0, 0.3, 0.2)
+		else:
+			col = Color(1.0, 0.45, 0.1)
+		var pul: float = 0.5 + 0.5 * sin(tnow * 2.4 + u.id)
+		var c: Vector2 = Vector2(u.x, u.y)
+		var r: float = (0.7 + 0.18 * (tier - 3)) * ss
+		GfxFx.ell(self, c, r * 1.25, r * 0.5, Color(col, 0.10 + 0.05 * pul))
+		GfxFx.ell(self, c, r * 0.85, r * 0.34, Color(col, 0.14 + 0.06 * pul))
+		if tier >= 6:
+			draw_circle(c - Vector2(0, ss * 0.9), r * (0.95 + 0.08 * pul), Color(col, 0.06 + 0.03 * pul))
+			GfxFx.ering(self, c, r * (1.25 + 0.15 * pul), r * 0.5 * (1.25 + 0.15 * pul), Color(col, 0.35 * (1.0 - pul) + 0.1), maxf(0.2, 1.2 / m.z), 28)
+			if GfxFx.RNG.randf() < 0.04 * (tier - 5):
+				m.sim.parts.append({"x": u.x + (GfxFx.RNG.randf() - 0.5) * 2.2 * ss, "y": u.y - GfxFx.RNG.randf() * ss, "vx": 0.0, "vy": -1.8 - GfxFx.RNG.randf(), "l": 1.0, "ml": 1.0, "c": Color(col.lightened(0.3), 0.8), "s": 0.4, "g": 0.0})
 
 	## Unsterbliche: pulsierender Glanz in der Unsterblichenessenz, Größe nach Rang. Rang 9: der Himmel verdunkelt
 	## sich weit um den Ehrwürdigen, darüber ein gelber Aprikosen-Schein und kreisende Ringe.
@@ -1860,6 +2082,8 @@ class EntityLayer:
 			draw_arc(c, 14.0 + 1.5 * pul, a0, a0 + TAU * 0.7, 48, Color(ec, 0.55), lw)
 			draw_arc(c, 22.0, -a0 * 0.7, -a0 * 0.7 + TAU * 0.45, 48, Color(ec, 0.3), lw)
 			draw_arc(c, 34.0, a0 * 0.4, a0 * 0.4 + TAU * 0.3, 64, Color(ec, 0.18), lw)
+			if m.z >= 2.4:
+				GfxFx.venerable(self, u, tnow, m.z, ec)
 			return
 		var r: float = 2.2 + (u.rank - 6) * 1.1 + (1.2 if sim_quasi(u) else 0.0)
 		for k: int in range(3):
@@ -1882,32 +2106,6 @@ class EntityLayer:
 			var px: float = x0 + k * (w + gap)
 			draw_rect(Rect2(px - 0.12 * sc, y0 - 0.12 * sc, w + 0.24 * sc, w + 0.24 * sc), Color(0.06, 0.05, 0.05, 0.7))
 			draw_rect(Rect2(px, y0, w, w), ec.lightened(0.35) if u.stage == 3 else ec)
-
-	## Mordzug: Strahlenkranz und Wellen in der Pfadfarbe, je nach Pfad mit eigener Form.
-	func _draw_km(e: Dictionary, t: float) -> void:
-		var c: Color = e["c"]
-		var p: int = e["p"]
-		var cen: Vector2 = Vector2(e["x"], e["y"])
-		var r: float = float(e["r"]) * (0.35 + t * 0.75)
-		var a0: float = t * 2.4
-		var al: float = 1.0 - t
-		var lw: float = maxf(0.4, 2.2 / m.z)
-		draw_circle(cen, r * 0.55, Color(c, 0.22 * al))
-		draw_arc(cen, r, 0.0, TAU, 40, Color(c, al), lw * 1.6)
-		draw_arc(cen, r * 0.7, 0.0, TAU, 32, Color(1, 1, 1, al * 0.8), lw)
-		var n: int = 12 if p in [5, 17, 20, 11] else 8
-		for k: int in range(n):
-			var a: float = a0 + k * TAU / n
-			var d0: float = r * 0.3
-			var d1: float = r * (1.05 if k % 2 == 0 else 0.8)
-			if p == 36 or p == 37 or p == 4:
-				# Klingen: schräge Striche
-				draw_line(cen + Vector2(cos(a), sin(a)) * d0, cen + Vector2(cos(a + 0.5), sin(a + 0.5)) * d1, Color(c.lightened(0.3), al), lw)
-			elif p == 2 or p == 8:
-				# Flammen/Blut: dicke Zungen
-				draw_line(cen + Vector2(cos(a), sin(a)) * d0, cen + Vector2(cos(a), sin(a)) * d1 - Vector2(0, r * 0.2 * (1.0 - t)), Color(c, al), lw * 2.2)
-			else:
-				draw_line(cen + Vector2(cos(a), sin(a)) * d0, cen + Vector2(cos(a), sin(a)) * d1, Color(c, al), lw)
 
 	## Ort zeichnen: Schatten, Bild (schwebend mit Auf und Ab), belebte Effekte.
 	func _draw_place(p: Place, tnow: float, sel: bool) -> void:
@@ -3415,6 +3613,8 @@ func _dev_gfx(dir: String) -> void:
 		await get_tree().process_frame
 	for k: int in range(20):
 		await get_tree().process_frame
+	while not detail.edt_ok:
+		await get_tree().process_frame
 	printerr("GFX start")
 	var te: int = Time.get_ticks_usec()
 	for c: int in range(sim.world.CXN * sim.world.CXN):
@@ -3475,7 +3675,10 @@ func _dev_gfx(dir: String) -> void:
 					spots[key] = Vector2(x, y)
 	printerr("GFX spots ", spots)
 	paused = true
+	var perf_only: bool = "--perfonly" in OS.get_cmdline_user_args()
 	for key: String in spots:
+		if perf_only:
+			break
 		var c: Vector2 = spots[key]
 		for zz: float in [2.4, 2.8, 3.3, 4.0, 10.0, 24.0]:
 			if zz == 24.0 and key != "dorf" and key != "kueste" and key != "gebirge":
@@ -3490,7 +3693,7 @@ func _dev_gfx(dir: String) -> void:
 			await _shot(dir + "/%s_z%s.png" % [key, str(zz).replace(".0", "")])
 			printerr("GFX shot ", key, " ", zz)
 	# Straßen-Probe nach den Vergleichsbildern: ein gewundener Weg neben dem Dorf (nur Entwickler-Welt)
-	if spots.has("dorf"):
+	if spots.has("dorf") and not perf_only:
 		var rp: Vector2 = spots["dorf"] + Vector2(-14, 10)
 		for k2: int in range(28):
 			var rx: int = int(rp.x) + k2
@@ -3505,6 +3708,25 @@ func _dev_gfx(dir: String) -> void:
 		_clamp_cam()
 		await _wait(0.8)
 		await _shot(dir + "/strasse_z10.png")
+	# CPU-Zeit von EntityLayer._draw an festen Stellen (Simulation läuft, damit Wesen laufen und kämpfen)
+	paused = false
+	for key2: String in ["dorf", "wald", "kueste"]:
+		if not spots.has(key2):
+			continue
+		for zz2: float in [6.0, 10.0]:
+			z = zz2
+			zoom_goal = -1.0
+			cam = spots[key2]
+			_clamp_cam()
+			await _wait(0.5)
+			var us0: int = ents.draw_us_sum
+			var n0: int = ents.draw_n
+			ents.prof.fill(0)
+			for k7: int in range(120):
+				await get_tree().process_frame
+			var nn: int = maxi(1, ents.draw_n - n0)
+			print("ENTPERF %s z%d entity draw avg ms %.3f sections us %s units %d" % [key2, int(zz2), (ents.draw_us_sum - us0) / 1000.0 / nn, str(Array(ents.prof).map(func(v: int) -> int: return v / nn)), ents.items.size()])
+	paused = true
 	# Kameraschwenk: Bildzeiten messen (Simulation angehalten), einmal mit und einmal ohne Nahansicht
 	paused = true
 	for pass_i: int in range(2):
@@ -3537,4 +3759,171 @@ func _dev_gfx(dir: String) -> void:
 		print("GFXPERF %s: pan z6 frames %d avg ms %.2f median %.2f p95 %.2f max %.2f" % [nm, times.size(), sum / times.size(), times[times.size() / 2], times[int(times.size() * 0.95)], times[times.size() - 1]])
 	detail.dev_off = false
 	print("GFXSHOTS DONE")
+	get_tree().quit()
+
+
+## Entwickler: -- --fresh --fxshots=<ordner> – flache Probewelt mit allen Tierarten (stehend und laufend, vor und
+## hinter Bäumen), Mordzügen aller Darstellungsarten, Fingerschnipsen, Blitz, Säule, Boot, Kriegsbanner,
+## Hieben und Treffern; Bilder bei verschiedenen Zoomstufen ohne Oberfläche, danach FXPERF (CPU-Zeit EntityLayer).
+func _dev_fxshots(dir: String) -> void:
+	while loading:
+		await get_tree().process_frame
+	_start_new_world(false, "flat", {"life": "none", "presim": false})
+	await get_tree().process_frame
+	while loading:
+		await get_tree().process_frame
+	for k: int in range(10):
+		await get_tree().process_frame
+	_set_ui_hidden(true)
+	show_names = false
+	show_terr = false
+	paused = true
+	var cx: int = W / 2
+	var cy: int = H / 2
+	var f: PackedByteArray = sim.world.feat
+	# Zoo: alle Arten in Reihen, jede zweite läuft
+	var keys: Array = GuData.SPEC.keys()
+	var x: float = cx - 40.0
+	var y: float = cy - 30.0
+	var rowh: float = 0.0
+	var k2: int = 0
+	for sp: String in keys:
+		var ss: float = float(GuData.SPEC[sp].get("ss", 1.0))
+		var wdt: float = 3.6 * ss + 1.5
+		if x + wdt > cx + 40.0:
+			x = cx - 40.0
+			y += rowh + 1.5
+			rowh = 0.0
+		var u: Unit = sim.mk_animal(x + wdt * 0.5, y + 2.6 * ss, sp)
+		u.moving = k2 % 2 == 1
+		u.anim = k2 * 0.13
+		u.face = 1 if k2 % 3 != 2 else -1
+		x += wdt
+		rowh = maxf(rowh, 2.6 * ss)
+		k2 += 1
+	# Bäume vor und hinter Tieren (Tiefensortierung)
+	for k3: int in range(10):
+		var tx: int = cx - 30 + k3 * 6
+		var ty: int = int(y + 12.0)
+		f[ty * W + tx] = GuData.F_TREE
+		f[(ty - 5) * W + tx + 3] = GuData.F_PINE
+		sim.world.mark_area(tx, ty)
+		sim.world.mark_area(tx + 3, ty - 5)
+		var a: Unit = sim.mk_animal(tx + 0.5, ty - 1.0, ["wolf", "deer", "bk10000" if k3 < 3 else "boar", "tiger" if k3 < 2 else "monkey"][k3 % 4])
+		a.face = 1
+		var pp: Unit = sim.mk_person(tx + 2.0, ty + 2.5, k3 % 4, 30.0)
+		pp.face = -1
+	# See für Boote und Fische
+	for yy: int in range(int(y) + 20, int(y) + 34):
+		for xx: int in range(cx - 40, cx + 40):
+			sim.world.tile[yy * W + xx] = GuData.DEEP if (yy > int(y) + 22 and yy < int(y) + 32) else GuData.SHAL
+			f[yy * W + xx] = 0
+			sim.world.mark_area(xx, yy)
+	sim.world.water_dirty = true
+	var cl: Clan = null
+	for k4: int in range(4):
+		var bp: Unit = sim.mk_person(cx - 30.0 + k4 * 12.0, y + 27.0, k4, 25.0)
+		bp.boat = true
+		bp.fxm = true
+		bp.face = 1 if k4 % 2 == 0 else -1
+	await _wait(1.0)
+	z = 9.0
+	zoom_goal = -1.0
+	cam = Vector2(cx, cy - 12.0)
+	_clamp_cam()
+	await _wait(1.5)
+	await _shot(dir + "/zoo_z9.png")
+	z = 18.0
+	cam = Vector2(cx - 22.0, cy - 22.0)
+	_clamp_cam()
+	await _wait(0.8)
+	await _shot(dir + "/zoo_z18a.png")
+	cam = Vector2(cx + 18.0, cy - 14.0)
+	_clamp_cam()
+	await _wait(0.8)
+	await _shot(dir + "/zoo_z18b.png")
+	z = 12.0
+	cam = Vector2(cx, y + 14.0)
+	_clamp_cam()
+	await _wait(1.0)
+	await _shot(dir + "/trees_boats_z12.png")
+	# Mordzüge aller Darstellungsarten (eingefroren in der Mitte ihrer Laufzeit)
+	var styles: Dictionary = {}
+	for p: int in range(GuData.PATH_NAME.size()):
+		var st: String = GfxFx.km_style(p)
+		if not styles.has(st):
+			styles[st] = p
+	var gx: float = cx - 36.0
+	var gy: float = cy + 40.0
+	var i: int = 0
+	var frozen: Array[Dictionary] = []
+	for st2: String in styles.keys():
+		var p2: int = styles[st2]
+		var ex: float = gx + (i % 4) * 22.0
+		var ey: float = gy + (i / 4) * 22.0
+		var e: Dictionary = {"k": "km", "x": ex, "y": ey, "r": 8.0, "c": GuData.PATH_COL[p2], "p": p2, "l": 0.55, "ml": 1.1}
+		sim.fx.append(e)
+		frozen.append(e)
+		i += 1
+	var sn: Dictionary = {"k": "km", "x": gx + (i % 4) * 22.0, "y": gy + (i / 4) * 22.0, "r": 9.0, "c": GuData.PATH_COL[2], "p": 2, "l": 0.5, "ml": 0.8}
+	sim.fx.append(sn)
+	frozen.append(sn)
+	i += 1
+	sim.bolt(gx + (i % 4) * 22.0, gy + (i / 4) * 22.0, 0.0, false)
+	for e2: Dictionary in sim.fx:
+		if str(e2["k"]) == "bolt":
+			frozen.append(e2)
+	i += 1
+	sim.pillar(gx + (i % 4) * 22.0, gy + (i / 4) * 22.0 + 4.0, GuData.ESS_COL[7], 1.0)
+	frozen.append(sim.fx[sim.fx.size() - 1])
+	# Laufzeit einfrieren: jedes Bild wieder auffüllen
+	var hold: Callable = func() -> void:
+		for e3: Dictionary in frozen:
+			e3["l"] = float(e3["ml"]) * (0.45 if str(e3["k"]) != "bolt" else 0.7)
+	get_tree().process_frame.connect(hold)
+	var names: Array = styles.keys()
+	names.append_array(["snap", "bolt", "pillar"])
+	for j: int in range(frozen.size()):
+		var e4: Dictionary = frozen[j]
+		z = 11.0
+		if e4.has("pts"):
+			var pts: PackedVector2Array = e4["pts"]
+			cam = pts[pts.size() - 1] - Vector2(0, 12.0)
+		else:
+			cam = Vector2(e4["x"], float(e4["y"]) - 4.0)
+		_clamp_cam()
+		await _wait(0.4)
+		await _shot(dir + "/km_%02d_%s.png" % [j, names[mini(j, names.size() - 1)]])
+	get_tree().process_frame.disconnect(hold)
+	# Kampf: Hiebe und Treffer
+	var vc: Vector2 = Vector2(cx + 50.0, cy)
+	for k5: int in range(6):
+		var w2: Unit = sim.mk_animal(vc.x + k5 * 3.0, vc.y, "wolf")
+		var h2: Unit = sim.mk_person(vc.x + k5 * 3.0 + 1.5, vc.y + 0.5, 0, 25.0)
+		w2.tgt = h2
+		h2.tgt = w2
+		ents.gf.loc.append({"k": "slash", "x": w2.x, "y": w2.y - 1.3 * GuMain.PS, "a": 0.2, "l": 0.12, "ml": 0.22, "c": Color(1, 0.9, 0.8), "s": GuMain.PS, "an": k5 % 2 == 0})
+		ents.gf.loc.append({"k": "hit", "x": h2.x, "y": h2.y - 1.4 * GuMain.PS, "l": 0.18, "ml": 0.3, "c": GuData.PATH_COL[k5 * 3], "s": GuMain.PS, "a": 0.4})
+	var ven: String = sim.spawn_custom_venerable(2, 0, vc.x + 8.0, vc.y + 12.0)
+	z = 14.0
+	cam = vc + Vector2(8.0, 4.0)
+	_clamp_cam()
+	await get_tree().process_frame
+	await _shot(dir + "/fight_z14.png")
+	z = 5.0
+	await _wait(0.5)
+	await _shot(dir + "/venerable_z5.png")
+	# Leistung: CPU-Zeit von EntityLayer._draw bei z 6 und 10 über dem Zoo
+	for zz: float in [6.0, 10.0]:
+		z = zz
+		cam = Vector2(cx, cy - 12.0)
+		_clamp_cam()
+		await _wait(0.4)
+		ents.draw_us_sum = 0
+		ents.draw_n = 0
+		ents.prof.fill(0)
+		for k6: int in range(90):
+			await get_tree().process_frame
+		print("FXPERF z%d entity draw avg ms %.3f (n %d, units %d) sections us %s" % [int(zz), ents.draw_us_sum / 1000.0 / maxi(1, ents.draw_n), ents.draw_n, sim.units.size(), str(Array(ents.prof).map(func(v: int) -> int: return v / maxi(1, ents.draw_n)))])
+	print("FXSHOTS DONE ", ven)
 	get_tree().quit()

@@ -42,6 +42,14 @@ var max_ms: float = 0.0
 var built: int = 0
 ## Entwickler: Nahansicht abschalten (Vergleichsmessung)
 var dev_off: bool = false
+## Verdeckung durch Bäume (Tiefensortierung mit Wesen/Gebäuden): je Zelle aus OC × OC Kacheln die
+## größte Fußzeile eines hohen Objekts (Baum, Kiefer, Palme, Bambus), dessen Bild die Zelle bedeckt –
+## relativ zur Zelloberkante (0 = nichts). Wird beim Backen eines Blocks mitgeschrieben.
+const OC: int = 2
+var occ: PackedByteArray
+var occ_w: int = 0
+## Texturen der Objekt-Bilder (zum Nachzeichnen verdeckender Bäume vor Wesen)
+var _ftex_cache: Dictionary = {}
 
 
 func _ready() -> void:
@@ -80,6 +88,12 @@ func _realloc(w: World) -> void:
 	fuse.resize(CXN * CXN)
 	ftex.clear()
 	ftex.resize(CXN * CXN)
+	edt_ok = false
+	_edt_phase = -1
+	_edt_src = PackedByteArray()
+	occ_w = w.W / OC
+	occ = PackedByteArray()
+	occ.resize(occ_w * (w.H / OC))
 
 
 ## Zufallswerte in allen vier Kanälen (n × n, kachelbar durch Wiederholung im Shader).
@@ -104,6 +118,11 @@ func tick(w: World, vrect: Rect2, z: float) -> void:
 	Sprites.hd_step(int(BUDGET_MS * 1000.0))
 	if not Sprites.hd_feat_ready():
 		amt = 0.0
+	# euklidischer Wasserabstand (prüft auch, ob sich das Wasser geändert hat – vor dem Kodieren)
+	_edt_tick(Time.get_ticks_usec() + 1500)
+	# das Kodieren hat ein eigenes Budget (ein langer Bild-Auftrag darf die Nahansicht nicht abschalten)
+	var t_all: int = t0
+	t0 = Time.get_ticks_usec()
 	view = vrect
 	# Datenbild: geänderte Blöcke neu kodieren – sichtbare zuerst; fehlt dort noch einer (z. B. gleich nach einer
 	# neuen, großen Welt), bleibt in diesem Bild das 1:1-Bild statt halb leerem Gelände
@@ -127,6 +146,7 @@ func tick(w: World, vrect: Rect2, z: float) -> void:
 		if missing:
 			amt = 0.0
 	visible = amt > 0.0
+	feat.visible = visible
 	for c: int in range(CXN * CXN):
 		if (Time.get_ticks_usec() - t0) > BUDGET_MS * 1000.0:
 			break
@@ -143,7 +163,7 @@ func tick(w: World, vrect: Rect2, z: float) -> void:
 		_bake_visible(t0)
 		feat.queue_redraw()
 		queue_redraw()
-	last_ms = (Time.get_ticks_usec() - t0) / 1000.0
+	last_ms = (Time.get_ticks_usec() - t_all) / 1000.0
 	max_ms = maxf(max_ms, last_ms)
 
 
@@ -208,6 +228,9 @@ func _encode(c: int) -> void:
 	var reg: PackedByteArray = world.region
 	var ft: PackedByteArray = world.feat
 	var ts: PackedByteArray = world.temp_snow
+	# euklidischer Abstand nur, solange er zur aktuellen Wasserlage passt
+	var use_e: bool = edt_ok and _edt_phase < 0
+	var ed: PackedByteArray = edt
 	var k: int = 0
 	for y: int in range(y0, y0 + CHK):
 		var i: int = y * world.W + x0
@@ -217,7 +240,12 @@ func _encode(c: int) -> void:
 				t = 13
 			buf[k] = t
 			buf[k + 1] = clampi(int(hgt[i] * 255.0), 0, 255)
-			buf[k + 2] = 0 if t != GuData.DEEP and t != GuData.SHAL else mini(wd[i], 63) * 4
+			if t != GuData.DEEP and t != GuData.SHAL:
+				buf[k + 2] = 0
+			elif use_e and wd[i] > 1:
+				buf[k + 2] = mini(maxi(4, ed[i]), 252)
+			else:
+				buf[k + 2] = mini(wd[i], 63) * 4
 			buf[k + 3] = reg[i] * 16 + (1 if ft[i] == GuData.F_ROAD else 0)
 			k += 4
 			i += 1
@@ -234,6 +262,14 @@ func _bake(c: int) -> void:
 	var reg: PackedByteArray = world.region
 	var clip: Rect2i = Rect2i(0, 0, CPX, CPX)
 	var ww: int = world.W
+	# Verdeckungszellen dieses Blocks neu
+	var oc0: int = x0 / OC
+	var or0: int = y0 / OC
+	var on: int = CHK / OC
+	for r: int in range(on):
+		var ob: int = (or0 + r) * occ_w + oc0
+		for q: int in range(on):
+			occ[ob + q] = 0
 	for y: int in range(maxi(0, y0 - 1), mini(world.H, y0 + CHK + 16)):
 		for x: int in range(maxi(0, x0 - 8), mini(ww, x0 + CHK + 8)):
 			var i: int = y * ww + x
@@ -245,6 +281,8 @@ func _bake(c: int) -> void:
 			var foot: Vector2i = e[1]
 			var jx: int = int(GuData.hash2(x, y, 41) * 3.0) - 1
 			var dst: Rect2i = Rect2i((x - x0) * DS + DS / 2 - foot.x + jx, (y + 1 - y0) * DS - foot.y, im.get_width(), im.get_height())
+			if f <= GuData.F_PINE:
+				_occ_mark(x, y, dst, x0, y0)
 			var inter: Rect2i = dst.intersection(clip)
 			if inter.size.x <= 0 or inter.size.y <= 0:
 				continue
@@ -259,6 +297,224 @@ func _bake(c: int) -> void:
 		ftex[c].update(img)
 	else:
 		ftex[c] = ImageTexture.create_from_image(img)
+
+
+## Verdeckungszellen eines hohen Objekts (Bildrechteck dst in Block-Texeln) eintragen, nur innerhalb des Blocks.
+func _occ_mark(x: int, y: int, dst: Rect2i, x0: int, y0: int) -> void:
+	var iw: float = dst.size.x / float(DS)
+	var ih: float = dst.size.y / float(DS)
+	# nur der deckende Kern des Bildes (Ränder sind meist Luft oder Schatten)
+	var L: float = x0 + dst.position.x / float(DS) + iw * 0.18
+	var R: float = L + iw * 0.64
+	var T: float = y0 + dst.position.y / float(DS) + ih * 0.08
+	var B: float = y + 1.0
+	var c0: int = maxi(int(floorf(L)) / OC, x0 / OC)
+	var c1: int = mini(int(floorf(R)) / OC, (x0 + CHK) / OC - 1)
+	var r0: int = maxi(int(floorf(T)) / OC, y0 / OC)
+	var r1: int = mini(int(floorf(B - 0.5)) / OC, (y0 + CHK) / OC - 1)
+	for r: int in range(r0, r1 + 1):
+		var v: int = mini(255, y + 1 - r * OC)
+		var ob: int = r * occ_w
+		for c: int in range(c0, c1 + 1):
+			if occ[ob + c] < v:
+				occ[ob + c] = v
+
+
+## Steht vor einem Rechteck (Kacheln, Fußzeile foot) ein hoher Baum? Schneller Vortest über die Zellen.
+func occluded(x0: float, x1: float, top: float, foot: float) -> bool:
+	if occ_w == 0 or amt <= 0.0:
+		return false
+	var c0: int = clampi(int(x0) / OC, 0, occ_w - 1)
+	var c1: int = clampi(int(x1) / OC, 0, occ_w - 1)
+	var r0: int = clampi(int(top) / OC, 0, occ.size() / occ_w - 1)
+	var r1: int = clampi(int(foot - 0.3) / OC, 0, occ.size() / occ_w - 1)
+	for r: int in range(r0, r1 + 1):
+		var ob: int = r * occ_w
+		for c: int in range(c0, c1 + 1):
+			var v: int = occ[ob + c]
+			if v > 0 and r * OC + v > foot:
+				return true
+	return false
+
+
+## Hohe Objekte, die vor dem Rechteck stehen und es überdecken, in out sammeln (Kachelindex → [Textur, Rechteck,
+## Fußzeile]); depth > 0: danach einmal über die Vereinigung der Funde, damit auch Bäume, die wiederum vor diesen
+## stehen, nachgezeichnet werden (sonst überdeckt ein nachgezeichneter Baum einen weiter vorne stehenden).
+func occluders(x0: float, x1: float, top: float, foot: float, out: Dictionary, depth: int = 1) -> void:
+	var ww: int = world.W
+	var ft: PackedByteArray = world.feat
+	var reg: PackedByteArray = world.region
+	var ty0: int = maxi(0, int(floorf(foot)))
+	var ty1: int = mini(world.H - 1, int(foot) + 11)
+	var tx0: int = maxi(0, int(x0) - 3)
+	var tx1: int = mini(ww - 1, int(x1) + 3)
+	var u: Vector4 = Vector4(INF, -INF, INF, INF)
+	var any: bool = false
+	for ty: int in range(ty0, ty1 + 1):
+		if ty + 1.0 <= foot:
+			continue
+		var ob: int = ty * ww
+		for tx: int in range(tx0, tx1 + 1):
+			var f: int = ft[ob + tx]
+			if f < GuData.F_TREE or f > GuData.F_PINE:
+				continue
+			var i: int = ob + tx
+			var e: Variant = out.get(i)
+			var rc: Rect2
+			var im: Image = null
+			if e != null:
+				rc = (e as Array)[1]
+			else:
+				var fe: Array = Sprites.hd_feat(f, tx, ty, reg[i])
+				im = fe[0]
+				var fo: Vector2i = fe[1]
+				var jx: int = int(GuData.hash2(tx, ty, 41) * 3.0) - 1
+				rc = Rect2(tx + 0.5 + float(jx - fo.x) / DS, ty + 1.0 - float(fo.y) / DS, im.get_width() / float(DS), im.get_height() / float(DS))
+			# deckender Kern gegen das Rechteck
+			if rc.position.x + rc.size.x * 0.18 > x1 or rc.position.x + rc.size.x * 0.82 < x0 or rc.position.y + rc.size.y * 0.08 > foot:
+				continue
+			if e == null:
+				var tex: ImageTexture = _ftex_cache.get(im)
+				if tex == null:
+					var im2: Image = im.duplicate()
+					im2.generate_mipmaps()
+					tex = ImageTexture.create_from_image(im2)
+					_ftex_cache[im] = tex
+				out[i] = [tex, rc, ty + 1.0]
+			any = true
+			u.x = minf(u.x, rc.position.x + rc.size.x * 0.18)
+			u.y = maxf(u.y, rc.position.x + rc.size.x * 0.82)
+			u.z = minf(u.z, rc.position.y + rc.size.y * 0.08)
+			u.w = minf(u.w, ty + 1.0)
+	if any and depth > 0:
+		occluders(u.x, u.y, u.z, u.w, out, depth - 1)
+
+
+# ---------------- Euklidischer Wasserabstand ----------------
+# World.wdist zählt Schritte in der 4er-Nachbarschaft (Manhattan) – im Shader gäbe das rautenförmige Tiefenstufen.
+# Hier im Hintergrund (Häppchen je Bild) die echte euklidische Entfernung zum Land (Felzenszwalb, zeilen- dann
+# spaltenweise); fertig → alle Blöcke neu kodieren. Bis dahin (und nach jeder Wasseränderung) gilt wdist.
+var edt: PackedByteArray      ## Entfernung · 4 (gerundet, ≤ 255) je Kachel
+var edt_ok: bool = false
+var _edt_src: PackedByteArray
+var _edt_g: PackedFloat32Array
+var _edt_phase: int = -1      ## -1 ruht, 0 Zeilen, 1 Spalten
+var _edt_i: int = 0
+var _edt_v: PackedInt32Array
+var _edt_z: PackedFloat64Array
+var _edt_f: PackedFloat64Array
+
+
+func _edt_tick(t_end: int) -> void:
+	if _edt_phase < 0:
+		# Wasser geändert? (Vergleich in C++, ~260 kB) – sofort ungültig, damit kein Block mit altem Abstand kodiert wird
+		if edt_ok and _edt_src == world.wdist:
+			return
+		edt_ok = false
+		if not _edt_src.is_empty() and _edt_src == world.wdist:
+			return
+		_edt_src = world.wdist.duplicate()
+		_edt_g.resize(world.W * world.H)
+		edt.resize(world.W * world.H)
+		_edt_phase = 0
+		_edt_i = 0
+	var W2: int = world.W
+	var H2: int = world.H
+	var wd: PackedByteArray = _edt_src
+	var BIG: float = 1e6
+	while Time.get_ticks_usec() < t_end:
+		if _edt_phase == 0:
+			# Zeile: waagrechte Entfernung zum nächsten Land
+			var y: int = _edt_i
+			var o: int = y * W2
+			var last: float = -BIG
+			for x: int in range(W2):
+				if wd[o + x] == 0:
+					last = x
+				_edt_g[o + x] = x - last
+			last = BIG
+			for x2: int in range(W2 - 1, -1, -1):
+				if wd[o + x2] == 0:
+					last = x2
+				if last - x2 < _edt_g[o + x2]:
+					_edt_g[o + x2] = last - x2
+			_edt_i += 1
+			if _edt_i >= H2:
+				_edt_phase = 1
+				_edt_i = 0
+				_edt_v.resize(H2)
+				_edt_z.resize(H2 + 1)
+				_edt_f.resize(H2)
+		else:
+			# Spalte: untere Hüllkurve der Parabeln (Felzenszwalb & Huttenlocher)
+			var x3: int = _edt_i
+			for q: int in range(H2):
+				var g: float = _edt_g[q * W2 + x3]
+				_edt_f[q] = g * g if g < 1e5 else 1e10
+			var k: int = 0
+			_edt_v[0] = 0
+			_edt_z[0] = -1e20
+			_edt_z[1] = 1e20
+			for q2: int in range(1, H2):
+				var fq: float = _edt_f[q2] + q2 * q2
+				var vk: int = _edt_v[k]
+				var sv: float = (fq - (_edt_f[vk] + vk * vk)) / (2.0 * (q2 - vk))
+				while sv <= _edt_z[k]:
+					k -= 1
+					vk = _edt_v[k]
+					sv = (fq - (_edt_f[vk] + vk * vk)) / (2.0 * (q2 - vk))
+				k += 1
+				_edt_v[k] = q2
+				_edt_z[k] = sv
+				_edt_z[k + 1] = 1e20
+			k = 0
+			for q3: int in range(H2):
+				while _edt_z[k + 1] < q3:
+					k += 1
+				var vv: int = _edt_v[k]
+				var d2: float = (q3 - vv) * (q3 - vv) + _edt_f[vv]
+				edt[q3 * W2 + x3] = mini(255, roundi(sqrt(d2) * 4.0))
+			_edt_i += 1
+			if _edt_i >= W2:
+				_edt_phase = -1
+				if _edt_src != world.wdist:
+					# Wasser hat sich während der Rechnung geändert: von vorn
+					_edt_src = PackedByteArray()
+					return
+				edt_ok = true
+				# alle Blöcke mit der neuen Entfernung neu kodieren
+				dat_ver.fill(-1)
+				return
+
+
+var _occ_cache: Dictionary = {}
+var _occ_built: int = -1
+
+
+## Wie occluders, aber mit Zwischenspeicher je (auf ½ Kachel gerundetem) Rechteck – Wesen stehen oft still oder
+## laufen langsam. Alle 60 Bilder verworfen (gefällte/gewachsene Bäume erscheinen höchstens so lange verspätet).
+func occluders_cached(x0: float, x1: float, top: float, foot: float, out: Dictionary) -> void:
+	# nicht bei jedem neu gebackenen Block verwerfen (die laufende Welt backt ständig) – höchstens 1 s veraltet
+	if frame % 60 == 0 or _occ_cache.size() > 3000 or _occ_built < 0:
+		_occ_cache.clear()
+		_occ_built = built
+	var qx0: int = int(floorf(x0 * 2.0))
+	var qx1: int = int(ceilf(x1 * 2.0))
+	var qt: int = int(floorf(top))
+	var qf: int = int(floorf(foot))
+	var key: int = (qx0 & 0xFFFF) | ((qx1 & 0xFFFF) << 16) | ((qt & 0xFFF) << 32) | ((qf & 0xFFF) << 44)
+	var res: Variant = _occ_cache.get(key)
+	if res == null:
+		var d: Dictionary = {}
+		if occluded(qx0 * 0.5, qx1 * 0.5, float(qt), float(qf) + 0.001):
+			occluders(qx0 * 0.5, qx1 * 0.5, float(qt), float(qf) + 0.001, d)
+		_occ_cache[key] = d
+		res = d
+	var rd: Dictionary = res
+	if rd.is_empty():
+		return
+	for k: int in rd:
+		out[k] = rd[k]
 
 
 class FeatLayer:
@@ -425,10 +681,24 @@ void fragment() {
 			float fa = (1.0 - (wd - 0.5) / 2.5) * 0.85;
 			col = mix(col, c8(vec3(214.0, 242.0, 252.0)), fa);
 		}
-		// Gischtsaum direkt am Ufer
-		float rim = 0.5 + 0.2 + vn(pc * 1.3 + vec2(T * 0.15, 0.0), 9) * 0.22;
-		if (wd < rim) col = c8(vec3(236.0, 250.0, 255.0));
-		else if (wd < rim + 0.13) col = mix(col, c8(vec3(190.0, 236.0, 250.0)), 0.7);
+		// Gischtsaum direkt am Ufer: Schaum schwappt (rim atmet), bläschenhafter Rand, dahinter eine zweite,
+		// aufgelöste Schaumlinie, die mit der Brandung hereinläuft
+		float wash = 0.14 * sin(T * 1.25 + vn(pc * 0.35, 35) * 7.0);
+		float rim = 0.62 + wash + vn(pc * 1.3 + vec2(T * 0.15, 0.0), 9) * 0.24;
+		vec3 foam = c8(vec3(238.0, 251.0, 255.0));
+		float bub = h2(ti + ivec2(int(floor(T * 3.0)), 0), 36);
+		if (wd < rim) {
+			col = foam;
+			if (h2(ti, 37) < 0.18 * spk) col = c8(vec3(204.0, 236.0, 248.0));
+		} else if (wd < rim + 0.22) {
+			if (bub < 0.55) col = mix(col, foam, 0.8);
+			else col = mix(col, c8(vec3(190.0, 236.0, 250.0)), 0.55);
+		} else if (wd < rim + 0.42 && bub < 0.16 * spk) {
+			col = mix(col, foam, 0.7);
+		}
+		float w2 = fract(T * 0.16 + vn(pc * 0.3, 38) * 0.8);
+		float wl = 0.75 + (1.0 - w2) * 1.8;
+		if (abs(wd - wl) < 0.09 + 0.05 * w2 && h2(ti, 39) < 0.75 * (1.0 - w2 * 0.6)) col = mix(col, foam, 0.6 * (1.0 - w2 * 0.5));
 		// Sonnenglitzern
 		if (wd > 4.0 && h2(ti + ivec2(int(floor(T * 3.0)) * 7, 0), 10) > 1.0 - 0.0035 * spk) col = vec3(1.0);
 	} else {

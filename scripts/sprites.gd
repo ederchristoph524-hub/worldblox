@@ -1285,6 +1285,8 @@ static func hd_begin() -> void:
 	# Orte danach (bis dahin zeigt die Karte das grobe Bild)
 	for pt: String in PLACE_SIZE.keys():
 		_hd_jobs.append(func() -> void: place_tex(pt))
+	# Tiere und Bestien der Nahansicht (Beasts) danach
+	_hd_jobs.append(func() -> void: Beasts.prefetch())
 
 
 ## Sind alle Objekt-Bilder der Nahansicht fertig?
@@ -1779,7 +1781,7 @@ static func hd_sheet_extra() -> Array[Image]:
 		var ss: float = float(GuData.SPEC[sp].get("ss", 1.0))
 		draw_animal(sk2, 30.0, 36.0, 2.2 / maxf(1.0, ss * 0.6), sp, 1, false, 1.0, false, false, 3, 0.45, 1)
 		out.append(q2.img)
-	for pt: String in ["blessed", "grotto", "court", "imperial", "langya", "hu", "dream", "palace", "mushroom"]:
+	for pt: String in ["blessed", "grotto", "court", "imperial", "langya", "hu", "dream", "inherit", "fragment", "palace", "mushroom", "yitian", "crazed"]:
 		out.append(place_image_hd(pt))
 	for k: int in range(4):
 		var d: Dictionary = clan_textures_hd(GuData.CLANCOL[k * 3], k)
@@ -2498,8 +2500,7 @@ static func place_image_hd(type: String) -> Image:
 			q.d(roundi(cx * k), roundi(H2 * 0.55 * k), 5, Color("#f4e0ff"))
 			q.d(roundi(cx * k), roundi(H2 * 0.55 * k), 3, Color("#ffffff"))
 		_:
-			# übrige Orte: grobes Bild vergrößern (Scale2x zweimal) – sie sind klein
-			return scale2x(scale2x(place_image(type)))
+			return _place_hd2(type)
 	_hd_outline(q.img, Color(0.08, 0.07, 0.06, 0.9))
 	return q.img
 
@@ -2613,3 +2614,147 @@ static func _pagoda_hd(q: Px, k: int, x: float, y: float, roof: Color, floors: i
 		_hdb_roof(q, x * k + k * 0.5, roundi((by - 4.0) * k) + 1, (w / 2.0 - 1.4) * k, (w / 2.0 + 0.4) * k, k + 1, roof, true)
 	q.p(roundi(x * k) + 1, roundi((y - floors * 4.0 - 2.0) * k), 2, 2 * k, Color("#ffd23a"))
 	q.p(roundi(x * k) + 1, roundi((y - floors * 4.0 - 2.0) * k), 1, 2 * k, Color("#fff4b0"))
+
+
+# ---------------- Weitere Orte in der Nahansicht (gemalt mit dem Beasts-Pinsel, Einheiten = Kacheln) ----------------
+
+## Erbe, Himmelsfragment, Drachenpalast, Pilzmenschen-Paradies, Yi-Tian-Berg, Höhle des Irren Dämons.
+static func _place_hd2(type: String) -> Image:
+	var W2: int = int(place_size(type))
+	var H2: float = W2 * 0.95
+	var q: Beasts = Beasts.new(0.0, 0.0, W2, H2, float(PK))
+	var pq: Px = Px.new(1, 1)
+	pq.img = q.im
+	var cx: float = W2 / 2.0
+	var R: Callable = func(c: Color) -> Array: return Beasts.ramp(c)
+	match type:
+		"inherit":
+			var stone: Array = R.call(Color("#9a9488"))
+			var dk: Array = R.call(Color("#6a6460"))
+			q.ell(cx, H2 - 1.3, 5.7, 1.3, R.call(Color("#5e7e3e")), false)
+			q.poly(PackedVector2Array([Vector2(1.4, H2 - 2.2), Vector2(10.6, H2 - 2.2), Vector2(11.0, H2 - 1.2), Vector2(1.0, H2 - 1.2)]), stone, 3)
+			q.poly(PackedVector2Array([Vector2(1.0, H2 - 1.2), Vector2(11.0, H2 - 1.2), Vector2(11.0, H2 - 0.7), Vector2(1.0, H2 - 0.7)]), dk, 1)
+			q.poly(PackedVector2Array([Vector2(4.4, H2 - 0.7), Vector2(7.6, H2 - 0.7), Vector2(7.9, H2 - 0.1), Vector2(4.1, H2 - 0.1)]), stone, 2)
+			# Erbe-Siegel: goldener Strudel im Tor
+			q.ell(cx, 6.2, 2.6, 3.0, R.call(Color("#c89a3a")), false)
+			q.ell(cx, 6.2, 2.0, 2.4, R.call(Color("#ffd86a")), false)
+			for k: int in range(14):
+				var a: float = k * 0.62
+				var r: float = 0.25 + k * 0.13
+				q.dot(cx + cos(a) * r, 6.2 + sin(a) * r * 1.15, Color("#fff6c8"), 2 if k % 3 == 0 else 1)
+			q.ell(cx, 6.2, 0.45, 0.45, R.call(Color("#ffffff")), false)
+			for side: float in [-1.0, 1.0]:
+				var px: float = cx + side * 3.3
+				q.cap(px, H2 - 2.2, px, 3.6, 0.72, 0.68, stone, false)
+				q.poly(PackedVector2Array([Vector2(px - 1.0, 3.9), Vector2(px + 1.0, 3.9), Vector2(px + 0.8, 3.2), Vector2(px - 0.8, 3.2)]), dk, 2)
+				for g: int in range(4):
+					q.dot(px - 0.12, 5.0 + g * 1.0, Color("#ffcf3a"), 2)
+				q.ell(px + side * 0.2, H2 - 2.4, 0.9, 0.35, R.call(Color("#6a8a3a")), false)
+			# Dach-Querbalken mit hochgezogenen Ecken
+			q.poly(PackedVector2Array([Vector2(1.2, 3.3), Vector2(10.8, 3.3), Vector2(11.6, 2.1), Vector2(10.6, 2.5), Vector2(1.4, 2.5), Vector2(0.4, 2.1)]), R.call(Color("#3e4a5a")), 2)
+			q.poly(PackedVector2Array([Vector2(2.2, 2.5), Vector2(9.8, 2.5), Vector2(9.0, 1.5), Vector2(3.0, 1.5)]), R.call(Color("#a83a2e")), 2)
+			q.poly(PackedVector2Array([Vector2(2.6, 1.6), Vector2(9.4, 1.6), Vector2(10.0, 0.9), Vector2(9.2, 1.1), Vector2(2.8, 1.1), Vector2(2.0, 0.9)]), R.call(Color("#3e4a5a")), 3)
+			q.dot(cx - 0.25, 1.9, Color("#ffd23a"), 2)
+		"fragment":
+			q.ell(cx, H2 - 1.2, 5.4, 1.2, R.call(Color("#4a3e3a")), false)
+			q.ell(cx, H2 - 1.4, 3.4, 0.7, R.call(Color("#2e2626")), false)
+			for k2: int in range(7):
+				var rx: float = cx - 4.6 + k2 * 1.5
+				q.ell(rx, H2 - 1.0 - (k2 % 2) * 0.4, 0.6 + (k2 % 3) * 0.15, 0.45, R.call(Color("#6a5a50")), true)
+			var cr: Array = R.call(Color("#8eb4f4"))
+			var cr2: Array = R.call(Color("#6a8ae0"))
+			q.poly(PackedVector2Array([Vector2(cx - 3.6, H2 - 1.6), Vector2(cx - 4.4, 6.0), Vector2(cx - 3.2, 4.6), Vector2(cx - 2.4, H2 - 1.8)]), cr2, 2)
+			q.poly(PackedVector2Array([Vector2(cx + 2.6, H2 - 1.7), Vector2(cx + 3.4, 5.6), Vector2(cx + 4.4, 7.4), Vector2(cx + 3.8, H2 - 1.5)]), cr2, 2)
+			q.poly(PackedVector2Array([Vector2(cx - 1.6, H2 - 1.5), Vector2(cx - 2.2, 5.0), Vector2(cx - 0.3, 0.5), Vector2(cx + 0.2, 3.6), Vector2(cx + 1.0, 2.6), Vector2(cx + 1.9, H2 - 1.6)]), cr, 3)
+			q.poly(PackedVector2Array([Vector2(cx - 0.3, 0.5), Vector2(cx + 0.2, 3.6), Vector2(cx + 1.0, 2.6), Vector2(cx + 1.9, H2 - 1.6), Vector2(cx + 0.2, H2 - 1.5)]), cr2, 2)
+			q.line(cx - 0.3, 0.8, cx - 0.9, H2 - 1.8, Color("#e8f4ff"))
+			q.line(cx - 1.9, 5.2, cx - 1.2, H2 - 2.0, Color("#c8dcff"))
+			for k3: int in range(9):
+				q.dot(cx - 1.3 + GuData.hash2(k3, 3, 5) * 2.6, 2.5 + GuData.hash2(k3, 7, 5) * 6.0, Color("#ffffff"), 1)
+			q.line(cx + 2.0, H2 - 1.3, cx + 4.6, H2 - 0.6, Color("#9ec8ff"))
+			q.line(cx - 2.0, H2 - 1.2, cx - 4.8, H2 - 0.8, Color("#9ec8ff"))
+		"palace":
+			q.ell(cx, H2 - 2.3, 10.8, 2.3, R.call(Color("#3a86d0")), false)
+			q.ell(cx, H2 - 2.6, 9.0, 1.6, R.call(Color("#5aa8e4")), false, 0.4)
+			q.poly(PackedVector2Array([Vector2(3.5, H2 - 2.6), Vector2(18.5, H2 - 2.6), Vector2(17.0, H2 - 4.8), Vector2(5.0, H2 - 4.8)]), R.call(Color("#8a7060")), 2)
+			q.poly(PackedVector2Array([Vector2(4.4, H2 - 4.8), Vector2(17.6, H2 - 4.8), Vector2(17.2, H2 - 5.4), Vector2(4.8, H2 - 5.4)]), R.call(Color("#e8dcc0")), 3)
+			for side2: float in [-1.0, 1.0]:
+				var tx: float = cx + side2 * 6.5
+				_pagoda_hd(pq, PK, tx, H2 - 5.4, Color("#2a9a8a"), 2, Color("#e8dcc0"))
+				for c: int in range(3):
+					var bx: float = cx + side2 * (9.2 + c * 0.5)
+					q.cap(bx, H2 - 2.8, bx + side2 * 0.6, H2 - 4.8 - c * 0.4, 0.22, 0.14, R.call(Color("#f07a6a") if c % 2 == 0 else Color("#f0a85a")), false)
+					q.cap(bx + side2 * 0.3, H2 - 3.8, bx + side2 * 1.1, H2 - 4.4, 0.16, 0.1, R.call(Color("#f07a6a")), false)
+			_pagoda_hd(pq, PK, cx, H2 - 5.4, Color("#2a9a8a"), 3, Color("#e8dcc0"))
+			q.ell(cx + 0.5, 3.0, 0.9, 0.9, R.call(Color("#f4f0ff")), false)
+			for k4: int in range(24):
+				var a2: float = k4 * TAU / 24.0
+				if k4 % 3 != 0:
+					q.dot(cx + cos(a2) * 10.2, H2 - 2.3 + sin(a2) * 2.0, Color("#eaf8ff"), 2)
+		"mushroom":
+			q.ell(cx, H2 - 2.2, 9.6, 2.4, R.call(Color("#3e6e34")), false)
+			q.ell(cx - 1.0, H2 - 3.0, 7.0, 1.2, R.call(Color("#5a9a44")), false, 0.5)
+			_mush(q, cx - 7.0, H2 - 1.4, 3.6, 1.9, Color("#4ab8e8"), true)
+			_mush(q, cx - 2.4, H2 - 2.4, 9.5, 3.8, Color("#d8382a"), true)
+			_mush(q, cx + 4.2, H2 - 1.9, 6.0, 2.7, Color("#e8803a"), true)
+			_mush(q, cx + 7.8, H2 - 1.2, 2.6, 1.3, Color("#a05ad8"), false)
+			_mush(q, cx + 1.4, H2 - 1.0, 2.0, 1.0, Color("#e8c050"), false)
+			_mush(q, cx - 4.8, H2 - 0.9, 1.6, 0.8, Color("#d8382a"), false)
+			for k5: int in range(12):
+				q.dot(cx - 8.0 + GuData.hash2(k5, 1, 9) * 16.0, 2.0 + GuData.hash2(k5, 2, 9) * 9.0, Color("#c8f0ff") if k5 % 2 == 0 else Color("#f0d8ff"), 1)
+		"yitian":
+			var rk: Array = R.call(Color("#7a7c84"))
+			var base: float = H2 - 0.8
+			q.poly(PackedVector2Array([Vector2(1.0, base), Vector2(5.5, 10.5), Vector2(8.8, 6.4), Vector2(cx, 1.4), Vector2(15.6, 5.8), Vector2(19.2, 9.6), Vector2(23.0, base)]), rk, 1)
+			q.poly(PackedVector2Array([Vector2(1.0, base), Vector2(5.5, 10.5), Vector2(8.8, 6.4), Vector2(cx, 1.4), Vector2(cx - 1.2, 9.0), Vector2(cx - 3.0, base)]), rk, 3)
+			q.poly(PackedVector2Array([Vector2(cx + 3.0, base), Vector2(cx + 4.4, 12.0), Vector2(19.2, 9.6), Vector2(23.0, base)]), rk, 0)
+			q.line(cx, 1.6, cx - 1.2, 9.0, Color("#55565e"))
+			q.line(8.8, 6.6, 7.6, 13.0, Color("#9a9ca4"))
+			q.line(15.6, 6.0, 16.6, 12.4, Color("#55565e"))
+			q.poly(PackedVector2Array([Vector2(cx - 2.8, 4.6), Vector2(cx, 1.4), Vector2(cx + 2.6, 4.4), Vector2(cx + 1.4, 5.0), Vector2(cx + 0.2, 4.2), Vector2(cx - 1.0, 5.3)]), R.call(Color("#eef2f6")), 3)
+			q.poly(PackedVector2Array([Vector2(7.4, 8.4), Vector2(8.8, 6.4), Vector2(9.8, 8.0), Vector2(8.9, 8.6)]), R.call(Color("#e6ecf2")), 2)
+			q.ell(cx, base - 0.4, 11.0, 2.6, R.call(Color("#4e7a3a")), false, 0.5, base + 0.4)
+			for px2: float in [2.6, 5.4, 18.6, 21.4]:
+				_tree_hd(pq, PK, px2, base + 0.3 - (0.6 if px2 < 4.0 or px2 > 20.0 else 0.0), false, int(px2))
+			for k7: int in range(8):
+				var a3: float = -PI * 0.5 + (k7 - 3.5) * 0.28
+				q.line(cx + cos(a3) * 0.8, 0.9 + sin(a3) * 0.8 + 1.0, cx + cos(a3) * 2.6, 0.9 + sin(a3) * 2.6 + 1.0, Color("#fff2a0"))
+			q.ell(cx, 1.0, 0.55, 0.55, R.call(Color("#ffe27a")), false)
+		"crazed":
+			var rk2: Array = R.call(Color("#4a4048"))
+			var base2: float = H2 - 0.6
+			q.poly(PackedVector2Array([Vector2(0.5, base2), Vector2(2.6, 9.0), Vector2(5.4, 5.6), Vector2(8.6, 2.4), Vector2(11.8, 3.6), Vector2(14.8, 6.2), Vector2(17.8, 9.4), Vector2(19.5, base2)]), rk2, 1)
+			q.poly(PackedVector2Array([Vector2(0.5, base2), Vector2(2.6, 9.0), Vector2(5.4, 5.6), Vector2(8.6, 2.4), Vector2(8.0, 9.0), Vector2(6.0, base2)]), rk2, 3)
+			for sp: Vector2 in [Vector2(3.4, 8.2), Vector2(5.6, 5.8), Vector2(7.4, 4.0), Vector2(11.6, 3.9), Vector2(13.9, 5.6), Vector2(16.4, 8.2)]:
+				q.poly(PackedVector2Array([Vector2(sp.x - 0.7, sp.y + 1.0), Vector2(sp.x + 0.15, sp.y - 1.8), Vector2(sp.x + 0.8, sp.y + 1.0)]), R.call(Color("#2e262c")), 2)
+			q.ell(cx, base2 - 3.0, 3.4, 3.6, R.call(Color("#140a0e")), false, 0.0, base2 - 0.1)
+			q.ell(cx, base2 - 1.6, 2.4, 1.8, R.call(Color("#4a0c10")), false, 0.0, base2 - 0.1)
+			q.ell(cx, base2 - 1.1, 1.4, 0.9, R.call(Color("#b0281a")), false, 0.0, base2 - 0.1)
+			q.ell(cx, base2 - 0.8, 0.6, 0.45, R.call(Color("#ff7a3a")), false, 0.0, base2 - 0.1)
+			for k9: int in range(5):
+				var tx2: float = cx - 2.4 + k9 * 1.2
+				q.poly(PackedVector2Array([Vector2(tx2 - 0.35, base2 - 5.9 + absf(k9 - 2) * 0.5), Vector2(tx2, base2 - 4.6 + absf(k9 - 2) * 0.3), Vector2(tx2 + 0.35, base2 - 5.9 + absf(k9 - 2) * 0.5)]), R.call(Color("#e8e0d0")), 2)
+			q.dot(cx - 0.9, base2 - 2.8, Color("#ff3a2a"), 2)
+			q.dot(cx + 0.5, base2 - 2.8, Color("#ff3a2a"), 2)
+			for k10: int in range(4):
+				var bx2: float = cx - 5.0 + k10 * 3.2 + (1.6 if k10 > 1 else 0.0)
+				q.line(bx2, base2 - 0.3, bx2 + 0.9, base2 - 0.7, Color("#efe8d8"))
+				q.dot(bx2 - 0.1, base2 - 0.45, Color("#efe8d8"), 2)
+			for k11: int in range(10):
+				q.dot(cx - 6.0 + GuData.hash2(k11, 8, 3) * 12.0, 1.5 + GuData.hash2(k11, 9, 3) * 9.0, Color("#c03aa0") if k11 % 2 == 0 else Color("#ff5a3a"), 1)
+		_:
+			return scale2x(scale2x(place_image(type)))
+	_hd_outline(q.im, Color(0.08, 0.07, 0.06, 0.9))
+	return q.im
+
+
+## Riesenpilz: Stiel, gewölbter Hut mit Lamellen, weiße Tupfen (glow = leuchtende Tupfen).
+static func _mush(q: Beasts, x: float, foot: float, h: float, cw: float, col: Color, glow: bool) -> void:
+	var stem: Array = Beasts.ramp(Color("#efe4cc"))
+	q.cap(x, foot - 0.3, x - 0.1, foot - h + cw * 0.2, cw * 0.28, cw * 0.22, stem, false)
+	q.ell(x, foot - h + cw * 0.22, cw * 0.92, cw * 0.22, Beasts.ramp(col.darkened(0.45)), false, 0.4)
+	q.ell(x, foot - h, cw, cw * 0.62, Beasts.ramp(col), false, 1.0, foot - h + cw * 0.12)
+	for k: int in range(int(cw * 2.2)):
+		var a: float = PI * (1.1 + 0.8 * GuData.hash2(int(x * 10.0), k, 4))
+		var r: float = cw * (0.3 + 0.55 * GuData.hash2(k, int(x * 10.0), 6))
+		q.dot(x + cos(a) * r, foot - h + sin(a) * r * 0.55, Color("#ffffff") if not glow or k % 2 == 0 else Color("#e0f8ff"), 2 if cw > 2.0 else 1)
