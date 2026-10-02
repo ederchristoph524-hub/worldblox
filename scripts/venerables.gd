@@ -4,8 +4,13 @@ extends RefCounted
 ## Agenden der bekannten Ehrwürdigen (Lore.VEN: goal/seat/lin/court/ag). Dazu das Schicksals-Gu als Weltzustand.
 ## Zustand je Ehrwürdigem in `st` (Unit-Id -> Dictionary), gespeichert in Sim.serialize unter "ven" (ab Spielstand v5).
 
-const W: int = GuData.W
-const H: int = GuData.H
+## Kartengröße (zur Laufzeit umstellbar, siehe GuData.set_size)
+var W: int:
+	get:
+		return GuData.W
+var H: int:
+	get:
+		return GuData.H
 ## Siegel neuer Blutlinien je Pfad (Index = Pfad-Id).
 const PATH_GLYPH: String = "力月火水风雷木土血魂宙智骨金冰雪云光暗影星宇情魅运律幻禁天人气奴变炼阵毒剑刀兵梦虚盗食丹画信音杀"
 const EPITHET: PackedStringArray = ["kaiser", "ahn", "fürst", "weiser", "herr", "souverän"]

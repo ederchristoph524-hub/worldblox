@@ -2,8 +2,13 @@ class_name GuMain
 extends Node2D
 ## Hauptszene: verbindet Simulation, Kamera, Eingabe, Zeichnen und Oberfläche.
 
-const W: int = GuData.W
-const H: int = GuData.H
+## Kartengröße (zur Laufzeit umstellbar, siehe GuData.set_size)
+var W: int:
+	get:
+		return GuData.W
+var H: int:
+	get:
+		return GuData.H
 const SAVE_PATH: String = "user://gu_weltenbox.json"
 const SPEEDS: PackedInt32Array = [1, 2, 5, 10]
 const PS: float = 0.27
@@ -57,6 +62,7 @@ var hover: Vector2 = Vector2(-1, -1)
 var presim_on: bool = false  ## Vorgeschichte läuft im Hintergrund, die Karte ist schon sichtbar
 var t_boot: int = 0
 var fresh: bool = false  ## Entwickler: --fresh lädt und speichert nichts
+var new_size: int = GuData.SIZE_DEF  ## Kartengröße für die nächste neue Welt (Fenster „Neue Welt“)
 
 # Eingabe
 var touches: Dictionary = {}
@@ -115,6 +121,10 @@ func _ready() -> void:
 			_dev_blanktest()
 		if a.begins_with("--blankshots="):
 			_dev_blankshots(a.substr(13))
+		if a.begins_with("--mapshots="):
+			_dev_mapshots(a.substr(11))
+		if a.begins_with("--mapimg="):
+			_dev_mapimg(a.substr(9))
 		if a.begins_with("--terrshots="):
 			_dev_terrshots(a.substr(12))
 		if a.begins_with("--gfxshots="):
@@ -301,8 +311,9 @@ func _start_new_world(live: bool, mode: String = "gu", opts: Dictionary = {}) ->
 	follow = false
 	await get_tree().process_frame
 	await get_tree().process_frame
+	var tg: int = Time.get_ticks_usec()
 	sim.new_world(live, mode, opts)
-	sim.world.render_all()
+	sim.world.gen_ms["new_world"] = (Time.get_ticks_usec() - tg) / 1000.0
 	# Karte sofort zeigen; die Vorgeschichte (falls gewählt) läuft danach in Häppchen im Hintergrund.
 	presim_on = sim.presim
 	presim_ms0 = Time.get_ticks_msec()
@@ -312,21 +323,32 @@ func _start_new_world(live: bool, mode: String = "gu", opts: Dictionary = {}) ->
 		hud.show_hint("Leere Welt", "Forme Land mit „Welt formen“, setze Völker und Tiere mit „Kreaturen“ – alles liegt in deiner Hand.")
 	elif not presim_on and sim.villages.is_empty():
 		hud.show_hint("Freie Welt", "Keine Clans, keine Vorgeschichte: setze Völker, Gu-Meister und Tiere selbst.")
-	print("WORLD VISIBLE ms ", Time.get_ticks_msec() - t_boot)
+	print("WORLD VISIBLE ms ", Time.get_ticks_msec() - t_boot, " · Größe ", GuData.W, " · ", sim.world.gen_ms)
 
 
-## Fenster „Neue Welt“, Schritt 1: Kartenart wählen (wie in WorldBox).
+## Fenster „Neue Welt“, Schritt 1: Kartenart und Kartengröße wählen (wie in WorldBox).
 func _open_new_world() -> void:
-	hud.open_modal(Hud.H_PREFIX + "Neue Welt erschaffen[/b][/color][/font_size]\n\n[b]Gu-Weltkarte[/b]: die fünf Regionen mit Himmelshof, Gu-Yue-Dorf, Shang-Clan-Stadt und den anderen bekannten Orten.\n\n[b]Zufallswelt[/b]: frei erzeugte Regionen ohne benannte Orte.\n\n[b]Leere Welt[/b]: nur Wasser, eine Ebene, eine Insel oder flache Kontinente – ohne Regionswände und ohne Leben. Du formst alles selbst.\n\n[color=#9db09e]Die aktuelle Welt geht verloren, wenn du sie nicht gespeichert hast.[/color]", [
+	var sz: String = ""
+	for k: int in range(GuData.SIZES.size()):
+		var n: String = GuData.size_name(GuData.SIZES[k])
+		sz += ("[b][color=#ffd24a]%s[/color][/b]" % n) if GuData.SIZES[k] == new_size else n
+		if k < GuData.SIZES.size() - 1:
+			sz += " · "
+	hud.open_modal(Hud.H_PREFIX + "Neue Welt erschaffen[/b][/color][/font_size]\n\n[b]Gu-Weltkarte[/b]: die fünf Regionen mit Himmelshof, Gu-Yue-Dorf, Shang-Clan-Stadt und den anderen bekannten Orten.\n\n[b]Zufallswelt[/b]: frei erzeugte Regionen ohne benannte Orte.\n\n[b]Leere Welt[/b]: nur Wasser, eine Ebene, eine Insel oder flache Kontinente – ohne Regionswände und ohne Leben. Du formst alles selbst.\n\n[b]Kartengröße[/b] (Kacheln je Seite): " + sz + "\n[color=#9db09e]Große Karten bieten viel mehr Platz; von oben siehst du immer die ganze Welt.[/color]\n\n[color=#9db09e]Die aktuelle Welt geht verloren, wenn du sie nicht gespeichert hast.[/color]", [
 		["Gu-Weltkarte mit Clans", func() -> void: _new_world_go(true, "gu", {}), "red"],
 		["Gu-Weltkarte …", func() -> void: _open_new_world_life("gu"), ""],
 		["Zufallswelt …", func() -> void: _open_new_world_life("random"), "jade"],
-		["Leere Welt …", func() -> void: _open_new_world_blank(false), ""]])
+		["Leere Welt …", func() -> void: _open_new_world_blank(false), ""],
+		["Größe: " + GuData.size_name(new_size), func() -> void:
+			new_size = GuData.SIZES[(GuData.SIZES.find(new_size) + 1) % GuData.SIZES.size()]
+			_open_new_world(), ""]])
 
 
 func _new_world_go(live: bool, mode: String, opts: Dictionary) -> void:
 	hud.close_modal()
-	_start_new_world(live, mode, opts)
+	var o: Dictionary = opts.duplicate()
+	o["size"] = new_size
+	_start_new_world(live, mode, o)
 
 
 ## Schritt 2 für Gu-Weltkarte und Zufallswelt: wie viel Leben und ob es eine Vorgeschichte gibt.
@@ -337,7 +359,7 @@ func _open_new_world_life(mode: String) -> void:
 	txt += "[b]Mit Clans und Vorgeschichte[/b]: %s, dann vergehen %d Jahre Vorgeschichte.\n\n" % ["die kanonischen Mächte und Clans entstehen" if gu else "Clans entstehen in allen Regionen", int(PRESIM_YEARS)]
 	txt += "[b]Mit Clans, ohne Vorgeschichte[/b]: die Startdörfer stehen, die Welt beginnt sofort in Jahr 1.\n\n"
 	txt += "[b]Nur Tiere[/b]: Wildtiere und wilde Gu, aber keine Menschen – du setzt Völker und Gu-Meister selbst.\n\n"
-	txt += "[b]Ganz frei[/b]: nur die Karte, kein Leben. Auch der Tier-Spawn ist aus (Weltgesetze)."
+	txt += "[b]Ganz frei[/b]: nur die Karte, kein Leben. Auch der Tier-Spawn ist aus (Weltgesetze).\n\n[color=#9db09e]Kartengröße: %s[/color]" % GuData.size_name(new_size)
 	hud.open_modal(txt, [
 		["Mit Clans und Vorgeschichte", func() -> void: _new_world_go(true, mode, {}), "red" if gu else "jade"],
 		["Mit Clans, ohne Vorgeschichte", func() -> void: _new_world_go(true, mode, {"presim": false}), ""],
@@ -355,6 +377,7 @@ func _open_new_world_blank(animals: bool) -> void:
 	txt += "[b]Eine Insel[/b]: eine runde Insel mitten im Meer.\n\n"
 	txt += "[b]Kontinente[/b]: einige flache Landmassen ohne Gebirge und Regionen.\n\n"
 	txt += "Leben: [b]%s[/b] [color=#9db09e](umschalten mit dem letzten Knopf)[/color]" % ("Wildtiere und wilde Gu" if animals else "keines – du setzt alles selbst")
+	txt += "\n[color=#9db09e]Kartengröße: %s[/color]" % GuData.size_name(new_size)
 	hud.open_modal(txt, [
 		["Nur Ozean", func() -> void: _new_world_go(false, "ocean", opts), "jade"],
 		["Eine Ebene", func() -> void: _new_world_go(false, "flat", opts), "jade"],
@@ -367,6 +390,8 @@ func _open_new_world_blank(animals: bool) -> void:
 func _finish_start() -> void:
 	loading = false
 	hud.set_loading(false)
+	_on_resize()
+	clouds.reset()
 	z = min_z
 	zoom_goal = -1.0
 	fling = Vector2.ZERO
@@ -465,6 +490,12 @@ func _process(delta: float) -> void:
 	# Nahansicht deckt alles: Fernbild und 1:1-Bild nicht mehr zeichnen
 	near_spr.visible = lod > 0.0 and detail.amt < 1.0
 	far_spr.visible = detail.amt < 1.0
+	# große Karten in der Übersicht: weniger als ein Bildschirmpixel je Kachel – weich verkleinern statt Pixel zu verschlucken
+	var px_per_tile: float = z * get_viewport().get_stretch_transform().get_scale().x
+	var ff: CanvasItem.TextureFilter = CanvasItem.TEXTURE_FILTER_LINEAR if px_per_tile < 0.98 else CanvasItem.TEXTURE_FILTER_PARENT_NODE
+	if far_spr.texture_filter != ff:
+		far_spr.texture_filter = ff
+		terr_spr.texture_filter = ff
 	# Gebiete in jeder Zoomstufe: in der Übersicht kräftig, nah nur noch Ränder und eine leichte Fläche
 	var cl: float = 0.0 if reg_view else terr_close()
 	terr_spr.visible = (show_terr or reg_view) and cl < 1.0
@@ -1494,6 +1525,8 @@ func _load_game() -> bool:
 	sel_vil = null
 	hud.set_loading(false)
 	loading = false
+	_on_resize()
+	clouds.reset()
 	z = min_z
 	cam = Vector2(W / 2.0, H / 2.0)
 	_clamp_cam()
@@ -1803,10 +1836,26 @@ class CloudLayer:
 	var m: GuMain
 	var list: Array[Dictionary] = []
 
+	var made_w: int = 0
+
 	func _ready() -> void:
-		for k: int in range(7):
+		reset()
+
+	## Wolken passend zur Kartengröße (7 je 256er-Fläche) verteilen; Bilder werden wiederverwendet.
+	func reset() -> void:
+		var want: int = clampi(roundi(7.0 * GuData.area_f()), 5, 40)
+		while list.size() < want:
 			var ims: Array[Image] = _make_cloud()
-			list.append({"x": randf() * GuData.W * 1.4 - GuData.W * 0.2, "y": randf() * GuData.H, "tex": ImageTexture.create_from_image(ims[0]), "dark": ImageTexture.create_from_image(ims[1]), "sh": _shadow(ims[0]), "sp": 1.0 + randf() * 1.5})
+			list.append({"x": 0.0, "y": 0.0, "tex": ImageTexture.create_from_image(ims[0]), "dark": ImageTexture.create_from_image(ims[1]), "sh": _shadow(ims[0]), "sp": 1.0 + randf() * 1.5})
+		if list.size() > want:
+			list.resize(want)
+		if made_w == GuData.W:
+			return
+		made_w = GuData.W
+		for c: Dictionary in list:
+			c["x"] = randf() * GuData.W * 1.4 - GuData.W * 0.2
+			c["y"] = randf() * GuData.H
+		glints.clear()
 
 	## Pixelwolke aus überlappenden Ballen: oben weiß, Mitte hellblau, Unterseite blaugrau (WorldBox).
 	func _make_cloud() -> Array[Image]:
@@ -1879,7 +1928,7 @@ class CloudLayer:
 				glints[k] = g
 			k -= 1
 		var tries: int = 0
-		while glints.size() < 90 and tries < 40:
+		while glints.size() < int(90.0 * GuData.area_f()) and tries < 40:
 			tries += 1
 			var x: int = randi() % GuData.W
 			var y: int = randi() % GuData.H
@@ -2195,8 +2244,8 @@ func _dev_shots(dir: String) -> void:
 	await _shot(dir + "/B.png")
 	var coast: Vector2 = Vector2(-1, -1)
 	for k: int in range(30000):
-		var x: int = 20 + randi() % 200
-		var y: int = 40 + randi() % 170
+		var x: int = 20 + randi() % (W - 56)
+		var y: int = 40 + randi() % (H - 86)
 		var i: int = y * W + x
 		var t: PackedByteArray = sim.world.tile
 		if t[i] == GuData.SAND and t[i + W] == GuData.SHAL and t[i - 6 * W] == GuData.GRASS and t[i + 12 * W] <= 1 and t[i + 30 * W] >= 2 and t[i + 30 * W] != GuData.WALL:
@@ -2711,6 +2760,116 @@ func _dev_blanktest() -> void:
 
 
 ## Entwickler: -- --fresh --blankshots=<ordner> – Übersichtsbilder der leeren Welten (ohne --headless).
+## Entwickler: -- --fresh --mapimg=<ordner> [--mapsizes=512,256] [--mapmode=gu] – nur Karten erzeugen und das
+## Fernbild 1:1 als PNG speichern (läuft headless, schnell zum Gestalten der Karte).
+func _dev_mapimg(dir: String) -> void:
+	var sizes: PackedStringArray = ["512"]
+	var mode: String = "gu"
+	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with("--mapsizes="):
+			sizes = a.substr(11).split(",")
+		if a.begins_with("--mapmode="):
+			mode = a.substr(10)
+	var reps: int = 3 if "--mapreps" in OS.get_cmdline_user_args() else 1
+	for s: String in sizes:
+		GuData.set_size(int(s))
+		var t0: int = 0
+		var best: Dictionary = {}
+		for rep: int in range(reps):
+			t0 = Time.get_ticks_usec()
+			sim.reset_state()
+			sim.world.generate(int(Time.get_ticks_usec()) if "--rndseed" in OS.get_cmdline_user_args() else 7, mode)
+			sim.world.render_all()
+			for k: String in sim.world.gen_ms.keys():
+				if sim.world.gen_ms[k] is float:
+					best[k] = minf(float(best.get(k, 1e9)), float(sim.world.gen_ms[k]))
+		sim.world.gen_ms = best
+		var rl: PackedInt32Array = PackedInt32Array()
+		rl.resize(5)
+		for i: int in range(GuData.N):
+			if GuData.is_land(sim.world.tile[i]) and sim.world.tile[i] != GuData.WALL:
+				rl[sim.world.region[i]] += 1
+		var pc: Array = []
+		for r: int in range(5):
+			pc.append("%.1f%%" % (100.0 * rl[r] / GuData.N))
+		print("MAPIMG %s %s %.0f ms %s walls=%d land N/S/W/O/Z=%s" % [mode, s, (Time.get_ticks_usec() - t0) / 1000.0, str(sim.world.gen_ms), sim.world.tile.count(GuData.WALL), str(pc)])
+		sim.world.far_img.save_png(dir + "/%s_%s.png" % [mode, s])
+	get_tree().quit()
+
+
+## Entwickler: -- --fresh --mapshots=<ordner> – Gu-Weltkarte in jeder Kartengröße (Übersicht), Zufalls- und leere
+## Welten in der Standardgröße, mittlerer Zoom; druckt MAPPERF-Zeilen (Generierung, Zeichnen, Simulationsschritt).
+func _dev_mapshots(dir: String) -> void:
+	while loading or presim_on:
+		await get_tree().process_frame
+	var only: String = ""
+	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with("--mapsizes="):
+			only = a.substr(11)
+	for sz: int in GuData.SIZES:
+		if only != "" and not (str(sz) in only.split(",")):
+			continue
+		await _start_new_world(true, "gu", {"size": sz, "presim": false})
+		_set_ui_hidden(true)
+		await _wait(0.6)
+		await _shot(dir + "/gu_%d.png" % sz)
+		_set_ui_hidden(false)
+		await _wait(0.2)
+		await _shot(dir + "/gu_%d_ui.png" % sz)
+		var gm: Dictionary = sim.world.gen_ms.duplicate()
+		# Simulationsschritt: 3 Jahre ohne Bild, dann mittlere Kosten
+		var t0: int = Time.get_ticks_usec()
+		var steps: int = 0
+		while sim.sim_time < 36.0:
+			sim.step(Sim.DT)
+			steps += 1
+		var st_ms: float = (Time.get_ticks_usec() - t0) / 1000.0 / steps
+		sim.world.update_territory(sim.villages, sim.clans, Influence.head)
+		print("MAPPERF size=%d gen=%s step_ms=%.2f units=%d villages=%d terr_ms=%.1f" % [sz, str(gm), st_ms, sim.units.size(), sim.villages.size(), sim.world.terr_ms])
+		await _wait(0.4)
+		await _shot(dir + "/gu_%d_j3.png" % sz)
+		var vbest: Village = null
+		for v: Village in sim.villages:
+			if v.alive and v.reg == 1 and (vbest == null or v.pop > vbest.pop):
+				vbest = v
+		if vbest != null:
+			z = 3.6
+			cam = Vector2(vbest.cx, vbest.cy + 4.0)
+			_clamp_cam()
+			await _wait(1.2)
+			await _shot(dir + "/gu_%d_nah.png" % sz)
+	if only != "":
+		get_tree().quit()
+		return
+	await _start_new_world(true, "gu", {"size": GuData.SIZE_DEF, "presim": false})
+	z = 2.2
+	cam = Vector2(W * 0.5, H * 0.5)
+	_clamp_cam()
+	await _wait(0.6)
+	await _shot(dir + "/gu_mitte.png")
+	z = 1.4
+	cam = Vector2(W * 0.3, H * 0.85)
+	_clamp_cam()
+	await _wait(0.6)
+	await _shot(dir + "/gu_sued.png")
+	z = 3.2
+	cam = Vector2(W * 0.75, H * 0.75)
+	_clamp_cam()
+	await _wait(1.0)
+	await _shot(dir + "/gu_wand.png")
+	await _start_new_world(true, "random", {"presim": false})
+	await _wait(0.6)
+	await _shot(dir + "/random.png")
+	for mode: String in ["flat", "island", "continents"]:
+		await _start_new_world(false, mode, {})
+		await _wait(0.5)
+		await _shot(dir + "/blank_" + mode + ".png")
+	_open_new_world()
+	await _wait(0.3)
+	await _shot(dir + "/neu_1.png")
+	get_tree().quit()
+
+
 func _dev_blankshots(dir: String) -> void:
 	while loading or presim_on:
 		await get_tree().process_frame
@@ -3058,10 +3217,10 @@ func _dev_gfx(dir: String) -> void:
 		await get_tree().process_frame
 	printerr("GFX start")
 	var te: int = Time.get_ticks_usec()
-	for c: int in range(World.CXN * World.CXN):
+	for c: int in range(sim.world.CXN * sim.world.CXN):
 		detail._encode(c)
 	var te2: int = Time.get_ticks_usec()
-	for c2: int in range(World.CXN * World.CXN):
+	for c2: int in range(sim.world.CXN * sim.world.CXN):
 		detail._bake(c2)
 	var te3: int = Time.get_ticks_usec()
 	printerr("GFXPERF encode 64 chunks ms %.1f, bake 64 chunks ms %.1f" % [(te2 - te) / 1000.0, (te3 - te2) / 1000.0])

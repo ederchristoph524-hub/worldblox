@@ -2,9 +2,38 @@ class_name GuData
 extends RefCounted
 ## Feste Spieldaten: Gelände, Ränge, Pfade, Völker, Tiere, Namen und Zeitalter.
 
-const W: int = 256
-const H: int = 256
-const N: int = W * H
+## Kartengröße in Kacheln – zur Laufzeit umstellbar (Fenster „Neue Welt“, Spielstand v6). Nur über set_size ändern,
+## danach World.alloc (Sim.new_world/deserialize erledigen das). Andere Skripte lesen W/H/N über eigene Felder
+## (Sim/World: Variablen, in reset_state/alloc nachgezogen; GuMain/Powers/Venerables: Eigenschaften mit Getter);
+## statische Funktionen nehmen GuData.W/H/N direkt.
+static var W: int = 512
+static var H: int = 512
+static var N: int = W * H
+## Wählbare Größen (quadratisch) und Namen; SIZE_DEF ist die Standardgröße neuer Welten.
+const SIZES: PackedInt32Array = [256, 384, 512, 640]
+const SIZE_NAME: PackedStringArray = ["Klein", "Mittel", "Groß", "Riesig"]
+const SIZE_DEF: int = 512
+
+
+static func set_size(s: int) -> void:
+	W = clampi(s / 32 * 32, 128, 1024)
+	H = W
+	N = W * H
+
+
+## Flächenfaktor gegenüber der alten 256er-Karte (Tier-Spawn, Wolkenzahl, Naturtakt …).
+static func area_f() -> float:
+	return float(N) / 65536.0
+
+
+## Längenfaktor gegenüber der alten 256er-Karte.
+static func len_f() -> float:
+	return float(W) / 256.0
+
+
+static func size_name(s: int) -> String:
+	var k: int = SIZES.find(s)
+	return ("%s %d" % [SIZE_NAME[k], s]) if k >= 0 else str(s)
 
 # Geländearten
 const DEEP: int = 0

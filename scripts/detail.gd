@@ -3,7 +3,7 @@ extends Node2D
 ## Nahansicht der Welt: Gelände mit 4 × 4 Texeln je Kachel (Shader) und Objekte (Bäume, Felsen …)
 ## in hoher Auflösung, die je 32er-Block nur bei Bedarf gebacken werden.
 ##
-## Gelände: Ein Datenbild (256 × 256, je Kachel R = Geländeart, G = Höhe, B = Wasserabstand,
+## Gelände: Ein Datenbild (W × H, je Kachel R = Geländeart, G = Höhe, B = Wasserabstand,
 ## A = Region × 16 + Straße) wird im Shader zu Pixel-Art: verwackelte (organische) Grenzen,
 ## Wassertiefe in Stufen mit Gischt am Ufer, Licht von links oben über die Höhe, Schnee auf Gipfeln,
 ## Dünenrippel, glühende Lava, schimmernde Regionswände. Kosten auf der CPU nur beim Ändern von Kacheln.
@@ -12,7 +12,8 @@ extends Node2D
 
 const DS: int = 4
 const CHK: int = World.CHK
-const CXN: int = World.CXN
+## Blöcke je Zeile – folgt der Kartengröße der Welt (_realloc)
+var CXN: int = 0
 const CPX: int = CHK * DS
 ## Höchstens so viele Objekt-Blöcke behalten (64 = ganze Karte, je ~85 kB mit Mipmaps)
 const MAX_FEAT: int = 48
@@ -54,12 +55,21 @@ func _ready() -> void:
 	feat.d = self
 	feat.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	add_child(feat)
-	dat_img = Image.create_empty(World.W, World.H, false, Image.FORMAT_RGBA8)
-	dat_tex = ImageTexture.create_from_image(dat_img)
-	mat.set_shader_parameter("dat", dat_tex)
 	mat.set_shader_parameter("nz", _noise_tex(64, 11))
 	mat.set_shader_parameter("wn", _noise_tex(256, 23))
 	mat.set_shader_parameter("ds", float(DS))
+
+
+## Datenbild und Block-Listen für die Welt w (und ihre Größe) neu anlegen.
+func _realloc(w: World) -> void:
+	world = w
+	CXN = w.CXN
+	dat_img = Image.create_empty(w.W, w.H, false, Image.FORMAT_RGBA8)
+	if dat_tex == null:
+		dat_tex = ImageTexture.create_from_image(dat_img)
+		mat.set_shader_parameter("dat", dat_tex)
+	else:
+		dat_tex.set_image(dat_img)
 	dat_ver = PackedInt32Array()
 	dat_ver.resize(CXN * CXN)
 	dat_ver.fill(-1)
@@ -68,6 +78,7 @@ func _ready() -> void:
 	fver.fill(-1)
 	fuse = PackedInt32Array()
 	fuse.resize(CXN * CXN)
+	ftex.clear()
 	ftex.resize(CXN * CXN)
 
 
@@ -84,12 +95,8 @@ static func _noise_tex(n: int, sd: int) -> ImageTexture:
 
 ## Jedes Bild aus main.gd: sichtbarer Ausschnitt in Kacheln und Zoom.
 func tick(w: World, vrect: Rect2, z: float) -> void:
-	if w != world:
-		world = w
-		dat_ver.fill(-1)
-		fver.fill(-1)
-		for c: int in range(ftex.size()):
-			ftex[c] = null
+	if w != world or w.CXN != CXN or dat_img.get_width() != w.W:
+		_realloc(w)
 	frame += 1
 	amt = 0.0 if dev_off else clampf((z - Z_ON) / (Z_FULL - Z_ON), 0.0, 1.0)
 	var t0: int = Time.get_ticks_usec()
@@ -97,16 +104,36 @@ func tick(w: World, vrect: Rect2, z: float) -> void:
 	Sprites.hd_step(int(BUDGET_MS * 1000.0))
 	if not Sprites.hd_feat_ready():
 		amt = 0.0
-	visible = amt > 0.0
 	view = vrect
-	# Datenbild: geänderte Blöcke neu kodieren (immer, damit es beim Hineinzoomen bereit ist)
+	# Datenbild: geänderte Blöcke neu kodieren – sichtbare zuerst; fehlt dort noch einer (z. B. gleich nach einer
+	# neuen, großen Welt), bleibt in diesem Bild das 1:1-Bild statt halb leerem Gelände
+	if amt > 0.0:
+		var cx0: int = clampi(int(floorf(view.position.x / CHK)) - 1, 0, CXN - 1)
+		var cy0: int = clampi(int(floorf(view.position.y / CHK)) - 1, 0, CXN - 1)
+		var cx1: int = clampi(int(floorf(view.end.x / CHK)) + 1, 0, CXN - 1)
+		var cy1: int = clampi(int(floorf(view.end.y / CHK)) + 1, 0, CXN - 1)
+		var missing: bool = false
+		for cy: int in range(cy0, cy1 + 1):
+			for cx: int in range(cx0, cx1 + 1):
+				var cv: int = cy * CXN + cx
+				if dat_ver[cv] == world.dver[cv]:
+					continue
+				if (Time.get_ticks_usec() - t0) > BUDGET_MS * 2000.0:
+					missing = true
+					continue
+				_encode(cv)
+				dat_ver[cv] = world.dver[cv]
+				dat_dirty = true
+		if missing:
+			amt = 0.0
+	visible = amt > 0.0
 	for c: int in range(CXN * CXN):
+		if (Time.get_ticks_usec() - t0) > BUDGET_MS * 1000.0:
+			break
 		if dat_ver[c] != world.dver[c]:
 			_encode(c)
 			dat_ver[c] = world.dver[c]
 			dat_dirty = true
-			if (Time.get_ticks_usec() - t0) > BUDGET_MS * 1000.0:
-				break
 	if dat_dirty and (visible or frame % 30 == 0):
 		dat_tex.update(dat_img)
 		dat_dirty = false
@@ -122,7 +149,8 @@ func tick(w: World, vrect: Rect2, z: float) -> void:
 
 func _draw() -> void:
 	# Ein Rechteck über die ganze Karte; der Shader rechnet nur sichtbare Pixel.
-	draw_rect(Rect2(0, 0, World.W, World.H), Color.WHITE)
+	if world != null:
+		draw_rect(Rect2(0, 0, world.W, world.H), Color.WHITE)
 
 
 ## Sichtbare Blöcke (plus Rand) backen, die nächsten zur Bildmitte zuerst, im Zeitbudget.
@@ -182,7 +210,7 @@ func _encode(c: int) -> void:
 	var ts: PackedByteArray = world.temp_snow
 	var k: int = 0
 	for y: int in range(y0, y0 + CHK):
-		var i: int = y * World.W + x0
+		var i: int = y * world.W + x0
 		for x: int in range(CHK):
 			var t: int = tile[i]
 			if t == GuData.SNOW and ts[i] > 0:
@@ -205,9 +233,10 @@ func _bake(c: int) -> void:
 	var ft: PackedByteArray = world.feat
 	var reg: PackedByteArray = world.region
 	var clip: Rect2i = Rect2i(0, 0, CPX, CPX)
-	for y: int in range(maxi(0, y0 - 1), mini(World.H, y0 + CHK + 16)):
-		for x: int in range(maxi(0, x0 - 8), mini(World.W, x0 + CHK + 8)):
-			var i: int = y * World.W + x
+	var ww: int = world.W
+	for y: int in range(maxi(0, y0 - 1), mini(world.H, y0 + CHK + 16)):
+		for x: int in range(maxi(0, x0 - 8), mini(ww, x0 + CHK + 8)):
+			var i: int = y * ww + x
 			var f: int = ft[i]
 			if f == 0 or f == GuData.F_ROAD:
 				continue
@@ -238,6 +267,9 @@ class FeatLayer:
 
 	func _draw() -> void:
 		var v: Rect2 = d.view
+		var CXN: int = d.CXN
+		if CXN <= 0:
+			return
 		var cx0: int = clampi(int(floorf(v.position.x / CHK)) - 1, 0, CXN - 1)
 		var cy0: int = clampi(int(floorf(v.position.y / CHK)) - 1, 0, CXN - 1)
 		var cx1: int = clampi(int(floorf(v.end.x / CHK)) + 1, 0, CXN - 1)
@@ -288,7 +320,7 @@ float vn(vec2 p, int s) {
 }
 
 vec4 D(ivec2 t) {
-	return texelFetch(dat, clamp(t, ivec2(0), ivec2(255)), 0);
+	return texelFetch(dat, clamp(t, ivec2(0), textureSize(dat, 0) - ivec2(1)), 0);
 }
 
 vec3 c8(vec3 c) {

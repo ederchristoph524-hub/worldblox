@@ -2,11 +2,13 @@ class_name World
 extends RefCounted
 ## Kartendaten der Gu-Welt (eine Kachel = ein Pixel) und ihre Bilder für nah, fern und Clan-Gebiete.
 
-const W: int = GuData.W
-const H: int = GuData.H
-const N: int = GuData.N
+## Kartengröße (aus GuData, in alloc nachgezogen – Größe ist zur Laufzeit umstellbar)
+var W: int = GuData.W
+var H: int = GuData.H
+var N: int = GuData.N
 const CHK: int = 32
-const CXN: int = W / CHK
+## Blöcke je Zeile (W / CHK)
+var CXN: int = W / CHK
 
 var tile: PackedByteArray
 var feat: PackedByteArray
@@ -20,22 +22,29 @@ var temp_snow: PackedByteArray
 var wdist: PackedByteArray
 
 ## Benannte Orte der kanonischen Gu-Weltkarte (Modus "gu"); kind: siedlung (Bauland), berg, fluss, ort, gebiet.
+## x/y in Bezugskoordinaten 0..256 (MapGu.REF); landmarks enthält sie in Kacheln der aktuellen Kartengröße.
 const LANDMARKS: Array = [
-	{"name": "Himmlischer Hof", "x": 124, "y": 130, "region": 4, "kind": "siedlung"},
-	{"name": "Unsterblicher-Kranich-Sekte", "x": 154, "y": 134, "region": 4, "kind": "siedlung"},
-	{"name": "Geistaffinitätshaus", "x": 110, "y": 140, "region": 4, "kind": "siedlung"},
-	{"name": "Gu-Yue-Dorf", "x": 78, "y": 213, "region": 1, "kind": "siedlung"},
+	{"name": "Himmlischer Hof", "x": 124, "y": 126, "region": 4, "kind": "siedlung"},
+	{"name": "Unsterblicher-Kranich-Sekte", "x": 158, "y": 136, "region": 4, "kind": "siedlung"},
+	{"name": "Geistaffinitätshaus", "x": 100, "y": 142, "region": 4, "kind": "siedlung"},
+	{"name": "Gu-Yue-Dorf", "x": 78, "y": 214, "region": 1, "kind": "siedlung"},
 	{"name": "Qing-Mao-Berg", "x": 80, "y": 205, "region": 1, "kind": "berg"},
-	{"name": "Shang-Clan-Stadt", "x": 142, "y": 233, "region": 1, "kind": "siedlung"},
+	{"name": "Shang-Clan-Stadt", "x": 140, "y": 238, "region": 1, "kind": "siedlung"},
 	{"name": "Bai-Gu-Berg", "x": 176, "y": 230, "region": 1, "kind": "berg"},
-	{"name": "Roter Drachenfluss", "x": 62, "y": 214, "region": 1, "kind": "fluss"},
-	{"name": "Gelber Drachenfluss", "x": 124, "y": 208, "region": 1, "kind": "fluss"},
-	{"name": "Jadedrachenfluss", "x": 190, "y": 212, "region": 1, "kind": "fluss"},
-	{"name": "Kaiserhof-Gesegnetes-Land", "x": 150, "y": 52, "region": 0, "kind": "siedlung"},
-	{"name": "Lang-Ya-Gesegnetes-Land", "x": 86, "y": 58, "region": 0, "kind": "ort"},
-	{"name": "Große Oase", "x": 50, "y": 104, "region": 2, "kind": "siedlung"},
-	{"name": "Unpassierbare Dünen", "x": 34, "y": 166, "region": 2, "kind": "gebiet"},
+	{"name": "Roter Drachenfluss", "x": 66, "y": 222, "region": 1, "kind": "fluss"},
+	{"name": "Gelber Drachenfluss", "x": 126, "y": 214, "region": 1, "kind": "fluss"},
+	{"name": "Jadedrachenfluss", "x": 190, "y": 216, "region": 1, "kind": "fluss"},
+	{"name": "Kaiserhof-Gesegnetes-Land", "x": 154, "y": 30, "region": 0, "kind": "siedlung"},
+	{"name": "Lang-Ya-Gesegnetes-Land", "x": 104, "y": 26, "region": 0, "kind": "ort"},
+	{"name": "Große Oase", "x": 36, "y": 112, "region": 2, "kind": "siedlung"},
+	{"name": "Unpassierbare Dünen", "x": 30, "y": 168, "region": 2, "kind": "gebiet"},
 ]
+
+## Lage der Orte auf der alten 256er-Gu-Karte (Spielstände bis v5, Kacheln)
+const LANDMARKS_V5: Dictionary = {"Himmlischer Hof": [124, 130], "Unsterblicher-Kranich-Sekte": [154, 134], "Geistaffinitätshaus": [110, 140],
+	"Gu-Yue-Dorf": [78, 213], "Qing-Mao-Berg": [80, 205], "Shang-Clan-Stadt": [142, 233], "Bai-Gu-Berg": [176, 230], "Roter Drachenfluss": [62, 214],
+	"Gelber Drachenfluss": [124, 208], "Jadedrachenfluss": [190, 212], "Kaiserhof-Gesegnetes-Land": [150, 52], "Lang-Ya-Gesegnetes-Land": [86, 58],
+	"Große Oase": [50, 104], "Unpassierbare Dünen": [34, 166]}
 
 ## Leere Startwelten zum freien Bauen (ohne Regionswände, ohne benannte Orte, kaum Pflanzen).
 const BLANK_MODES: PackedStringArray = ["ocean", "flat", "island", "continents"]
@@ -71,6 +80,7 @@ const INF_R: int = 12
 ## der Punkt liegt immer im eigenen Gebiet des Clans.
 var terr_center: Dictionary = {}
 var terr_ms: float = 0.0  ## Dauer des letzten update_territory (Entwickler)
+var gen_ms: Dictionary = {}  ## Entwickler: Zeiten der letzten Generierung (ms)
 const REG_COL: Array[Color] = [Color("#e8e0a0"), Color("#5ac85a"), Color("#e8a040"), Color("#40a8e8"), Color("#c070e8")]
 
 
@@ -78,25 +88,48 @@ func _init() -> void:
 	Sprites.init()
 	_set_landmarks("gu")
 	alloc()
+
+
+## Bilder, Texturen und Block-Listen in der aktuellen Kartengröße anlegen. Die Textur-Objekte bleiben dieselben
+## (set_image), damit Sprites in main.gd sie behalten, auch wenn sich die Größe ändert.
+func _alloc_images() -> void:
 	near_img = Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
 	far_img = Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
 	terr_img = Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
 	war_img = Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
 	fill_img = Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
 	edge_img = Image.create_empty(W * EDGE_S, H * EDGE_S, false, Image.FORMAT_RGBA8)
-	near_tex = ImageTexture.create_from_image(near_img)
-	far_tex = ImageTexture.create_from_image(far_img)
-	terr_tex = ImageTexture.create_from_image(terr_img)
-	war_tex = ImageTexture.create_from_image(war_img)
-	fill_tex = ImageTexture.create_from_image(fill_img)
-	edge_tex = ImageTexture.create_from_image(edge_img)
+	if near_tex == null:
+		near_tex = ImageTexture.create_from_image(near_img)
+		far_tex = ImageTexture.create_from_image(far_img)
+		terr_tex = ImageTexture.create_from_image(terr_img)
+		war_tex = ImageTexture.create_from_image(war_img)
+		fill_tex = ImageTexture.create_from_image(fill_img)
+		edge_tex = ImageTexture.create_from_image(edge_img)
+	else:
+		near_tex.set_image(near_img)
+		far_tex.set_image(far_img)
+		terr_tex.set_image(terr_img)
+		war_tex.set_image(war_img)
+		fill_tex.set_image(fill_img)
+		edge_tex.set_image(edge_img)
 	dirty = PackedByteArray()
 	dirty.resize(CXN * CXN)
 	dver = PackedInt32Array()
 	dver.resize(CXN * CXN)
+	_jphase = -1
 
 
+## Kartenfelder in der aktuellen Größe (GuData.W/H) leeren; bei geänderter Größe auch Bilder und Blöcke neu anlegen.
 func alloc() -> void:
+	var resized: bool = near_img == null or W != GuData.W or H != GuData.H
+	W = GuData.W
+	H = GuData.H
+	N = GuData.N
+	CXN = ceili(float(W) / CHK)
+	if resized:
+		_alloc_images()
+	_jphase = -1
 	tile = PackedByteArray()
 	tile.resize(N)
 	feat = PackedByteArray()
@@ -144,38 +177,69 @@ static func n01(n: FastNoiseLite, x: float, y: float) -> float:
 	return clampf(n.get_noise_2d(x, y) * 0.5 + 0.5, 0.0, 1.0)
 
 
+## Wasserabstand (wdist): 0 an Land, sonst Schritte (4er-Nachbarschaft) bis zum nächsten Land, höchstens 40 (sonst 255).
 func compute_water() -> void:
-	wdist.fill(255)
+	var wd: PackedByteArray = PackedByteArray()
+	wd.resize(N)
+	wd.fill(255)
+	var tl: PackedByteArray = tile
 	var q: PackedInt32Array = PackedInt32Array()
 	q.resize(N)
 	var qh: int = 0
 	var qt: int = 0
 	for i: int in range(N):
-		if not GuData.is_water(tile[i]):
-			wdist[i] = 0
+		if tl[i] > GuData.SHAL:
+			wd[i] = 0
 			q[qt] = i
 			qt += 1
+	var w1: int = W - 1
+	var lim: int = N - W
 	while qh < qt:
 		var i: int = q[qh]
 		qh += 1
-		var d: int = wdist[i]
+		var d: int = wd[i]
 		if d >= 40:
 			continue
+		var nd: int = d + 1
 		var x: int = i % W
-		var y: int = i / W
-		for j: int in [i - 1 if x > 0 else -1, i + 1 if x < W - 1 else -1, i - W if y > 0 else -1, i + W if y < H - 1 else -1]:
-			if j >= 0 and wdist[j] == 255:
-				wdist[j] = d + 1
-				q[qt] = j
-				qt += 1
+		if x > 0 and wd[i - 1] == 255:
+			wd[i - 1] = nd
+			q[qt] = i - 1
+			qt += 1
+		if x < w1 and wd[i + 1] == 255:
+			wd[i + 1] = nd
+			q[qt] = i + 1
+			qt += 1
+		if i >= W and wd[i - W] == 255:
+			wd[i - W] = nd
+			q[qt] = i - W
+			qt += 1
+		if i < lim and wd[i + W] == 255:
+			wd[i + W] = nd
+			q[qt] = i + W
+			qt += 1
+	wdist = wd
 
 
-func _set_landmarks(mode: String) -> void:
+func _set_landmarks(mode: String, legacy: bool = false) -> void:
 	map_mode = mode
 	landmarks.clear()
 	if mode == "gu":
+		var k: float = W / MapGu.REF
 		for l: Dictionary in LANDMARKS:
-			landmarks.append(l.duplicate())
+			var d: Dictionary = l.duplicate()
+			d["x"] = clampi(int((float(l["x"]) + 0.5) * k), 0, W - 1)
+			d["y"] = clampi(int((float(l["y"]) + 0.5) * k), 0, H - 1)
+			if legacy and LANDMARKS_V5.has(l["name"]):
+				d["x"] = int(LANDMARKS_V5[l["name"]][0])
+				d["y"] = int(LANDMARKS_V5[l["name"]][1])
+			landmarks.append(d)
+
+
+## Verdickung der Regionswände (Kacheln je Seite über die zwei Grenzkacheln hinaus): 256 → 4 Kacheln breit,
+## ab 448 → 6 Kacheln breit.
+func wall_r() -> float:
+	return 1.0 if W < 448 else 2.0
 
 
 static func is_blank(mode: String) -> bool:
@@ -185,6 +249,7 @@ static func is_blank(mode: String) -> bool:
 ## mode "gu": kanonische Gu-Weltkarte (Form fest, Samen ändert nur Details); "random": Zufallswelt;
 ## "ocean", "flat", "island", "continents": leere Welt zum freien Bauen.
 func generate(S: int, mode: String = "gu") -> void:
+	var t0: int = Time.get_ticks_usec()
 	alloc()
 	var open_sea: PackedByteArray = PackedByteArray()
 	var blank: bool = is_blank(mode)
@@ -195,8 +260,10 @@ func generate(S: int, mode: String = "gu") -> void:
 	else:
 		mode = "gu"
 		open_sea = MapGu.build(self, S)
+	gen_ms["base"] = (Time.get_ticks_usec() - t0) / 1000.0
 	_set_landmarks(mode)
 	_finish(S, open_sea, blank)
+	gen_ms["gen"] = (Time.get_ticks_usec() - t0) / 1000.0
 	if blank:
 		# Höhen passend zu den Kacheln, damit Heben/Senken und Lava sich wie gewohnt verhalten
 		for i: int in range(N):
@@ -313,67 +380,97 @@ func _finish(S: int, open_sea: PackedByteArray, blank: bool = false) -> void:
 	for i: int in range(N):
 		if tile[i] == GuData.DEEP and wdist[i] <= 8:
 			tile[i] = GuData.SHAL
-	# Regionswände
+	# Regionswände: Grenzkacheln (Nachbar in anderer Region, 8er-Nachbarschaft), auf großen Karten zu einem
+	# breiteren Band verdickt. Jedes Paar verschiedener Nachbarn wird einmal (nach rechts/unten) geprüft.
+	var wr: float = wall_r()
+	var wri: int = ceili(wr)
+	var wr2: float = wr * wr
+	var bm: PackedByteArray = PackedByteArray()
+	bm.resize(N)
+	var rg: PackedByteArray = region
 	for y: int in range(0 if blank else H):
+		var row: int = y * W
+		var last: bool = y == H - 1
 		for x: int in range(W):
-			var i: int = y * W + x
-			var r: int = region[i]
-			var b: bool = (x > 0 and region[i - 1] != r) or (x < W - 1 and region[i + 1] != r)
-			if not b and y > 0:
-				var k: int = i - W
-				b = region[k] != r or (x > 0 and region[k - 1] != r) or (x < W - 1 and region[k + 1] != r)
-			if not b and y < H - 1:
-				var k2: int = i + W
-				b = region[k2] != r or (x > 0 and region[k2 - 1] != r) or (x < W - 1 and region[k2 + 1] != r)
-			if b and (open_sea.is_empty() or open_sea[i] == 0 or wdist[i] <= 10):
-				tile[i] = GuData.WALL
-	# Strand mit Zacken
+			var i: int = row + x
+			var r: int = rg[i]
+			if x < W - 1 and rg[i + 1] != r:
+				bm[i] = 1
+				bm[i + 1] = 1
+			if not last:
+				var k: int = i + W
+				if rg[k] != r:
+					bm[i] = 1
+					bm[k] = 1
+				if x < W - 1 and rg[k + 1] != r:
+					bm[i] = 1
+					bm[k + 1] = 1
+				if x > 0 and rg[k - 1] != r:
+					bm[i] = 1
+					bm[k - 1] = 1
+	var tl: PackedByteArray = tile
+	for i: int in range(N if not blank else 0):
+		if bm[i] == 0 or not (open_sea.is_empty() or open_sea[i] == 0 or wdist[i] <= 10):
+			continue
+		tl[i] = GuData.WALL
+		if wri <= 0:
+			continue
+		var x: int = i % W
+		var y: int = i / W
+		for dy: int in range(maxi(-wri, -y), mini(wri, H - 1 - y) + 1):
+			for dx: int in range(maxi(-wri, -x), mini(wri, W - 1 - x) + 1):
+				if dx * dx + dy * dy <= wr2:
+					tl[i + dy * W + dx] = GuData.WALL
+	# Strand mit Zacken: Land (ohne Wand/Schnee) neben Wasser (8er-Nachbarschaft); gesucht wird vom Ufer-Wasser
+	# aus (wdist == 1 aus der Wasserberechnung vor den Wänden)
 	var sand: PackedByteArray = PackedByteArray()
 	sand.resize(N)
-	for y: int in range(H):
-		for x: int in range(W):
-			var i: int = y * W + x
-			var t: int = tile[i]
-			if not GuData.is_land(t) or t == GuData.WALL or t == GuData.SNOW:
-				continue
-			# Wasser = DEEP (0) oder SHAL (1)
-			var w: bool = (x > 0 and tile[i - 1] <= GuData.SHAL) or (x < W - 1 and tile[i + 1] <= GuData.SHAL)
-			if not w and y > 0:
-				var k: int = i - W
-				w = tile[k] <= GuData.SHAL or (x > 0 and tile[k - 1] <= GuData.SHAL) or (x < W - 1 and tile[k + 1] <= GuData.SHAL)
-			if not w and y < H - 1:
-				var k2: int = i + W
-				w = tile[k2] <= GuData.SHAL or (x > 0 and tile[k2 - 1] <= GuData.SHAL) or (x < W - 1 and tile[k2 + 1] <= GuData.SHAL)
-			if w:
-				sand[i] = 1
+	var wd: PackedByteArray = wdist
 	for i: int in range(N):
-		if sand[i] == 1 and tile[i] != GuData.DES and tile[i] != GuData.MOUNT:
-			tile[i] = GuData.SAND
+		if wd[i] != 1 or tl[i] > GuData.SHAL:
+			continue
+		var x: int = i % W
+		var y: int = i / W
+		for dy: int in range(-1 if y > 0 else 0, 2 if y < H - 1 else 1):
+			for dx: int in range(-1 if x > 0 else 0, 2 if x < W - 1 else 1):
+				var j: int = i + dy * W + dx
+				var t: int = tl[j]
+				if t > GuData.SHAL and t != GuData.WALL and t != GuData.SNOW:
+					sand[j] = 1
+	for i: int in range(N):
+		if sand[i] == 1 and tl[i] != GuData.DES and tl[i] != GuData.MOUNT:
+			tl[i] = GuData.SAND
 			var x: int = i % W
 			var y: int = i / W
-			if GuData.hash2(x, y, S + 3) < 0.3 and y > 1 and tile[i - W] != GuData.WALL and GuData.is_land(tile[i - W]) and sand[i - W] == 0:
-				tile[i - W] = GuData.SAND
-				if GuData.hash2(x, y, S + 4) < 0.45 and GuData.is_land(tile[i - 2 * W]) and tile[i - 2 * W] != GuData.WALL:
-					tile[i - 2 * W] = GuData.SAND
+			if GuData.hash2(x, y, S + 3) < 0.3 and y > 1 and tl[i - W] != GuData.WALL and GuData.is_land(tl[i - W]) and sand[i - W] == 0:
+				tl[i - W] = GuData.SAND
+				if GuData.hash2(x, y, S + 4) < 0.45 and GuData.is_land(tl[i - 2 * W]) and tl[i - 2 * W] != GuData.WALL:
+					tl[i - 2 * W] = GuData.SAND
+	tile = tl
 	compute_water()
 	if blank:
 		_blank_plants(S)
 		return
-	# Pflanzen, Felsen, Adern
-	var nf: FastNoiseLite = _noise(S + 55, 0.045, 3)
+	# Pflanzen, Felsen, Adern (Wasser, Wände und die vielen Kacheln ohne Objekt früh überspringen);
+	# Waldflecken wachsen mit der Karte mit
+	var nf: FastNoiseLite = _noise(S + 55, 0.045 * 256.0 / W, 3)
 	for y: int in range(H):
 		for x: int in range(W):
 			var i: int = y * W + x
-			var t: int = tile[i]
+			var t: int = tl[i]
+			if t <= GuData.SHAL or t == GuData.WALL:
+				continue
+			var q: float = GuData.hash2(x, y, S + 999)
+			if q >= 0.05 and q <= 0.94:
+				continue
 			var r: int = region[i]
 			var f: float = n01(nf, x, y)
-			var q: float = GuData.hash2(x, y, S + 999)
 			var q2: float = GuData.hash2(x, y, S + 4)
 			var ft: int = 0
 			if t == GuData.GRASS:
 				if r == 1:
 					if f > 0.47:
-						if q < 0.011:
+						if q < (0.045 if f > 0.56 else 0.011):
 							ft = GuData.F_BAMB if (f > 0.62 and q2 < 0.45) else GuData.F_TREE
 					elif q < 0.006:
 						ft = GuData.F_TREE
@@ -381,7 +478,7 @@ func _finish(S: int, open_sea: PackedByteArray, blank: bool = false) -> void:
 						ft = GuData.F_SPRING
 				elif r == 4:
 					if f > 0.5:
-						if q < 0.008:
+						if q < (0.04 if f > 0.58 else 0.008):
 							ft = GuData.F_TREE
 					elif q < 0.0045:
 						ft = GuData.F_TREE
@@ -429,7 +526,8 @@ func _finish(S: int, open_sea: PackedByteArray, blank: bool = false) -> void:
 			elif t == GuData.MOUNT:
 				if q < 0.006:
 					ft = GuData.F_ORE
-			feat[i] = ft
+			if ft != 0:
+				feat[i] = ft
 
 
 ## Leere Welt: ganz vereinzelte Baumgruppen, Grasbüschel und Blumen auf dem Grasland.
@@ -452,7 +550,17 @@ func _blank_plants(S: int) -> void:
 
 # ---------------- Zeichnen ----------------
 
-var _fbm_water: FastNoiseLite = null
+## Wasserrauschen je Kachel (einmal je Kartengröße, nativ über Noise.get_image): Tiefenränder und Meeresflecken
+var _wf1: PackedByteArray
+var _wf2: PackedByteArray
+
+
+func _water_fields() -> void:
+	var n: FastNoiseLite = _noise(11, 0.09, 2)
+	_wf1 = n.get_image(W, H, false, false, false).get_data()
+	n.frequency = 0.09 * 0.8
+	n.offset = Vector3(375.0, 0.0, 0.0)
+	_wf2 = n.get_image(W, H, false, false, false).get_data()
 
 
 func tile_color(x: int, y: int) -> Color:
@@ -462,10 +570,10 @@ func tile_color(x: int, y: int) -> Color:
 	var k: int = 0 if n < 0.4 else (1 if n < 0.75 else 2)
 	var c: Color
 	if t == GuData.DEEP or t == GuData.SHAL:
-		if _fbm_water == null:
-			_fbm_water = _noise(11, 0.09, 2)
+		if _wf1.size() != N:
+			_water_fields()
 		var nn: float = GuData.hash2(x >> 1, y >> 1, 5)
-		var d: float = wdist[i] + (n01(_fbm_water, x, y) - 0.5) * 9.0
+		var d: float = wdist[i] + (_wf1[i] / 255.0 - 0.5) * 9.0
 		if wdist[i] <= 1:
 			c = Color8(104, 202, 244)
 		elif d <= 6:
@@ -475,17 +583,22 @@ func tile_color(x: int, y: int) -> Color:
 		elif d <= 15:
 			c = Color8(52, 124, 212) if nn < (d - 9.0) / 7.0 else Color8(66, 156, 228)
 		else:
-			var b: float = n01(_fbm_water, x * 0.8 + 300, y * 0.8)
+			var b: float = _wf2[i] / 255.0
 			c = Color8(38, 94, 184) if b > 0.6 else (Color8(42, 102, 192) if (b > 0.55 and nn < 0.5) else Color8(46, 110, 200))
 		if n > 0.985:
 			c = c.lightened(0.1)
 	elif t == GuData.GRASS:
 		c = GuData.GRASSP[region[i]][k]
 	elif t == GuData.WALL:
-		var s: float = 1.18 if (x + y * 2) % 7 < 2 else 1.0
-		c = Color8(int(176 * s), int(160 * s), mini(255, int(232 * s)))
-		if n > 0.9:
-			c = Color8(220, 210, 255)
+		# Regionswand: violetter Saum, heller schimmernder Kern mit schrägen Lichtstreifen (auch im Fernblick klar)
+		var rim: bool = (x > 0 and tile[i - 1] != t) or (x < W - 1 and tile[i + 1] != t) or (y > 0 and tile[i - W] != t) or (y < H - 1 and tile[i + W] != t)
+		if rim:
+			c = Color8(146, 112, 226) if n < 0.8 else Color8(168, 136, 238)
+		else:
+			var st: int = (x + y * 2) % 9
+			c = Color8(250, 248, 255) if st < 2 else (Color8(214, 204, 252) if st < 5 else Color8(232, 226, 255))
+			if n > 0.93:
+				c = Color8(255, 236, 250)
 	elif t == GuData.MOUNT:
 		c = GuData.PAL[t][k]
 		if hgt[i] > 0.92 and n > 0.55:
@@ -549,11 +662,19 @@ func _far_dot(i: int) -> void:
 
 
 func _render_rect(x0: int, y0: int, x1: int, y1: int) -> void:
+	# Geländefarben in einen Puffer, dann auf einmal in beide Bilder
+	var rw: int = x1 - x0
+	var rh: int = y1 - y0
+	var buf: PackedInt32Array = PackedInt32Array()
+	buf.resize(rw * rh)
+	var k: int = 0
 	for y: int in range(y0, y1):
 		for x: int in range(x0, x1):
-			var c: Color = tile_color(x, y)
-			near_img.set_pixel(x, y, c)
-			far_img.set_pixel(x, y, c)
+			buf[k] = tile_color(x, y).to_abgr32()
+			k += 1
+	var im0: Image = Image.create_from_data(rw, rh, false, Image.FORMAT_RGBA8, buf.to_byte_array())
+	near_img.blit_rect(im0, Rect2i(0, 0, rw, rh), Vector2i(x0, y0))
+	far_img.blit_rect(im0, Rect2i(0, 0, rw, rh), Vector2i(x0, y0))
 	var clip: Rect2i = Rect2i(x0, y0, x1 - x0, y1 - y0)
 	for y: int in range(maxi(0, y0 - 1), mini(H, y1 + 16)):
 		for x: int in range(maxi(0, x0 - 7), mini(W, x1 + 7)):
@@ -572,12 +693,14 @@ func _render_rect(x0: int, y0: int, x1: int, y1: int) -> void:
 
 
 func render_all() -> void:
+	var t0: int = Time.get_ticks_usec()
 	_render_rect(0, 0, W, H)
 	near_tex.update(near_img)
 	far_tex.update(far_img)
 	dirty.fill(0)
 	for c: int in range(dver.size()):
 		dver[c] += 1
+	gen_ms["render"] = (Time.get_ticks_usec() - t0) / 1000.0
 
 
 func mark_dirty(x: int, y: int) -> void:

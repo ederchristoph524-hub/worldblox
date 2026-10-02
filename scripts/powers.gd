@@ -2,8 +2,13 @@ class_name Powers
 extends RefCounted
 ## Gottkräfte: alle Werkzeuge der Leiste und was sie auf der Karte bewirken.
 
-const W: int = GuData.W
-const H: int = GuData.H
+## Kartengröße (zur Laufzeit umstellbar, siehe GuData.set_size)
+var W: int:
+	get:
+		return GuData.W
+var H: int:
+	get:
+		return GuData.H
 
 ## Reiter -1 ist das Hauptmenü. m: paint = Pinsel, tap = Tippen, pair = zwei Dörfer, spawn = Setzen, act = Sofort-Aktion.
 const TABS: PackedStringArray = ["Welt formen", "Noosphäre und Leben", "Kreaturen und Bestien", "Natur und Katastrophen", "Zerstörung und Chaos", "Gu und Schicksal", "Gu-Meister und Unsterbliche"]
@@ -233,8 +238,11 @@ static func tool_by_id(id: String) -> Dictionary:
 	return _tool_idx.get(id, {})
 
 
+## Pinselradius; die beiden großen Pinsel wachsen auf großen Karten mit (Wurzel der Kantenlänge).
 func brush_r() -> int:
-	return 0 if shape == 2 else BRUSH[brush_idx]
+	if shape == 2:
+		return 0
+	return BRUSH[brush_idx] if brush_idx < 3 else roundi(BRUSH[brush_idx] * sqrt(maxf(1.0, GuData.len_f())))
 
 
 func cycle_shape() -> String:

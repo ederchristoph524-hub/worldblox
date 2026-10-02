@@ -5,13 +5,14 @@ extends Node
 signal logged(text: String, kind: String, notify: bool)
 signal unit_died(u: Unit)
 
-const W: int = GuData.W
-const H: int = GuData.H
-const N: int = GuData.N
+## Kartengröße (aus GuData, in reset_state nachgezogen – Größe ist zur Laufzeit umstellbar)
+var W: int = GuData.W
+var H: int = GuData.H
+var N: int = GuData.N
 const DT: float = 0.05
 const GC: int = 16
-const GW: int = W / GC
-const GH: int = H / GC
+var GW: int = W / GC
+var GH: int = H / GC
 
 var world: World
 var units: Array[Unit] = []
@@ -83,6 +84,18 @@ const MOVE_OFFS: PackedFloat32Array = [0.0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9]
 func _init() -> void:
 	world = World.new()
 	ven = Venerables.new(self)
+	_sync_size()
+
+
+## Kartengröße aus GuData übernehmen (nach GuData.set_size) und das Wesen-Raster neu anlegen.
+func _sync_size() -> void:
+	W = GuData.W
+	H = GuData.H
+	N = GuData.N
+	GW = ceili(float(W) / GC)
+	GH = ceili(float(H) / GC)
+	if _grid.size() == GW * GH:
+		return
 	_grid.resize(GW * GH)
 	for k: int in range(GW * GH):
 		_grid[k] = []
@@ -1648,7 +1661,7 @@ func animal_month(u: Unit) -> void:
 		u.hp = 0.0
 		return
 	u.hp = minf(u.mhp, u.hp + u.mhp * 0.15)
-	if laws["growth"] and laws["animals"] and u.rank == 0 and u.beh != GuData.B_GU and u.beh != GuData.B_IGU and u.ldr == null and randf() < 0.006 and sp_count.get(s, 0) < int(GuData.SPEC[s]["cap"]) / 2:
+	if laws["growth"] and laws["animals"] and u.rank == 0 and u.beh != GuData.B_GU and u.beh != GuData.B_IGU and u.ldr == null and randf() < 0.006 and sp_count.get(s, 0) < int(GuData.SPEC[s]["cap"] * GuData.len_f()) / 2:
 		mk_animal(u.x + (randf() - 0.5) * 2.0, u.y + (randf() - 0.5) * 2.0, s)
 
 
@@ -1672,13 +1685,13 @@ func nature_spawns() -> void:
 		["white_boar", [GuData.GRASS, GuData.HILL], [1]], ["black_boar", [GuData.GRASS, GuData.HILL], [1]], ["lightning_wolf", [GuData.GRASS], [1]], ["thousand_li_earthwolf_spider", [GuData.GRASS, GuData.SOIL], [1]]]
 	for e: Array in tries:
 		var s: String = e[0]
-		if laws["animals"] and sp_count.get(s, 0) < int(GuData.SPEC[s]["cap"]) * 0.12 and randf() < 0.25:
+		if laws["animals"] and sp_count.get(s, 0) < int(GuData.SPEC[s]["cap"]) * 0.12 * GuData.len_f() and randf() < 0.25:
 			var ts: Array = e[1]
 			var rs: Array = e[2]
 			var p: Vector2 = random_tile(func(i: int) -> bool: return world.tile[i] in ts and world.region[i] in rs)
 			if p.x >= 0.0:
 				mk_animal(p.x, p.y, s)
-	if laws["animals"] and sp_count.get("wildgu", 0) < 50 and randf() < 0.6:
+	if laws["animals"] and sp_count.get("wildgu", 0) < 50.0 * GuData.len_f() and randf() < 0.6:
 		var p2: Vector2 = random_tile(func(i: int) -> bool: return (world.tile[i] == GuData.GRASS or world.tile[i] == GuData.HILL or world.tile[i] == GuData.STEP or world.tile[i] == GuData.DES) and world.region[i] != 3)
 		if p2.x >= 0.0:
 			var pth: int = int(GuData.REGPATH[region_at(p2.x, p2.y)].pick_random())
@@ -2516,7 +2529,9 @@ func env_step(dt: float) -> void:
 	var dry: bool = wt == "drought"
 	var snow: bool = wt == "snow" or age_index() == 7
 	var grow: float = float(age_data()["grow"])
-	var n: int = 26 if rain else 10
+	# Stichproben je Schritt wachsen mit der Kartenfläche (gleiches Tempo je Kachel)
+	var af: float = GuData.area_f()
+	var n: int = roundi((26 if rain else 10) * af)
 	for k: int in range(n):
 		var i: int = randi() % N
 		var t: int = world.tile[i]
@@ -2547,7 +2562,7 @@ func env_step(dt: float) -> void:
 			world.temp_snow[i] = 0
 			world.mark_dirty(x, y)
 	if snow:
-		for k: int in range(40 if wt == "snow" else 6):
+		for k: int in range(roundi((40 if wt == "snow" else 6) * af)):
 			var i: int = randi() % N
 			var t: int = world.tile[i]
 			if (t == GuData.GRASS or t == GuData.STEP or t == GuData.SOIL or t == GuData.DES) and world.bmap[i] < 0:
@@ -2555,7 +2570,7 @@ func env_step(dt: float) -> void:
 				world.tile[i] = GuData.SNOW
 				world.mark_dirty(i % W, i / W)
 	if dry:
-		for k: int in range(16):
+		for k: int in range(roundi(16 * af)):
 			var i: int = randi() % N
 			if world.tile[i] == GuData.GRASS and randf() < 0.4:
 				world.tile[i] = GuData.DES if world.region[i] == 2 else GuData.SOIL
@@ -2570,6 +2585,7 @@ func env_step(dt: float) -> void:
 # ---------------- Welt starten ----------------
 
 func reset_state() -> void:
+	_sync_size()
 	units.clear()
 	villages.clear()
 	clans.clear()
@@ -2607,7 +2623,8 @@ func seed_life(canon: bool = true) -> void:
 		plan = [[0, 1], [1, 1], [3, 1]]
 	for e: Array in plan:
 		var r: int = e[0]
-		for k: int in range(int(e[1])):
+		# auf großen Karten mehr Startdörfer (mit der Kantenlänge, nicht der Fläche – es bleibt viel freies Land)
+		for k: int in range(roundi(int(e[1]) * GuData.len_f())):
 			var p: Vector2 = random_tile(func(i: int) -> bool: return world.region[i] == r and GuData.buildable(world.tile[i]) and world.tile[i] != GuData.SAND and site_ok(i % W, i / W, r), 900)
 			if p.x < 0.0:
 				continue
@@ -2682,7 +2699,7 @@ func nature_only() -> void:
 	for e: Array in [["deer", 22], ["boar", 10], ["wolf", 12], ["monkey", 8], ["crane", 8], ["wildgu", 36], ["white_boar", 3], ["black_boar", 3], ["lightning_wolf", 4]]:
 		var s: String = e[0]
 		var rg: int = int(GuData.SPEC[s].get("reg", -1))
-		for k: int in range(int(e[1])):
+		for k: int in range(roundi(int(e[1]) * GuData.len_f())):
 			var p: Vector2 = random_tile(func(i: int) -> bool:
 				var t: int = world.tile[i]
 				if rg >= 0 and world.region[i] != rg:
@@ -2704,6 +2721,7 @@ func nature_only() -> void:
 ##   "canon": false – auf der Gu-Weltkarte ohne die kanonischen Mächte,
 ##   "presim": false – ohne Vorgeschichte, die Welt beginnt sofort in Jahr 1.
 func new_world(live: bool, mode: String = "gu", opts: Dictionary = {}) -> void:
+	GuData.set_size(int(opts.get("size", GuData.W)))
 	reset_state()
 	seed_val = randi()
 	world.generate(seed_val, mode)
@@ -2757,7 +2775,7 @@ func serialize() -> Dictionary:
 	var lv: Array = []
 	for i: int in lava.keys():
 		lv.append([i, snappedf(float(lava[i]), 0.01)])
-	return {"v": 5, "ven": ven.to_dict(), "age_off": age_off, "lava": lv, "mines": Array(mines), "layer": world.layer, "seed": seed_val, "sim_time": sim_time, "next_id": next_id, "map_mode": world.map_mode, "places": ps, "next_pid": next_pid,
+	return {"v": 6, "size": W, "ven": ven.to_dict(), "age_off": age_off, "lava": lv, "mines": Array(mines), "layer": world.layer, "seed": seed_val, "sim_time": sim_time, "next_id": next_id, "map_mode": world.map_mode, "places": ps, "next_pid": next_pid,
 		"tile": Marshalls.raw_to_base64(world.tile), "feat": Marshalls.raw_to_base64(world.feat), "region": Marshalls.raw_to_base64(world.region),
 		"hgt": Marshalls.raw_to_base64(hb), "ts": Marshalls.raw_to_base64(world.temp_snow),
 		"units": us, "villages": vs, "clans": cs, "buildings": bs, "laws": laws, "log": log_entries.slice(0, 120), "fire": fr}
@@ -2765,11 +2783,17 @@ func serialize() -> Dictionary:
 
 func deserialize(d: Dictionary) -> bool:
 	var ver: int = int(d.get("v", 0))
-	if ver < 1 or ver > 5:
+	if ver < 1 or ver > 6:
 		return false
+	# Kartengröße: ab v6 gespeichert, ältere Spielstände haben immer 256 × 256
+	var sz: int = int(d.get("size", 256))
+	var tl: PackedByteArray = Marshalls.base64_to_raw(d["tile"])
+	if tl.size() != sz * sz:
+		return false
+	GuData.set_size(sz)
 	reset_state()
 	world.alloc()
-	world.tile = Marshalls.base64_to_raw(d["tile"])
+	world.tile = tl
 	world.feat = Marshalls.base64_to_raw(d["feat"])
 	world.region = Marshalls.base64_to_raw(d["region"])
 	world.hgt = Marshalls.base64_to_raw(d["hgt"]).to_float32_array()
@@ -2778,7 +2802,7 @@ func deserialize(d: Dictionary) -> bool:
 	sim_time = d["sim_time"]
 	last_month = int(sim_time)
 	next_id = int(d["next_id"])
-	world._set_landmarks(str(d.get("map_mode", "random")))
+	world._set_landmarks(str(d.get("map_mode", "random")), ver < 6)
 	next_pid = int(d.get("next_pid", 1))
 	for e: Dictionary in d.get("places", []):
 		places.append(Place.from_dict(e))
