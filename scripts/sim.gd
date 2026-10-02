@@ -57,6 +57,7 @@ var goo_left: int = 0                  # Kacheln, die der Schwarm noch fressen d
 var mines: PackedInt32Array = PackedInt32Array()   # Erdminen-Gu (Kachel-Indizes)
 var seeds: Array[Dictionary] = []      # Biom-Samen {x, y, tt, r, n}
 var possessed: Unit = null             # Seelenbesitz
+var sfx: Array = []                    # Klang-Ereignisse [Art, x, y, Wert] für Audio (je Bild geleert; x < 0 = überall)
 var age_off: int = 0                   # Jahre, die das Zeitalter angehalten war (Gesetz „Zeitalter“ aus) bzw. per Hand verschoben wurde
 var ven: Venerables                    # Rang-9-Ehrwürdige: Pfad-Blüte, Herrschaft, Blutlinien, Agenden, Schicksals-Gu (v5)
 var cheats: Cheats                     # Cheat-Schalter, Wesens-Merker, Friedhof, Zeitsprung (scripts/cheats.gd)
@@ -142,6 +143,11 @@ func log_event(t: String, kind: String = "info", notify: bool = false) -> void:
 		logged.emit(t, kind, true)
 
 
+func sfx_ev(k: String, x: float, y: float, p: float = 0.0) -> void:
+	if not presim and sfx.size() < 48:
+		sfx.append([k, x, y, p])
+
+
 func later(t: float, fn: Callable) -> void:
 	sched.append({"t": sim_time + t, "fn": fn})
 
@@ -193,6 +199,7 @@ func bolt(x: float, y: float, dmg: float, ign: bool, src: Unit = null) -> void:
 		var jit: float = (randf() - 0.5) * 5.0 if (k > 0 and k < 10) else 0.0
 		pts.append(Vector2(px + (x - px) * t + jit, py + (y - py) * t))
 	fx.append({"k": "bolt", "pts": pts, "l": 0.35, "ml": 0.35})
+	sfx_ev("bolt", x, y)
 	flash(0.15)
 	spark(x, y, Color("#fff7b0"), 10, 10.0)
 	var i: int = clampi(int(y), 0, H - 1) * W + clampi(int(x), 0, W - 1)
@@ -923,6 +930,7 @@ func found_village(u: Unit, clan_id: int) -> bool:
 	u.boat = false
 	if c.cap < 0 or c.cap >= villages.size() or not villages[c.cap].alive or villages[c.cap].clan != c.id:
 		c.cap = v.id
+	sfx_ev("vil", v.cx, v.cy)
 	if is_new:
 		log_event(("The " if c.kind == "Sect" else "") + c.name + " is founded in " + v.name + " (" + GuData.REGN[v.reg] + ").", "jade", true)
 	elif randf() < 0.5:
@@ -1096,6 +1104,7 @@ func rank_up(u: Unit) -> void:
 			log_event(nm + " becomes the rank 9 " + u.title + "! The world trembles.", "gold", true)
 			pillar(u.x, u.y, GuData.ESS_COL[9])
 			shake = 1.0
+			sfx_ev("ven", u.x, u.y)
 			ven.register(u, {})
 		else:
 			u.prog = 0.3
@@ -1118,6 +1127,7 @@ func ascend(u: Unit, nr: int) -> void:
 	gain_gu(u)
 	set_stats(u, true)
 	float_txt(u, "Rank %d" % nr, GuData.ESS_COL[nr])
+	sfx_ev("rank", u.x, u.y, nr)
 	if nr < 6:
 		pillar(u.x, u.y, GuData.ESS_COL[nr], 0.6)
 
@@ -1132,6 +1142,7 @@ func tribulation(u: Unit) -> void:
 		ring(u.x, u.y - 2.0, 4.0, Color("#bfe8ff"), 0.8)
 		u.prog = minf(0.99, u.prog + 0.1)
 		return
+	sfx_ev("trib", u.x, u.y)
 	for k: int in range(6):
 		later(k * 0.25, func() -> void:
 			if u.hp > 0.0:
@@ -1178,6 +1189,8 @@ func declare_war(a: Clan, b: Clan, quiet: bool = false) -> void:
 		if u.k == "p" and (u.clan == a.id or u.clan == b.id) and u.rank == 0 and uage(u) >= 16.0 and uage(u) < 55.0:
 			u.militia = randf() < 0.45
 	log_event(a.name + " declares a feud on " + b.name + "!", "war", not quiet)
+	if not quiet:
+		sfx_ev("war", -1.0, -1.0)
 
 
 func make_peace(a: Clan, b: Clan, quiet: bool = false) -> void:
@@ -1393,6 +1406,7 @@ func use_fortune(u: Unit) -> bool:
 
 
 func boom(x: float, y: float, r: float, dmg: float, o: Dictionary = {}) -> void:
+	sfx_ev("boom", x, y, r)
 	for ty: int in range(floori(y - r), ceili(y + r) + 1):
 		for tx: int in range(floori(x - r), ceili(x + r) + 1):
 			if not world.in_map(tx, ty):
@@ -1870,6 +1884,7 @@ func beast_tide(v: Village, at: Vector2) -> void:
 	var kw: Unit = mk_animal(p.x, p.y, "kingwolf")
 	kw.tide = true
 	kw.tide_v = v.id
+	sfx_ev("tide", p.x, p.y)
 	log_event("Wolf tide! A Thunder Crown Wolf leads %d %s against %s (%s)." % [n, "lightning wolves" if ws == "lightning_wolf" else "wolves", v.name, clans[v.clan].name], "war", true)
 
 
@@ -1887,6 +1902,7 @@ func heavens_will(u: Unit) -> void:
 		log_event("Heaven's Will rebounds off the heavenly protection of " + nm + ".", "violet", true)
 		return
 	log_event("Heaven's Will turns against " + nm + ".", "violet", true)
+	sfx_ev("will", u.x, u.y)
 	for k: int in range(9):
 		later(k * 0.18, func() -> void:
 			if u.hp > 0.0:
@@ -2402,6 +2418,7 @@ func attack(u: Unit, e: Unit) -> void:
 	else:
 		hurt(e, u.atk * (0.8 + randf() * 0.4), u)
 		spark(e.x, e.y - 1.0, Color("#ffe0b0"), 2, 3.0)
+		sfx_ev("hit", e.x, e.y)
 		if u.aoe > 0.0:
 			for o: Unit in near_units(e.x, e.y, u.aoe):
 				if o != e and hostile(u, o):
@@ -2529,6 +2546,7 @@ func step(dt: float) -> void:
 							world.feat[i] = 0
 						world.mark_area(i % W, i / W)
 			spark(p["x"], p["y"], p["c"], 10 if p["big"] else 4, 8.0 if p["big"] else 4.0)
+			sfx_ev("hit", p["x"], p["y"], 2.0 if p["big"] else 1.0)
 			projs.remove_at(pi)
 		else:
 			p["x"] += dx / d * s
@@ -3004,6 +3022,7 @@ func killer_move(u: Unit, x: float, y: float) -> void:
 	var dmg: float = u.atk * 2.5
 	var nm: String = Lore.km_name(p)
 	fx.append({"k": "km", "x": x, "y": y, "r": r, "c": c, "p": p, "l": 1.1, "ml": 1.1})
+	sfx_ev("km", x, y, p)
 	fx.append({"k": "txt", "x": u.x, "y": u.y - 7.0, "t": nm, "c": c.lightened(0.3), "l": 2.0, "ml": 2.0})
 	for o: Unit in near_units(x, y, r):
 		if o != u and hostile(u, o):
@@ -3057,6 +3076,7 @@ func finger_snap(u: Unit, e: Unit) -> void:
 	var r: float = snap_r(u)
 	u.cd = 1.0 if u.rank < 9 else 0.7
 	fx.append({"k": "km", "x": e.x, "y": e.y, "r": r, "c": c, "p": p, "l": 0.8, "ml": 0.8})
+	sfx_ev("snap", e.x, e.y, p)
 	ring(u.x, u.y - 2.0, 2.5, GuData.ESS_COL[clampi(u.rank, 0, 9)], 0.4)
 	var n: int = 0
 	for o: Unit in near_units(e.x, e.y, r):
@@ -3180,6 +3200,7 @@ func spawn_venerable(vd: Dictionary, x: float, y: float) -> String:
 	u.hp = u.mhp
 	log_event("The " + u.title + " descends! The world trembles.", "gold", true)
 	pillar(x, y, GuData.ESS_COL[9], 1.6)
+	sfx_ev("ven", x, y)
 	ring(x, y, 16.0, Color(str(vd["col"])), 1.2)
 	shake = 1.0
 	ven.register(u, vd)
@@ -3220,6 +3241,7 @@ func spawn_custom_venerable(p: int, al: int, x: float, y: float) -> String:
 	u.hp = u.mhp
 	log_event("%s, the %s, descends – Supreme Grandmaster of the %s Path! The world trembles." % [u.given, title, pn], "gold", true)
 	pillar(x, y, GuData.ESS_COL[9], 1.6)
+	sfx_ev("ven", x, y)
 	ring(x, y, 16.0, GuData.PATH_COL[p], 1.2)
 	shake = 1.0
 	ven.register(u, {})

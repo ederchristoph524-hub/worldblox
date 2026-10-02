@@ -24,6 +24,7 @@ var terr_spr: Sprite2D
 var terr_ov: TerrOverlay  ## Herrschaftsgebiete der Ehrwürdigen, Kriegsgrenzen (über terr_spr)
 var legend: PowerLegend  ## Legende der Mächte oben links
 var infl_t: float = 0.0
+var audio: Audio  ## prozeduraler Klang und Musik (scripts/audio.gd)
 var detail: Detail  ## Nahansicht: Gelände-Shader und hochaufgelöste Objekte (scripts/detail.gd)
 var ents: EntityLayer
 var clouds: CloudLayer
@@ -101,6 +102,9 @@ func _ready() -> void:
 			if insp_kind == "u":
 				_close_insp())
 	_build_scene()
+	audio = Audio.new()
+	audio.m = self
+	add_child(audio)
 	hud.toggled = powers.cheat.is_on
 	get_viewport().size_changed.connect(_on_resize)
 	_on_resize()
@@ -746,6 +750,7 @@ func _paint_at(p: Vector2) -> void:
 	var w: Vector2 = to_world(p)
 	if w.x < 0 or w.y < 0 or w.x >= W or w.y >= H:
 		return
+	audio.tool(t)
 	if t["m"] == "spawn":
 		var msg: String = powers.spawn_at(t, w.x, w.y)
 		if msg != "":
@@ -764,6 +769,7 @@ func _tap_at(p: Vector2) -> void:
 			_inspect_at(w.x, w.y)
 			return
 		_end_presim()
+		audio.tool(t)
 		var msg: String = powers.tap_tool(t, w.x, w.y)
 		if msg != "":
 			hud.show_hint("", msg)
@@ -1454,6 +1460,9 @@ func _on_meta(m: String) -> void:
 	elif m == "disp:names":
 		show_names = not show_names
 		_open_display()
+	elif m.begins_with("snd:"):
+		audio.meta(m.substr(4))
+		_open_display()
 
 
 const LAWS: Array = [["war", "Feuds", "Clans declare war on each other."], ["tide", "Beast tides", "Wolf tides raid villages."], ["immortal", "Immortality", "Rank 5 Gu Masters can ascend to Gu Immortals."], ["trib", "Tribulations", "Immortals must regularly survive heavenly tribulations."], ["will", "Heaven's Will", "Heaven strikes down the most outstanding."], ["walls", "Region walls", "Mortals cannot cross the walls."], ["growth", "Growth", "Births, animal offspring and plant growth."], ["fire", "Fire spread", "Fire jumps to neighboring tiles."]]
@@ -1510,6 +1519,7 @@ func _open_display() -> void:
 	s += "[url=disp:terr]%s  [b]Territories and influence[/b][/url]\n    [color=#9db09e]Borders, territory names and the legend of powers at every zoom level.[/color]\n" % _switch(show_terr)
 	s += "[url=disp:layer][color=#9fd0ff][b]»[/b][/color]  [b]Map layer: %s[/b][/url]\n    [color=#9db09e]%s[/color]\n" % [World.LAYER_NAME[sim.world.layer], LAYER_DESC[sim.world.layer]]
 	s += "[url=disp:names]%s  [b]Village names[/b][/url]\n    [color=#9db09e]Banners with clan seal and population.[/color]\n" % _switch(show_names)
+	s += audio.display_text()
 	hud.open_modal(s)
 
 
