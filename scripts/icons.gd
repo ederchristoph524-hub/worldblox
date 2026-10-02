@@ -873,10 +873,10 @@ static func _org_icon(o: Dictionary) -> Px:
 	var tx: Dictionary = Sprites.clan_textures(col, race)
 	var k: String = o["k"]
 	match k:
-		"Sekte", "Hof":
+		"Sect", "Court":
 			var im: Image = (tx["hall2"] as ImageTexture).get_image()
 			q.draw_image(im, 12 - im.get_width() / 2, 21 - im.get_height())
-			if k == "Hof":
+			if k == "Court":
 				q.p(6, 2, 12, 2, Color("#ffd23a"))
 				q.p(6, 0, 2, 2, Color("#ffd23a"))
 				q.p(11, 0, 2, 2, Color("#ffd23a"))
@@ -886,7 +886,7 @@ static func _org_icon(o: Dictionary) -> Px:
 			q.draw_image(im2, 12 - im2.get_width() / 2, 20 - im2.get_height())
 			q.p(2, 2, 1, 12, Color("#6a4a2a"))
 			q.p(3, 2, 6, 4, col)
-		"Stamm":
+		"Tribe":
 			var im3: Image = (tx["tent"] as ImageTexture).get_image()
 			q.draw_image(_scaled(im3, 2), 13 - im3.get_width(), 22 - im3.get_height() * 2)
 			q.p(1, 1, 1, 13, Color("#6a4a2a"))

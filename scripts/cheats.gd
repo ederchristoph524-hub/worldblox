@@ -11,7 +11,7 @@ const HARD_MAX: int = 3000   ## technische Obergrenze für Wesen (darüber wird 
 const MULTS: PackedInt32Array = [1, 5, 10, 50]
 const GRAVE_MAX: int = 40
 ## Todesursachen, vor denen „Unsterblich“ schützt.
-const IMM_SAVE: PackedStringArray = ["Alter", "Himmelsdrangsal", "Himmelswille", "Irdische Kalamität", "Aufstieg gescheitert", "Extremkonstitution", "Hunger", "zerfallen"]
+const IMM_SAVE: PackedStringArray = ["old age", "heavenly tribulation", "Heaven's Will", "earthly calamity", "failed ascension", "extreme physique", "starvation", "crumbled"]
 ## Globale Schalter für das Cheat-Menü: [Schlüssel, Name, Beschreibung]. „walls“ ist das Weltgesetz „Regionswände“ (umgekehrt).
 const SWITCHES: Array = [
 	["uniq", "Uniqueness", "On: canonical limits – every Venerable, figure, unique place and organization only once, organizations only in their region, places kept apart. Off (default): everything any number of times and anywhere."],
@@ -188,7 +188,7 @@ func month_villages() -> void:
 ## Aus Sim.try_revive: true = das Wesen bleibt am Leben (Cheat-Schutz).
 func keep_alive(u: Unit) -> bool:
 	var why: String = u.dreason
-	if why == "göttliche Auslöschung" or u.caught:
+	if why == "divine annihilation" or u.caught:
 		return false
 	var save: bool = false
 	if (u.ch & CH_INV) != 0:
@@ -196,20 +196,20 @@ func keep_alive(u: Unit) -> bool:
 	elif (u.ch & CH_IMM) != 0 and why in IMM_SAVE:
 		save = true
 	elif u.k == "p":
-		if bool(flags["noage"]) and (why == "Alter" or why == "Extremkonstitution"):
+		if bool(flags["noage"]) and (why == "old age" or why == "extreme physique"):
 			save = true
-		elif bool(flags["notrib"]) and (why == "Himmelsdrangsal" or why == "Irdische Kalamität"):
+		elif bool(flags["notrib"]) and (why == "heavenly tribulation" or why == "earthly calamity"):
 			save = true
-		elif bool(flags["nowill"]) and why == "Himmelswille":
+		elif bool(flags["nowill"]) and why == "Heaven's Will":
 			save = true
 	if not save:
 		return false
 	u.hp = maxf(1.0, u.mhp)
 	u.dreason = ""
 	u.sick = 0.0
-	if why == "Alter" or why == "zerfallen":
+	if why == "old age" or why == "crumbled":
 		u.life = sim.uage(u) + 30.0
-	if why == "Extremkonstitution":
+	if why == "extreme physique":
 		u.phys_x = false
 	return true
 
@@ -315,7 +315,7 @@ func set_rank(u: Unit, r: int, stage: int = 0) -> String:
 	sim.set_stats(u, false)
 	u.hp = maxf(u.hp, u.mhp * 0.5)
 	if r >= 9 and old < 9:
-		if u.title == "" or u.title == "Fremdweltdämon":
+		if u.title == "" or u.title == "Otherworldly Demon":
 			u.title = _ven_title(u)
 		u.life = maxf(u.life, sim.uage(u) + 1000.0)
 		sim.pillar(u.x, u.y, GuData.ESS_COL[9], 1.2)

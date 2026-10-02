@@ -36,7 +36,7 @@ static func from_dict(d: Dictionary) -> Clan:
 	c.id = int(d["id"])
 	c.name = d["name"]
 	c.glyph = d["glyph"]
-	c.kind = d["kind"]
+	c.kind = {"Hof": "Court", "Sekte": "Sect", "Stamm": "Tribe", "Allianz": "Alliance"}.get(str(d["kind"]), str(d["kind"]))
 	c.col = Color(str(d["col"]))
 	for e: Variant in d["war"]:
 		c.war[int(e)] = true

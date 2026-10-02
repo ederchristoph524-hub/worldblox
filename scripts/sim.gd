@@ -649,13 +649,13 @@ func new_clan(r: int, sur: String, race: int = 0) -> Clan:
 			found2 = GuData.RACE_SUR[race].pick_random()
 		c.name = str(found2[0]) + "-" + GuData.RACE_CLAN[race]
 		c.glyph = found2[1]
-		c.kind = "Stamm" if (GuData.RACE_CLAN[race].to_lower().ends_with("stamm") or GuData.RACE_CLAN[race].to_lower().ends_with("tribe")) else "Clan"
+		c.kind = "Tribe" if (GuData.RACE_CLAN[race].to_lower().ends_with("stamm") or GuData.RACE_CLAN[race].to_lower().ends_with("tribe")) else "Clan"
 		c.sur = found2[0]
 	elif r == 4:
 		var s: Array = GuData.SURN[4].pick_random()
 		c.name = s[0] + " Sect"
 		c.glyph = s[1]
-		c.kind = "Sekte"
+		c.kind = "Sect"
 	else:
 		var list: Array = GuData.SURN[r if (r >= 0 and r < 4) else 1]
 		var found: Array = []
@@ -669,7 +669,7 @@ func new_clan(r: int, sur: String, race: int = 0) -> Clan:
 						found = a
 		if found.is_empty():
 			found = list.pick_random()
-		c.kind = "Stamm" if r == 0 else "Clan"
+		c.kind = "Tribe" if r == 0 else "Clan"
 		c.name = c.kind + " " + found[0]
 		c.glyph = found[1]
 	for o: Clan in clans:
@@ -924,7 +924,7 @@ func found_village(u: Unit, clan_id: int) -> bool:
 	if c.cap < 0 or c.cap >= villages.size() or not villages[c.cap].alive or villages[c.cap].clan != c.id:
 		c.cap = v.id
 	if is_new:
-		log_event(("The " if c.kind == "Sekte" else "") + c.name + " is founded in " + v.name + " (" + GuData.REGN[v.reg] + ").", "jade", true)
+		log_event(("The " if c.kind == "Sect" else "") + c.name + " is founded in " + v.name + " (" + GuData.REGN[v.reg] + ").", "jade", true)
 	elif randf() < 0.5:
 		log_event(c.name + " settles " + v.name + ".", "jade")
 	terr_dirty = true
@@ -973,7 +973,7 @@ func pick_sur(v: Village) -> String:
 		return c.sur
 	if v.race >= 4:
 		return GuData.RACE_SUR[v.race].pick_random()[0]
-	if c.kind != "Sekte" and c.org == "":
+	if c.kind != "Sect" and c.org == "":
 		return c.name.replace("Clan ", "").replace("Stamm ", "").replace(" (Branch)", "")
 	return rand_sur(v.reg)
 
@@ -1671,7 +1671,7 @@ func person_month(u: Unit) -> void:
 	var a: float = uage(u)
 	if u.undead:
 		if a > u.life:
-			u.dreason = "zerfallen"
+			u.dreason = "crumbled"
 			u.hp = 0.0
 		return
 	if a > u.life and (laws["age"] or u.rank == 0 and a > u.life * 3.0):
@@ -1679,7 +1679,7 @@ func person_month(u: Unit) -> void:
 		u.hp = 0.0
 		return
 	if u.phys_x and u.rank < 6 and a > 20.0:
-		u.dreason = "Extremkonstitution"
+		u.dreason = "extreme physique"
 		u.hp = 0.0
 		log_event(u.pname() + " dies of the extreme physique.", "red")
 		return
@@ -3325,12 +3325,12 @@ func found_org(o: Dictionary, x: float, y: float, quiet: bool = false) -> String
 	var k: String = o["k"]
 	if k == "Clan" and c.sur != "":
 		v.name = c.sur.replace(" ", "-") + " Village"
-	elif k == "Stamm" and c.sur != "":
+	elif k == "Tribe" and c.sur != "":
 		v.name = c.sur.replace(" ", "-") + " Camp"
 	v.food = 30.0
 	v.wood = 30.0
 	v.stones = 25.0
-	var elders: Array = {"Hof": [7, 6, 6], "Sekte": [5, 3, 3, 2], "Allianz": [5, 4, 3], "Clan": [3, 2, 2], "Stamm": [3, 2, 2]}.get(k, [2])
+	var elders: Array = {"Court": [7, 6, 6], "Sect": [5, 3, 3, 2], "Alliance": [5, 4, 3], "Clan": [3, 2, 2], "Tribe": [3, 2, 2]}.get(k, [2])
 	if o["id"] == "heavenly_court":
 		elders = [7, 7, 6, 6]
 	for j: int in range(9):
@@ -3358,7 +3358,7 @@ func found_org(o: Dictionary, x: float, y: float, quiet: bool = false) -> String
 				break
 	if o["id"] == "heavenly_court" and find_place("court") == null:
 		add_place("court", tx + 0.5, ty - 16.0, true)
-	if k == "Allianz":
+	if k == "Alliance":
 		var n: int = 0
 		for oc: Clan in clans:
 			if n >= 3:
@@ -3367,7 +3367,7 @@ func found_org(o: Dictionary, x: float, y: float, quiet: bool = false) -> String
 				oc.ally[c.id] = true
 				c.ally[oc.id] = true
 				n += 1
-	log_event(("The " if k in ["Sekte", "Allianz", "Clan", "Stamm", "Hof"] else "") + nm + " is founded in " + v.name + " (" + GuData.REGN[reg] + ").", "jade", not quiet)
+	log_event(("The " if k in ["Sect", "Alliance", "Clan", "Tribe", "Court"] else "") + nm + " is founded in " + v.name + " (" + GuData.REGN[reg] + ").", "jade", not quiet)
 	terr_dirty = true
 	return ""
 

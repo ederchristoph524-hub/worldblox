@@ -397,7 +397,7 @@ func _found_here(u: Unit, s: Dictionary, c: Clan) -> bool:
 func _own_lineage(u: Unit, s: Dictionary) -> Clan:
 	var goal: int = int(s["goal"])
 	var c: Clan = Clan.new()
-	c.kind = "Stamm" if goal == 0 else ("Sekte" if goal == 4 else "Clan")
+	c.kind = "Tribe" if goal == 0 else ("Sect" if goal == 4 else "Clan")
 	var base: String = u.given if u.sur == "" else u.sur
 	c.name = base.replace(" ", "-") + "-" + c.kind
 	var pi: int = clampi(u.path, 0, PATH_GLYPH.length() - 1)
@@ -778,7 +778,7 @@ func _humans(u: Unit, s: Dictionary) -> void:
 		var n: int = 0
 		for o: Unit in sim.units:
 			if n < 3 and o.k == "p" and o.hp > 0.0 and o.vil == v2.id and o.rank == 0:
-				o.dreason = "vertrieben"
+				o.dreason = "driven away"
 				o.hp = 0.0
 				n += 1
 		v2.food *= 0.5

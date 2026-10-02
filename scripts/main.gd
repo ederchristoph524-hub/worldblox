@@ -2917,7 +2917,7 @@ func _dev_sizetest() -> void:
 	d5.erase("size")
 	await _start_new_world(false, "flat", {"size": 512, "life": "none"})
 	var l5: bool = sim.deserialize(d5)
-	var hof: Vector2 = sim._landmark("Himmlischer Hof")
+	var hof: Vector2 = sim._landmark("Heavenly Court")
 	print("SIZETEST v5 load=%s size=%d hof=%s" % [str(l5), GuData.W, str(hof)])
 	ok = ok and l5 and GuData.W == 256 and hof == Vector2(124.5, 130.5)
 	# falsche Größe wird abgelehnt
@@ -3153,7 +3153,7 @@ func _dev_ventest() -> void:
 		await get_tree().process_frame
 	var t0: int = Time.get_ticks_msec()
 	sim.ven.awk_paths.clear()
-	var hc: Vector2 = sim._landmark("Himmlischer Hof")
+	var hc: Vector2 = sim._landmark("Heavenly Court")
 	if hc.x < 0.0:
 		hc = Vector2(128, 128)
 	var gs: Dictionary = {}
@@ -3161,7 +3161,7 @@ func _dev_ventest() -> void:
 		if vd["id"] == "giant_sun":
 			gs = vd
 	print("spawn giant_sun: '", sim.spawn_venerable(gs, hc.x + 14.0, hc.y + 10.0), "' region ", GuData.REGN[sim.region_at(hc.x + 14.0, hc.y + 10.0)])
-	var sp: Vector2 = sim._landmark("Shang-Clan-Stadt")
+	var sp: Vector2 = sim._landmark("Shang Clan City")
 	powers.v9_path = 2
 	powers.v9_al = 1
 	print("spawn custom: '", powers.spawn_at(Powers.tool_by_id("s_v9"), sp.x + 20.0, sp.y - 12.0), "' ", powers.v9_text())

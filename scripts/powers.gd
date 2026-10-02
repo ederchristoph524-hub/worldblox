@@ -429,7 +429,7 @@ func apply_paint(t: Dictionary, wx: float, wy: float, stroke: Dictionary) -> voi
 					u.sick = 22.0 + randf() * 10.0
 		"smite":
 			for u: Unit in _brush_units(wx, wy):
-				u.dreason = "göttliche Auslöschung"
+				u.dreason = "divine annihilation"
 				sim.hurt(u, 1e9, null)
 				sim.spark(u.x, u.y - 1.0, Color.WHITE, 5, 6.0)
 

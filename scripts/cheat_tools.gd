@@ -795,7 +795,7 @@ func dev_test() -> void:
 	sim.hurt(tgt, 1e6, null)
 	print("invulnerable hp ", tgt.hp > 0.0)
 	tgt.ch = Cheats.CH_IMM
-	tgt.dreason = "Himmelswille"
+	tgt.dreason = "Heaven's Will"
 	tgt.hp = 0.0
 	sim.step(Sim.DT)
 	print("immortal survives will ", tgt.hp > 0.0, " in units ", sim.units.has(tgt))

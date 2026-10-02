@@ -46,7 +46,7 @@ static func compute(sim: Sim) -> void:
 			p += c.lead.rank * c.lead.rank * 4.0
 		if c.org != "":
 			var k: String = str(Lore.org(c.org).get("k", ""))
-			p += 60.0 if k == "Hof" else (20.0 if k == "Sekte" else 6.0)
+			p += 60.0 if k == "Court" else (20.0 if k == "Sect" else 6.0)
 		power[c.id] = p
 	# Vormacht: jeder Clan folgt seinem stärksten direkten Verbündeten, wenn der deutlich stärker ist
 	# (> 1,25 ×); dessen Vormacht ist dann auch seine. Die Stärke steigt entlang der Kette, also keine Kreise.
