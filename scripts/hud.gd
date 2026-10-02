@@ -95,6 +95,9 @@ var _down_btn: Button = null
 var _down_scroll: int = 0
 var _long_fired: bool = false
 var _bar_tw: Tween = null
+var _bar_drag_x: float = -1.0  ## Maus-Ziehen der Leiste (Desktop)
+var _bar_drag_s: int = 0
+var _bar_dragged: bool = false
 var insp_scroll: ScrollContainer
 var insp_fold: Button
 var insp_collapsed: bool = false
@@ -378,7 +381,27 @@ func _build_bar() -> void:
 				dir = -1
 			if dir != 0:
 				scroll_bar_to(clampi(_bar_goal() + dir * (BTN + 7) * 2, 0, _bar_max()), 0.16)
-				tools_scroll.accept_event())
+				tools_scroll.accept_event()
+		# Maus ohne Touchscreen: Leiste mit gedrückter Taste waagrecht ziehen (Touch wischt die ScrollContainer selbst)
+		if DisplayServer.is_touchscreen_available():
+			return
+		if e is InputEventMouseButton and (e as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+			var mb2: InputEventMouseButton = e
+			if mb2.pressed:
+				_bar_drag_x = mb2.global_position.x
+				_bar_drag_s = tools_scroll.scroll_horizontal
+				_bar_dragged = false
+			else:
+				_bar_drag_x = -1.0
+		elif e is InputEventMouseMotion and _bar_drag_x >= 0.0 and ((e as InputEventMouseMotion).button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+			var dx: float = (e as InputEventMouseMotion).global_position.x - _bar_drag_x
+			if absf(dx) > 8.0 or _bar_dragged:
+				if not _bar_dragged:
+					_bar_dragged = true
+					_hide_tip()
+					if _bar_tw != null:
+						_bar_tw.kill()
+				tools_scroll.scroll_horizontal = clampi(int(_bar_drag_s - dx), 0, _bar_max()))
 	row.add_child(tools_scroll)
 	tools_box = HBoxContainer.new()
 	tools_box.add_theme_constant_override("separation", 7)
@@ -533,6 +556,9 @@ func set_tools(tab: int) -> void:
 			if _down_btn == b:
 				_down_btn = null)
 		b.pressed.connect(func() -> void:
+			if _bar_dragged:
+				_bar_dragged = false
+				return
 			if _long_fired:
 				# langes Drücken zeigt nur die Beschreibung
 				_long_fired = false

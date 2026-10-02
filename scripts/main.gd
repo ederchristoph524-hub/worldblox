@@ -1236,7 +1236,7 @@ func _open_village() -> void:
 	insp_kind = "v"
 	var v: Village = sel_vil
 	var c: Clan = sim.clans[v.clan]
-	var btns: Array = [["+20 primeval stones", func() -> void:
+	var btns: Array = [["+20 stones", func() -> void:
 		v.stones += 20.0
 		_refresh_insp(), ""]]
 	if not c.war.is_empty():
@@ -1244,7 +1244,7 @@ func _open_village() -> void:
 			for e: int in c.war.keys():
 				sim.make_peace(c, sim.clans[e])
 			_open_village(), "jade"])
-	btns.append(["Summon wolf tide", func() -> void:
+	btns.append(["Wolf tide", func() -> void:
 		sim.beast_tide(v, Vector2(-1, -1))
 		_close_insp(), "red"])
 	hud.open_insp(null, c.glyph, c.col, v.name, c.name + " · " + GuData.REGN[v.reg], _village_body(v), btns)
@@ -2325,11 +2325,12 @@ class ScreenLayer:
 				else:
 					rest.append(v)
 		var compact: bool = bloc_mode
+		var powers_named: bool = m.show_terr and not m.reg_view and sim.world.layer != 2
 		if float(tg["cap"]) > 0.0 or float(la["cap"]) > 0.02:
 			caps.sort_custom(func(a: Village, b: Village) -> bool: return _cap_rank(a) > _cap_rank(b))
 			for v: Village in caps:
 				var c2: Clan = sim.clans[v.clan]
-				if bloc_mode and Influence.overlord(sim, c2) != null:
+				if bloc_mode and powers_named and Influence.overlord(sim, c2) != null:
 					rest.append(v)  # Gefolgsleute erst aus der Nähe
 					continue
 				var it1: Dictionary = _banner(v, c2, compact, o, z, vs, font)
