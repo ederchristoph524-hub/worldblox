@@ -59,6 +59,8 @@ var edge_tex: ImageTexture
 ## Auflösung der Grenzlinien-Textur je Kachel (Außenlinie, Farblinie, frei)
 const EDGE_S: int = 3
 var dirty: PackedByteArray
+## Version je 32er-Block: steigt bei jedem Neuzeichnen (flush_dirty, render_all); die Nahansicht (Detail) backt danach neu.
+var dver: PackedInt32Array
 var water_dirty: bool = false
 ## Kartenebene der Gebietsanzeige: 0 Clan-Gebiete, 1 Dorf-Gebiete, 2 Regionen, 3 Einflusssphären (Mächte).
 var layer: int = 0
@@ -90,6 +92,8 @@ func _init() -> void:
 	edge_tex = ImageTexture.create_from_image(edge_img)
 	dirty = PackedByteArray()
 	dirty.resize(CXN * CXN)
+	dver = PackedInt32Array()
+	dver.resize(CXN * CXN)
 
 
 func alloc() -> void:
@@ -572,6 +576,8 @@ func render_all() -> void:
 	near_tex.update(near_img)
 	far_tex.update(far_img)
 	dirty.fill(0)
+	for c: int in range(dver.size()):
+		dver[c] += 1
 
 
 func mark_dirty(x: int, y: int) -> void:
@@ -599,6 +605,7 @@ func flush_dirty(limit: int = 12) -> void:
 			var cx: int = (c % CXN) * CHK
 			var cy: int = (c / CXN) * CHK
 			_render_rect(cx, cy, cx + CHK, cy + CHK)
+			dver[c] += 1
 			n += 1
 			if n >= limit:
 				break
