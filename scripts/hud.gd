@@ -324,17 +324,17 @@ func _build_bar() -> void:
 	_style_button(back_btn, red_style())
 	back_btn.icon = Icons.get_icon("back")
 	back_btn.add_theme_constant_override("icon_max_width", 30)
-	back_btn.tooltip_text = "Zurück"
+	back_btn.tooltip_text = "Back"
 	back_btn.pressed.connect(func() -> void: back_pressed.emit())
 	fixed_box.add_child(back_btn)
 	var col: VBoxContainer = VBoxContainer.new()
 	col.add_theme_constant_override("separation", GAP)
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	fixed_box.add_child(col)
-	pause_btn = _tool_button(Icons.get_icon("pause"), "Pause (Leertaste)")
+	pause_btn = _tool_button(Icons.get_icon("pause"), "Pause (Space)")
 	pause_btn.pressed.connect(func() -> void: pause_pressed.emit())
 	col.add_child(pause_btn)
-	speed_btn = _tool_button(Icons.get_icon("speed"), "Zeitgeschwindigkeit (T)")
+	speed_btn = _tool_button(Icons.get_icon("speed"), "Time speed (T)")
 	speed_btn.pressed.connect(func() -> void: speed_pressed.emit())
 	speed_lbl = _label("x1", 12, Color.WHITE, 4, Color.BLACK)
 	speed_lbl.position = Vector2(24, 26)
@@ -392,7 +392,7 @@ func _build_bar() -> void:
 			arrow.draw_rect(Rect2(9 + k, cy + hh2 * 0.3, 1, hh2 * 0.7 - 1.0), Color("#b89a00")))
 	arrow.pressed.connect(func() -> void: tools_scroll.scroll_horizontal += int(tools_scroll.size.x * 0.7))
 	bar.add_child(arrow)
-	var ver: Label = _label("gu-welt 0.3-27@gdt (4)", 10, Color("#a4b0a4"))
+	var ver: Label = _label("gu-world 0.3-27@gdt (4)", 10, Color("#a4b0a4"))
 	ver.anchor_left = 1.0
 	ver.anchor_right = 1.0
 	ver.anchor_top = 1.0
@@ -518,14 +518,14 @@ func _build_top() -> void:
 	star.custom_minimum_size = Vector2(46, 46)
 	_style_button(star, red_style())
 	star.icon = Icons.get_icon("star")
-	star.tooltip_text = "Rangliste der Stärksten"
+	star.tooltip_text = "Ranking of the strongest"
 	star.pressed.connect(func() -> void: star_pressed.emit())
 	top_r.add_child(star)
 	gift_btn = Button.new()
 	gift_btn.custom_minimum_size = Vector2(46, 46)
 	_style_button(gift_btn, red_style())
 	gift_btn.icon = Icons.get_icon("gift")
-	gift_btn.tooltip_text = "Schicksalsgabe"
+	gift_btn.tooltip_text = "Gift of Fate"
 	gift_btn.pressed.connect(func() -> void: gift_pressed.emit())
 	top_r.add_child(gift_btn)
 	toasts = VBoxContainer.new()
@@ -583,7 +583,7 @@ func toast(text: String, kind: String, year: int) -> void:
 	r.add_theme_font_size_override("normal_font_size", 12)
 	r.add_theme_font_size_override("bold_font_size", 12)
 	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	r.text = "[b][color=#%s]J%d[/color][/b] %s" % [GuData.KCOL.get(kind, C_YELLOW).to_html(false), year, _esc(text)]
+	r.text = "[b][color=#%s]Y%d[/color][/b] %s" % [GuData.KCOL.get(kind, C_YELLOW).to_html(false), year, _esc(text)]
 	p.add_child(r)
 	toasts.add_child(p)
 	while toasts.get_child_count() > MAX_TOASTS:
@@ -681,7 +681,7 @@ func _build_floaters() -> void:
 		b.draw.connect(func() -> void: b.draw_circle(Vector2(15, 15), d / 2.0, Color("#d2ecdb")))
 		var kk: int = k
 		b.pressed.connect(func() -> void: brush_changed.emit(kk))
-		b.tooltip_text = "Pinselgröße %d" % (Powers.BRUSH[k] * 2 + 1)
+		b.tooltip_text = "Brush size %d" % (Powers.BRUSH[k] * 2 + 1)
 		bh.add_child(b)
 		brush_btns.append(b)
 
@@ -817,7 +817,13 @@ const STAT_ICON: Dictionary = {
 	"Fehden": "sword", "Bündnisse": "hand", "Alter": "hourglass", "Pfad": "orb", "Begabung": "star", "Essenz": "gem",
 	"Fortschritt": "arrow", "Öffnung": "eye", "Arbeit": "hammer", "Leben": "heart", "Siege": "sword", "Stärke": "sword", "Beute": "skull",
 	"Gesinnung": "yinyang", "Besitzer": "crown", "Wirkung": "gem", "Gu-Meister": "person", "Stufe": "star", "Verblasst": "hourglass", "Fötus-Gu": "orb",
-	"Einfluss": "crown", "Gebiet": "flag"}
+	"Einfluss": "crown", "Gebiet": "flag",
+	# English labels (inspector rows)
+	"Population": "person", "Race": "person", "People": "person", "Supplies": "apple", "Buildings": "house", "Strongest": "crown",
+	"Feuds": "sword", "Alliances": "hand", "Age": "hourglass", "Path": "orb", "Aptitude": "star", "Talent": "star", "Essence": "gem",
+	"Progress": "arrow", "Aperture": "eye", "Work": "hammer", "Job": "hammer", "Life": "heart", "Health": "heart", "Victories": "sword", "Wins": "sword", "Strength": "sword", "Kills": "skull", "Prey": "skull", "Loot": "skull",
+	"Disposition": "yinyang", "Alignment": "yinyang", "Owner": "crown", "Effect": "gem", "Gu Masters": "person", "Rank": "star", "Tier": "star", "Fades": "hourglass", "Fetus Gu": "orb",
+	"Influence": "crown", "Territory": "flag"}
 
 
 static func stat_icon(id: String) -> ImageTexture:
@@ -1247,7 +1253,7 @@ func open_input(body: String, value: String, ok_text: String, ok: Callable) -> v
 		var txt: String = modal_input.text
 		_input_cb = Callable()
 		close_modal()
-		ok.call(txt), "jade"], ["Abbrechen", func() -> void: close_modal(), ""]])
+		ok.call(txt), "jade"], ["Cancel", func() -> void: close_modal(), ""]])
 	modal_input.text = value
 	modal_input.visible = true
 	_input_cb = ok
@@ -1281,7 +1287,7 @@ func _build_loading() -> void:
 	big.add_theme_constant_override("shadow_offset_y", 3)
 	big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(big)
-	load_label = _label("Die fünf Regionen entstehen …", 15, Color.WHITE)
+	load_label = _label("The five regions are taking shape …", 15, Color.WHITE)
 	load_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(load_label)
 	load_bar = ProgressBar.new()

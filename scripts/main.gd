@@ -109,7 +109,7 @@ func _ready() -> void:
 	if fresh or not _load_game():
 		_start_new_world(true)
 	else:
-		hud.toast("Deine Welt wurde fortgesetzt.", "jade", sim.year())
+		hud.toast("Your world has been resumed.", "jade", sim.year())
 	for a: String in OS.get_cmdline_user_args():
 		if a.begins_with("--shots="):
 			_dev_shots(a.substr(8))
@@ -317,7 +317,7 @@ func view_center() -> Vector2:
 func _start_new_world(live: bool, mode: String = "gu", opts: Dictionary = {}) -> void:
 	loading = true
 	load_live = live
-	hud.set_loading(true, "Die Welt entsteht …" if World.is_blank(mode) else "Die fünf Regionen entstehen …", 0.05)
+	hud.set_loading(true, "The world is taking shape …" if World.is_blank(mode) else "The five regions are taking shape …", 0.05)
 	_close_insp()
 	hud.close_modal()
 	sel_unit = null
@@ -334,9 +334,9 @@ func _start_new_world(live: bool, mode: String = "gu", opts: Dictionary = {}) ->
 	presim_budget = 12.0
 	_finish_start()
 	if World.is_blank(sim.world.map_mode):
-		hud.show_hint("Leere Welt", "Forme Land mit „Welt formen“, setze Völker und Tiere mit „Kreaturen“ – alles liegt in deiner Hand.")
+		hud.show_hint("Blank World", "Shape land with “Shape the World”, place races and animals with “Creatures” – everything is in your hands.")
 	elif not presim_on and sim.villages.is_empty():
-		hud.show_hint("Freie Welt", "Keine Clans, keine Vorgeschichte: setze Völker, Gu-Meister und Tiere selbst.")
+		hud.show_hint("Free World", "No clans, no prehistory: place races, Gu Masters and animals yourself.")
 	print("WORLD VISIBLE ms ", Time.get_ticks_msec() - t_boot, " · Größe ", GuData.W, " · ", sim.world.gen_ms)
 
 
@@ -348,12 +348,12 @@ func _open_new_world() -> void:
 		sz += ("[b][color=#ffd24a]%s[/color][/b]" % n) if GuData.SIZES[k] == new_size else n
 		if k < GuData.SIZES.size() - 1:
 			sz += " · "
-	hud.open_modal(Hud.H_PREFIX + "Neue Welt erschaffen[/b][/color][/font_size]\n\n[b]Gu-Weltkarte[/b]: die fünf Regionen mit Himmelshof, Gu-Yue-Dorf, Shang-Clan-Stadt und den anderen bekannten Orten.\n\n[b]Zufallswelt[/b]: frei erzeugte Regionen ohne benannte Orte.\n\n[b]Leere Welt[/b]: nur Wasser, eine Ebene, eine Insel oder flache Kontinente – ohne Regionswände und ohne Leben. Du formst alles selbst.\n\n[b]Kartengröße[/b] (Kacheln je Seite): " + sz + "\n[color=#9db09e]Große Karten bieten viel mehr Platz; von oben siehst du immer die ganze Welt.[/color]\n\n[color=#9db09e]Die aktuelle Welt geht verloren, wenn du sie nicht gespeichert hast.[/color]", [
-		["Gu-Weltkarte mit Clans", func() -> void: _new_world_go(true, "gu", {}), "red"],
-		["Gu-Weltkarte …", func() -> void: _open_new_world_life("gu"), ""],
-		["Zufallswelt …", func() -> void: _open_new_world_life("random"), "jade"],
-		["Leere Welt …", func() -> void: _open_new_world_blank(false), ""],
-		["Größe: " + GuData.size_name(new_size), func() -> void:
+	hud.open_modal(Hud.H_PREFIX + "Create a New World[/b][/color][/font_size]\n\n[b]Gu World Map[/b]: the five regions with Heavenly Court, Gu Yue Village, Shang Clan City and the other well-known places.\n\n[b]Random World[/b]: freely generated regions without named places.\n\n[b]Blank World[/b]: only water, a plain, an island or flat continents – without region walls and without life. You shape everything yourself.\n\n[b]Map size[/b] (tiles per side): " + sz + "\n[color=#9db09e]Large maps offer much more room; zoomed out you always see the whole world.[/color]\n\n[color=#9db09e]The current world will be lost if you have not saved it.[/color]", [
+		["Gu World Map with clans", func() -> void: _new_world_go(true, "gu", {}), "red"],
+		["Gu World Map …", func() -> void: _open_new_world_life("gu"), ""],
+		["Random World …", func() -> void: _open_new_world_life("random"), "jade"],
+		["Blank World …", func() -> void: _open_new_world_blank(false), ""],
+		["Size: " + GuData.size_name(new_size), func() -> void:
 			new_size = GuData.SIZES[(GuData.SIZES.find(new_size) + 1) % GuData.SIZES.size()]
 			_open_new_world(), ""]])
 
@@ -368,37 +368,37 @@ func _new_world_go(live: bool, mode: String, opts: Dictionary) -> void:
 ## Schritt 2 für Gu-Weltkarte und Zufallswelt: wie viel Leben und ob es eine Vorgeschichte gibt.
 func _open_new_world_life(mode: String) -> void:
 	var gu: bool = mode == "gu"
-	var nm: String = "Gu-Weltkarte" if gu else "Zufallswelt"
+	var nm: String = "Gu World Map" if gu else "Random World"
 	var txt: String = Hud.H_PREFIX + nm + "[/b][/color][/font_size]\n\n"
-	txt += "[b]Mit Clans und Vorgeschichte[/b]: %s, dann vergehen %d Jahre Vorgeschichte.\n\n" % ["die kanonischen Mächte und Clans entstehen" if gu else "Clans entstehen in allen Regionen", int(PRESIM_YEARS)]
-	txt += "[b]Mit Clans, ohne Vorgeschichte[/b]: die Startdörfer stehen, die Welt beginnt sofort in Jahr 1.\n\n"
-	txt += "[b]Nur Tiere[/b]: Wildtiere und wilde Gu, aber keine Menschen – du setzt Völker und Gu-Meister selbst.\n\n"
-	txt += "[b]Ganz frei[/b]: nur die Karte, kein Leben. Auch der Tier-Spawn ist aus (Weltgesetze).\n\n[color=#9db09e]Kartengröße: %s[/color]" % GuData.size_name(new_size)
+	txt += "[b]With clans and prehistory[/b]: %s, then %d years of prehistory pass.\n\n" % ["the canonical powers and clans arise" if gu else "clans arise in all regions", int(PRESIM_YEARS)]
+	txt += "[b]With clans, no prehistory[/b]: the starting villages stand, the world begins right away in year 1.\n\n"
+	txt += "[b]Animals only[/b]: wild animals and wild Gu, but no humans – you place races and Gu Masters yourself.\n\n"
+	txt += "[b]Completely empty[/b]: only the map, no life. Animal spawning is off as well (World Laws).\n\n[color=#9db09e]Map size: %s[/color]" % GuData.size_name(new_size)
 	hud.open_modal(txt, [
-		["Mit Clans und Vorgeschichte", func() -> void: _new_world_go(true, mode, {}), "red" if gu else "jade"],
-		["Mit Clans, ohne Vorgeschichte", func() -> void: _new_world_go(true, mode, {"presim": false}), ""],
-		["Nur Tiere", func() -> void: _new_world_go(false, mode, {"life": "animals"}), ""],
-		["Ganz frei", func() -> void: _new_world_go(false, mode, {"life": "none"}), ""],
-		["Zurück", func() -> void: _open_new_world(), ""]])
+		["With clans and prehistory", func() -> void: _new_world_go(true, mode, {}), "red" if gu else "jade"],
+		["With clans, no prehistory", func() -> void: _new_world_go(true, mode, {"presim": false}), ""],
+		["Animals only", func() -> void: _new_world_go(false, mode, {"life": "animals"}), ""],
+		["Completely empty", func() -> void: _new_world_go(false, mode, {"life": "none"}), ""],
+		["Back", func() -> void: _open_new_world(), ""]])
 
 
 ## Schritt 2 für leere Welten; animals schaltet zwischen „ohne Leben“ und „mit Tieren“ um.
 func _open_new_world_blank(animals: bool) -> void:
 	var opts: Dictionary = {"life": "animals" if animals else "none"}
-	var txt: String = Hud.H_PREFIX + "Leere Welt[/b][/color][/font_size]\n\n"
-	txt += "[b]Nur Ozean[/b]: überall tiefes Meer – hebe mit „Land heben“ eigene Inseln und Kontinente aus dem Wasser.\n\n"
-	txt += "[b]Eine Ebene[/b]: ein einziges Grasland bis zum Kartenrand.\n\n"
-	txt += "[b]Eine Insel[/b]: eine runde Insel mitten im Meer.\n\n"
-	txt += "[b]Kontinente[/b]: einige flache Landmassen ohne Gebirge und Regionen.\n\n"
-	txt += "Leben: [b]%s[/b] [color=#9db09e](umschalten mit dem letzten Knopf)[/color]" % ("Wildtiere und wilde Gu" if animals else "keines – du setzt alles selbst")
-	txt += "\n[color=#9db09e]Kartengröße: %s[/color]" % GuData.size_name(new_size)
+	var txt: String = Hud.H_PREFIX + "Blank World[/b][/color][/font_size]\n\n"
+	txt += "[b]Ocean only[/b]: deep sea everywhere – use “Raise Land” to lift your own islands and continents out of the water.\n\n"
+	txt += "[b]One plain[/b]: a single grassland up to the edge of the map.\n\n"
+	txt += "[b]One island[/b]: a round island in the middle of the sea.\n\n"
+	txt += "[b]Continents[/b]: a few flat landmasses without mountains or regions.\n\n"
+	txt += "Life: [b]%s[/b] [color=#9db09e](toggle with the last button)[/color]" % ("wild animals and wild Gu" if animals else "none – you place everything yourself")
+	txt += "\n[color=#9db09e]Map size: %s[/color]" % GuData.size_name(new_size)
 	hud.open_modal(txt, [
-		["Nur Ozean", func() -> void: _new_world_go(false, "ocean", opts), "jade"],
-		["Eine Ebene", func() -> void: _new_world_go(false, "flat", opts), "jade"],
-		["Eine Insel", func() -> void: _new_world_go(false, "island", opts), "jade"],
-		["Kontinente", func() -> void: _new_world_go(false, "continents", opts), "jade"],
-		["Zurück", func() -> void: _open_new_world(), ""],
-		["Mit Tieren: ja" if animals else "Mit Tieren: nein", func() -> void: _open_new_world_blank(not animals), ""]])
+		["Ocean only", func() -> void: _new_world_go(false, "ocean", opts), "jade"],
+		["One plain", func() -> void: _new_world_go(false, "flat", opts), "jade"],
+		["One island", func() -> void: _new_world_go(false, "island", opts), "jade"],
+		["Continents", func() -> void: _new_world_go(false, "continents", opts), "jade"],
+		["Back", func() -> void: _open_new_world(), ""],
+		["With animals: yes" if animals else "With animals: no", func() -> void: _open_new_world_blank(not animals), ""]])
 
 
 func _finish_start() -> void:
@@ -425,7 +425,7 @@ func _end_presim() -> void:
 	presim_on = false
 	if sim.presim:
 		sim.presim = false
-		sim.log_event("Die Welt erwacht. Jahr %d." % sim.year(), "jade")
+		sim.log_event("The world awakens. Year %d." % sim.year(), "jade")
 	sim.update_leaders()
 	sim.terr_dirty = true
 
@@ -437,7 +437,7 @@ func _process(delta: float) -> void:
 	if sim.cheats.jumping():
 		# Cheat-Zeitsprung: im Zeitraffer, in Häppchen je Bild
 		if sim.cheats.jump_chunk(50) >= 1.0:
-			hud.toast("Zeitsprung beendet: %d Jahre vergangen – Jahr %d." % [sim.year() - sim.cheats.jump_y0, sim.year()], "violet", sim.year())
+			hud.toast("Time skip finished: %d years passed – year %d." % [sim.year() - sim.cheats.jump_y0, sim.year()], "violet", sim.year())
 			terr_t = 0.0
 	elif presim_on:
 		# Budget anpassen: was vom letzten Bild nicht Vorgeschichte war, ist Zeichnen/Eingabe
@@ -537,16 +537,16 @@ func _process(delta: float) -> void:
 		gift_cd -= rdt
 		hud.gift_btn.disabled = gift_cd > 0.0
 	if sim.cheats.jumping():
-		hud.age_lbl.text = "Zeitsprung … %d %% · Jahr %d" % [int((1.0 - sim.cheats.jump_left / maxf(1.0, sim.cheats.jump_total)) * 100.0), sim.year()]
+		hud.age_lbl.text = "Time skip … %d %% · Year %d" % [int((1.0 - sim.cheats.jump_left / maxf(1.0, sim.cheats.jump_total)) * 100.0), sim.year()]
 	elif presim_on:
-		hud.age_lbl.text = "Vorgeschichte … %d %%" % int(clampf(sim.sim_time / (PRESIM_YEARS * 12.0), 0.0, 0.99) * 100.0)
+		hud.age_lbl.text = "Prehistory … %d %%" % int(clampf(sim.sim_time / (PRESIM_YEARS * 12.0), 0.0, 0.99) * 100.0)
 	else:
 		var ad: Dictionary = sim.age_data()
 		var era: String = sim.era_text()
 		if era != "":
-			hud.age_lbl.text = "%s · Jahr %d" % [era, sim.year()]
+			hud.age_lbl.text = "%s · Year %d" % [era, sim.year()]
 		else:
-			hud.age_lbl.text = "%s · Jahr %d · %s" % [ad["n"], sim.year(), ("nächstes in %d Jahren" % sim.years_to_next_age()) if sim.laws["ages"] else "angehalten"]
+			hud.age_lbl.text = "%s · Year %d · %s" % [ad["n"], sim.year(), ("next in %d years" % sim.years_to_next_age()) if sim.laws["ages"] else "paused"]
 	hud.tick_layout()
 	auto_t += rdt
 	if auto_t > 60.0 and not presim_on:
@@ -604,7 +604,7 @@ func _unhandled_input(e: InputEvent) -> void:
 		return
 	if e.is_action_pressed("quick_save"):
 		_save_game()
-		hud.toast("Welt gespeichert (Jahr %d)." % sim.year(), "jade", sim.year())
+		hud.toast("World saved (year %d)." % sim.year(), "jade", sim.year())
 		return
 	if e is InputEventMagnifyGesture:
 		var mg: InputEventMagnifyGesture = e
@@ -806,11 +806,11 @@ func _click_tool(t: Dictionary) -> void:
 
 ## Auswahl für „Höchster Großmeister (Rang 9 nach Wahl)“: Gesinnung und Pfad (Links p9:/al9: in _on_meta).
 func _open_ven9_picker() -> void:
-	var s: String = _h("Höchster Großmeister") + "Wähle die Gesinnung und tippe dann auf einen Pfad. Danach tippst du auf die Karte: Dort erscheint der Ehrwürdige, errichtet seinen Sitz, gründet seine Blutlinie und lässt seinen Pfad in der ganzen Welt erblühen.\n\n"
+	var s: String = _h("Supreme Grandmaster") + "Choose an alignment, then tap a path. Then tap the map: the Venerable appears there, establishes his seat, founds his bloodline and lets his path flourish across the whole world.\n\n"
 	for al: int in [0, 1]:
 		var on: bool = powers.v9_al == al
-		s += "[url=al9:%d]%s [b]%s[/b][/url]    " % [al, "[color=#ffd24a]●[/color]" if on else "[color=#9db09e]○[/color]", "Rechtschaffen (Unsterblicher Ehrwürdiger)" if al == 0 else "Dämonisch (Dämonen-Ehrwürdiger)"]
-	s += "\n\n[url=p9:-1]%s [b]Zufälliger Pfad[/b][/url]\n" % ("[color=#ffd24a]●[/color]" if powers.v9_path < 0 else "[color=#9db09e]○[/color]")
+		s += "[url=al9:%d]%s [b]%s[/b][/url]    " % [al, "[color=#ffd24a]●[/color]" if on else "[color=#9db09e]○[/color]", "Righteous (Immortal Venerable)" if al == 0 else "Demonic (Demon Venerable)"]
+	s += "\n\n[url=p9:-1]%s [b]Random path[/b][/url]\n" % ("[color=#ffd24a]●[/color]" if powers.v9_path < 0 else "[color=#9db09e]○[/color]")
 	for g: Array in Lore.PATH_GROUPS:
 		s += "\n[color=#e8c70a][b]%s[/b][/color]\n" % str(g[0]).to_upper()
 		var items: PackedStringArray = PackedStringArray()
@@ -820,15 +820,15 @@ func _open_ven9_picker() -> void:
 		s += "   ".join(items) + "\n"
 	var live: PackedStringArray = PackedStringArray()
 	for d: Dictionary in sim.ven_dominions():
-		live.append("%s (%s-Pfad)" % [str(d["name"]), GuData.PATH_NAME[clampi(int(d["path"]), 0, GuData.PATH_NAME.size() - 1)]])
+		live.append("%s (%s Path)" % [str(d["name"]), GuData.PATH_NAME[clampi(int(d["path"]), 0, GuData.PATH_NAME.size() - 1)]])
 	if not live.is_empty():
-		s += "\n[color=#9db09e]Lebende Ehrwürdige: %s[/color]" % ", ".join(live)
-	hud.open_modal(s, [["Fertig", func() -> void: hud.close_modal(), "jade"]])
+		s += "\n[color=#9db09e]Living Venerables: %s[/color]" % ", ".join(live)
+	hud.open_modal(s, [["Done", func() -> void: hud.close_modal(), "jade"]])
 
 
 func _ven9_hint() -> void:
 	var t: Dictionary = Powers.tool_by_id("s_v9")
-	hud.show_hint(t["n"], powers.v9_text() + ". Tippe auf die Karte.")
+	hud.show_hint(t["n"], powers.v9_text() + ". Tap the map.")
 
 
 func _run_action(t: Dictionary) -> void:
@@ -860,7 +860,7 @@ func _run_action(t: Dictionary) -> void:
 		"will":
 			var top: Array[Unit] = sim.strongest(1)
 			if top.is_empty():
-				hud.show_hint("", "Noch hat niemand die Aufmerksamkeit des Himmels erregt.")
+				hud.show_hint("", "No one has drawn the attention of Heaven yet.")
 				return
 			sim.heavens_will(top[0])
 			sel_unit = top[0]
@@ -868,10 +868,10 @@ func _run_action(t: Dictionary) -> void:
 			zoom_to(top[0].x, top[0].y, 8.0)
 		"save":
 			var ok: bool = _save_game()
-			hud.toast("Welt gespeichert (Jahr %d)." % sim.year() if ok else "Speichern ist fehlgeschlagen.", "jade" if ok else "red", sim.year())
+			hud.toast("World saved (year %d)." % sim.year() if ok else "Saving failed.", "jade" if ok else "red", sim.year())
 		"load":
 			var ok2: bool = _load_game()
-			hud.toast("Gespeicherte Welt geladen." if ok2 else "Kein Spielstand gefunden.", "jade" if ok2 else "red", sim.year())
+			hud.toast("Saved world loaded." if ok2 else "No saved game found.", "jade" if ok2 else "red", sim.year())
 		"new":
 			_open_new_world()
 		"hideui":
@@ -882,7 +882,7 @@ func _run_action(t: Dictionary) -> void:
 		"plans":
 			_open_plans()
 		"brushshape":
-			hud.show_hint("Pinselform", powers.cycle_shape())
+			hud.show_hint("Brush shape", powers.cycle_shape())
 		"coin":
 			hud.show_hint(t["n"], powers.coin())
 		# Sandkasten (Logik in Powers.world_act / Sim)
@@ -890,12 +890,12 @@ func _run_action(t: Dictionary) -> void:
 			_end_presim()
 			hud.show_hint(t["n"], powers.world_act(t["id"]))
 		"w_wipe", "w_flat":
-			hud.open_modal(_h(t["n"]) + str(t["d"]) + "\n\n[color=#9db09e]Das lässt sich nicht rückgängig machen.[/color]", [
+			hud.open_modal(_h(t["n"]) + str(t["d"]) + "\n\n[color=#9db09e]This cannot be undone.[/color]", [
 				[t["n"], func() -> void:
 					hud.close_modal()
 					_end_presim()
 					hud.show_hint(t["n"], powers.world_act(t["id"])), "red"],
-				["Abbrechen", func() -> void: hud.close_modal(), ""]])
+				["Cancel", func() -> void: hud.close_modal(), ""]])
 		"ev_war", "ev_dream", "ev_inherit":
 			var r: Dictionary = powers.event_act(t["id"])
 			if str(r["msg"]) != "":
@@ -945,13 +945,13 @@ func _go_back() -> void:
 func _toggle_pause() -> void:
 	paused = not paused
 	hud.set_paused(paused)
-	hud.show_hint("Pausiert" if paused else "Weiter", "")
+	hud.show_hint("Paused" if paused else "Resumed", "")
 
 
 func _cycle_speed() -> void:
 	speed_idx = (speed_idx + 1) % SPEEDS.size()
 	hud.set_speed(SPEEDS[speed_idx])
-	hud.show_hint("Zeit x%d" % SPEEDS[speed_idx], "")
+	hud.show_hint("Speed x%d" % SPEEDS[speed_idx], "")
 
 
 func _gift() -> void:
@@ -1043,29 +1043,29 @@ func _open_unit() -> void:
 		var c: Clan = sim.clans[u.clan] if u.clan >= 0 else null
 		var v: Village = sim.villages[u.vil] if u.vil >= 0 else null
 		sub = ((u.title + " · " + GuData.rank_stage(u.rank, u.stage)) if (u.rank == 9 or u.ow) and u.title != "" else GuData.rank_stage_title(u.rank, u.stage, sim.quasi9(u)))
-		sub += "\n" + ("Dämonischer Einzelgänger" if u.rogue else ((c.name + ((" · " + v.name) if v != null else "")) if c != null else "ohne Clan"))
+		sub += "\n" + ("Demonic rogue cultivator" if u.rogue else ((c.name + ((" · " + v.name) if v != null else "")) if c != null else "no clan"))
 	else:
-		var tn: String = GuData.TIER_NAME.get(u.rank, "Wildtier")
+		var tn: String = GuData.TIER_NAME.get(u.rank, "Wild beast")
 		if u.beh == GuData.B_GU:
-			sub = "Wilder Gu des %s-Pfades – Gu-Meister fangen ihn" % GuData.PATH_NAME[maxi(0, u.path)]
+			sub = "Wild Gu of the %s Path – Gu Masters can catch it" % GuData.PATH_NAME[maxi(0, u.path)]
 		elif u.beh == GuData.B_IGU:
-			sub = "Wildes Unsterbliches Gu (Rang %d) – nur Unsterbliche fangen es" % int(Lore.igu(u.gname).get("r", 6))
+			sub = "Wild Immortal Gu (rank %d) – only Gu Immortals can catch it" % int(Lore.igu(u.gname).get("r", 6))
 		elif u.tide:
-			sub = "Teil einer Wolfsflut"
+			sub = "Part of a wolf tide"
 		elif u.ldr != null and u.ldr.hp > 0.0:
-			sub = tn + " · Rudel von " + u.ldr.pname()
+			sub = tn + " · pack of " + u.ldr.pname()
 		else:
 			sub = tn
 	var btns: Array = [
-		["Folgt" if follow else "Folgen", func() -> void:
+		["Following" if follow else "Follow", func() -> void:
 			follow = not follow
 			_open_unit(), "jade" if follow else ""]]
 	if u.k == "p":
-		btns.append(["Glück schenken", func() -> void:
+		btns.append(["Grant fortune", func() -> void:
 			u.luck = 1.0
 			sim.spark(u.x, u.y - 2.0, Color("#ffe27a"), 10, 5.0), ""])
-	btns.append(["Auslöschen", func() -> void:
-		u.dreason = "göttliche Auslöschung"
+	btns.append(["Annihilate", func() -> void:
+		u.dreason = "divine annihilation"
 		sim.hurt(u, 1e9, null)
 		_close_insp(), "red"])
 	hud.open_insp(_portrait(u), "", Color.WHITE, u.pname(), sub, _unit_body(u), btns)
@@ -1082,31 +1082,31 @@ func _unit_body(u: Unit) -> String:
 	var mt: String = "[color=#9db09e]"
 	var s: String = ""
 	if u.k == "p":
-		s += mt + "Volk[/color]  " + GuData.RACE_NAME[u.race] + ("  [color=#c080ff](Fremdweltdämon)[/color]" if u.ow else "") + "\n"
-		s += mt + "Alter[/color]  %d / %d Jahre\n" % [int(a), int(u.life)]
+		s += mt + "Race[/color]  " + GuData.RACE_NAME[u.race] + ("  [color=#c080ff](Otherworldly Demon)[/color]" if u.ow else "") + "\n"
+		s += mt + "Age[/color]  %d / %d years\n" % [int(a), int(u.life)]
 		if u.rank > 0:
-			s += mt + "Pfad[/color]  " + _swatch(GuData.PATH_COL[u.path]) + GuData.PATH_NAME[u.path] + "-Pfad\n"
-			s += mt + "Gesinnung[/color]  " + ("[color=#ff8a7a]dämonisch[/color]" if (u.align == 1 or u.rogue) else "[color=#9fe0b0]rechtschaffen[/color]") + "\n"
-			s += mt + "Begabung[/color]  " + ("Extremkonstitution" if u.apt == "X" else u.apt + "-Grad") + "\n"
-			s += mt + "Essenz[/color]  " + _swatch(GuData.ESS_COL[u.rank]) + GuData.ESS_NAME[u.rank] + "\n"
-			s += mt + "Kleinstufe[/color]  " + _swatch(GuData.ESS_COL[u.rank]) + GuData.STAGE[u.stage] + ("  [color=#9db09e](Dao-Male)[/color]" if u.rank >= 6 else "") + "\n"
+			s += mt + "Path[/color]  " + _swatch(GuData.PATH_COL[u.path]) + GuData.PATH_NAME[u.path] + " Path\n"
+			s += mt + "Alignment[/color]  " + ("[color=#ff8a7a]demonic[/color]" if (u.align == 1 or u.rogue) else "[color=#9fe0b0]righteous[/color]") + "\n"
+			s += mt + "Aptitude[/color]  " + ("Extreme Physique" if u.apt == "X" else u.apt + "-grade") + "\n"
+			s += mt + "Essence[/color]  " + _swatch(GuData.ESS_COL[u.rank]) + GuData.ESS_NAME[u.rank] + "\n"
+			s += mt + "Stage[/color]  " + _swatch(GuData.ESS_COL[u.rank]) + GuData.STAGE[u.stage] + ("  [color=#9db09e](dao marks)[/color]" if u.rank >= 6 else "") + "\n"
 			if u.rank < 9 or u.stage < 3:
-				s += mt + "Fortschritt[/color]  " + _bar_txt(u.prog, GuData.ESS_COL[u.rank]) + "\n"
-			s += mt + "Macht[/color]  " + _might_txt(u) + "\n"
+				s += mt + "Progress[/color]  " + _bar_txt(u.prog, GuData.ESS_COL[u.rank]) + "\n"
+			s += mt + "Might[/color]  " + _might_txt(u) + "\n"
 		else:
-			var jobs: Dictionary = {"wood": "Holzfäller", "mine": "Urstein-Bergmann", "farm": "Bauer", "gather": "Sammler", "hunt": "Jäger"}
-			s += mt + "Öffnung[/color]  " + ("nicht erweckt" if u.awk else "noch nicht geprüft") + "\n"
-			s += mt + "Arbeit[/color]  " + str(jobs.get(u.job, "Kind" if a < 14.0 else "–")) + "\n"
+			var jobs: Dictionary = {"wood": "Woodcutter", "mine": "Primeval stone miner", "farm": "Farmer", "gather": "Gatherer", "hunt": "Hunter"}
+			s += mt + "Aperture[/color]  " + ("not awakened" if u.awk else "not yet tested") + "\n"
+			s += mt + "Job[/color]  " + str(jobs.get(u.job, "Child" if a < 14.0 else "–")) + "\n"
 		s += mt + "Leben[/color]  " + _bar_txt(u.hp / u.mhp, Color("#d24a35")) + "\n"
-		s += mt + "Siege[/color]  %d" % u.kills
+		s += mt + "Victories[/color]  %d" % u.kills
 		if not u.igu.is_empty():
 			var ig: PackedStringArray = PackedStringArray()
 			for id: String in u.igu:
 				var e: Dictionary = Lore.igu(id)
 				ig.append(str(e.get("n", id)) + " [color=#9db09e](" + str(Lore.FX_TEXT.get(str(e.get("fx", "gen")), "")) + ")[/color]")
-			s += "\n\n[color=#ffd24a]Unsterbliche Gu:[/color] " + ", ".join(ig)
+			s += "\n\n[color=#ffd24a]Immortal Gu:[/color] " + ", ".join(ig)
 		if u.notrib:
-			s += "\n[color=#cfe0ff]An ein Himmelsfragment gebunden – keine Drangsale[/color]"
+			s += "\n[color=#cfe0ff]Bound to a fragment of Heaven – no tribulations[/color]"
 		if not u.gus.is_empty():
 			s += "\n\n[color=#e8c70a]Gu:[/color] " + ", ".join(u.gus)
 		if u.fig != "" and u.rank < 9:
@@ -1118,24 +1118,24 @@ func _unit_body(u: Unit) -> String:
 				if vd["fig"] == u.fig:
 					s += "\n[color=#9db09e]" + str(vd["d"]) + "[/color]"
 		if u.luck > 0.0:
-			s += "\n[color=#ffd23a]Großes Glück[/color]"
+			s += "\n[color=#ffd23a]Great fortune[/color]"
 		if u.sick > 0.0 and not u.undead:
-			s += "\n[color=#86e04a]Seuchen-Gu[/color]"
+			s += "\n[color=#86e04a]Plague Gu[/color]"
 	else:
 		var S: Dictionary = GuData.SPEC[u.sp]
 		if u.beh == GuData.B_GU or u.beh == GuData.B_IGU:
-			s += mt + "Pfad[/color]  " + _swatch(GuData.PATH_COL[maxi(0, u.path)]) + GuData.PATH_NAME[maxi(0, u.path)] + "-Pfad\n"
+			s += mt + "Path[/color]  " + _swatch(GuData.PATH_COL[maxi(0, u.path)]) + GuData.PATH_NAME[maxi(0, u.path)] + " Path\n"
 			if u.beh == GuData.B_IGU:
 				var e2: Dictionary = Lore.igu(u.gname)
-				s += mt + "Wirkung[/color]  " + str(Lore.FX_TEXT.get(str(e2.get("fx", "gen")), "")) + "\n"
+				s += mt + "Effect[/color]  " + str(Lore.FX_TEXT.get(str(e2.get("fx", "gen")), "")) + "\n"
 				s += "[color=#9db09e]" + str(e2.get("d", "")) + "[/color]\n"
 			s += mt + "Leben[/color]  " + _bar_txt(u.hp / u.mhp, Color("#d24a35"))
 			return s
 		if u.rank > 0:
-			s += mt + "Stufe[/color]  " + _swatch(GuData.ESS_COL[u.rank]) + str(GuData.TIER_NAME.get(u.rank, "")) + " (wie Rang %d)\n" % u.rank
+			s += mt + "Tier[/color]  " + _swatch(GuData.ESS_COL[u.rank]) + str(GuData.TIER_NAME.get(u.rank, "")) + " (like rank %d)\n" % u.rank
 		s += mt + "Leben[/color]  " + _bar_txt(u.hp / u.mhp, Color("#d24a35")) + "\n"
-		s += mt + "Stärke[/color]  %d\n" % int(u.atk)
-		s += mt + "Beute[/color]  %d" % u.kills
+		s += mt + "Strength[/color]  %d\n" % int(u.atk)
+		s += mt + "Prey[/color]  %d" % u.kills
 		if S.has("d"):
 			s += "\n[color=#9db09e]" + str(S["d"]) + "[/color]"
 	s += powers.unit_lines(u)
@@ -1146,25 +1146,25 @@ func _unit_body(u: Unit) -> String:
 func _might_txt(u: Unit) -> String:
 	var mg: float = sim.might(u)
 	if u.rank >= 9:
-		return "[color=#ffd24a]Absoluter Herrscher[/color] – nichts unter Rang 9 kann ihn verletzen"
+		return "[color=#ffd24a]Absolute ruler[/color] – nothing below rank 9 can harm him"
 	if u.rank >= 6:
-		return "[color=#d8f0a0]Unsterblicher[/color] – Sterbliche sind für ihn Ameisen (×%s gegen Rang 5)" % String.num(snappedf(mg / Sim.MIGHT[5], 1.0))
-	return "×%s gegen einen Sterblichen" % String.num(snappedf(mg, 0.1))
+		return "[color=#d8f0a0]Immortal[/color] – mortals are ants to him (×%s vs. rank 5)" % String.num(snappedf(mg / Sim.MIGHT[5], 1.0))
+	return "×%s vs. a mortal" % String.num(snappedf(mg, 0.1))
 
 
 func _open_village() -> void:
 	insp_kind = "v"
 	var v: Village = sel_vil
 	var c: Clan = sim.clans[v.clan]
-	var btns: Array = [["+20 Ursteine", func() -> void:
+	var btns: Array = [["+20 primeval stones", func() -> void:
 		v.stones += 20.0
 		_refresh_insp(), ""]]
 	if not c.war.is_empty():
-		btns.append(["Frieden schließen", func() -> void:
+		btns.append(["Make peace", func() -> void:
 			for e: int in c.war.keys():
 				sim.make_peace(c, sim.clans[e])
 			_open_village(), "jade"])
-	btns.append(["Wolfsflut rufen", func() -> void:
+	btns.append(["Summon wolf tide", func() -> void:
 		sim.beast_tide(v, Vector2(-1, -1))
 		_close_insp(), "red"])
 	hud.open_insp(null, c.glyph, c.col, v.name, c.name + " · " + GuData.REGN[v.reg], _village_body(v), btns)
@@ -1191,24 +1191,24 @@ func _village_body(v: Village) -> String:
 		if w.alive and w.clan == c.id:
 			nv += 1
 	var s: String = ""
-	s += mt + "Bewohner[/color]  %d / %d · %d Gu-Meister\n" % [mem, v.cap, gm]
-	s += mt + "Vorräte[/color]  %d Nahrung · %d Holz · %d Ursteine\n" % [int(v.food), int(v.wood), int(v.stones)]
-	s += mt + "Gebäude[/color]  " + ("Ahnenhalle" if v.lvl > 0 else "Lagerfeuer") + " · %d Hütten · %d Felder" % [v.houses, v.farms] + (" · Gu-Veredelung" if v.forge else "") + ((" · %d Türme" % v.towers) if v.towers > 0 else "") + "\n"
-	s += mt + "Clan[/color]  %d Dörfer · gegründet Jahr %d\n" % [nv, c.born]
+	s += mt + "Population[/color]  %d / %d · %d Gu Masters\n" % [mem, v.cap, gm]
+	s += mt + "Supplies[/color]  %d food · %d wood · %d primeval stones\n" % [int(v.food), int(v.wood), int(v.stones)]
+	s += mt + "Buildings[/color]  " + ("Ancestral hall" if v.lvl > 0 else "Campfire") + " · %d huts · %d fields" % [v.houses, v.farms] + (" · Gu refinery" if v.forge else "") + ((" · %d towers" % v.towers) if v.towers > 0 else "") + "\n"
+	s += mt + "Clan[/color]  %d villages · founded year %d\n" % [nv, c.born]
 	s += powers.village_lines(v)
 	if top != null:
-		s += mt + "Stärkster[/color]  " + _swatch(GuData.ESS_COL[top.rank]) + top.pname() + ", " + GuData.rank_title(top.rank) + "\n"
+		s += mt + "Strongest[/color]  " + _swatch(GuData.ESS_COL[top.rank]) + top.pname() + ", " + GuData.rank_title(top.rank) + "\n"
 	if not c.war.is_empty():
 		var names: PackedStringArray = []
 		for e: int in c.war.keys():
 			names.append(sim.clans[e].name)
-		s += mt + "Fehden[/color]  [color=#ffa894]" + ", ".join(names) + "[/color]\n"
+		s += mt + "Feuds[/color]  [color=#ffa894]" + ", ".join(names) + "[/color]\n"
 	if not c.ally.is_empty():
 		var names2: PackedStringArray = []
 		for e: int in c.ally.keys():
 			names2.append(sim.clans[e].name)
-		s += mt + "Bündnisse[/color]  " + ", ".join(names2) + "\n"
-	s += "\n" + mt + "Gu-Meister nach Rang[/color]\n"
+		s += mt + "Alliances[/color]  " + ", ".join(names2) + "\n"
+	s += "\n" + mt + "Gu Masters by rank[/color]\n"
 	var maxn: int = 1
 	for r: int in range(1, 10):
 		maxn = maxi(maxn, by_r[r])
@@ -1224,7 +1224,7 @@ func _open_place() -> void:
 	var p: Place = sel_place
 	var D: Dictionary = Lore.PLACE[p.type]
 	var btns: Array = []
-	btns.append(["Auflösen", func() -> void:
+	btns.append(["Dissolve", func() -> void:
 		p.alive = false
 		sim.places.erase(p)
 		sim.spark(p.x, p.y - 4.0, Color("#fff1c0"), 20, 8.0)
@@ -1239,20 +1239,20 @@ func _place_body(p: Place) -> String:
 	if p.owner >= 0:
 		var o: Unit = sim.unit_by_id(p.owner)
 		if o != null:
-			s += mt + "Besitzer[/color]  " + _swatch(GuData.ESS_COL[o.rank]) + o.pname() + ", " + GuData.rank_title(o.rank) + "\n"
+			s += mt + "Owner[/color]  " + _swatch(GuData.ESS_COL[o.rank]) + o.pname() + ", " + GuData.rank_title(o.rank) + "\n"
 	elif p.type in ["blessed", "grotto", "hu"]:
-		s += mt + "Besitzer[/color]  herrenlos\n"
-	s += mt + "Alter[/color]  %d Jahre\n" % int((sim.sim_time - p.born) / 12.0)
+		s += mt + "Owner[/color]  unclaimed\n"
+	s += mt + "Age[/color]  %d years\n" % int((sim.sim_time - p.born) / 12.0)
 	if p.until > 0.0:
-		s += mt + "Verblasst[/color]  in %d Monaten\n" % int(p.until - sim.sim_time)
-	s += mt + "Wirkung[/color]  %d Felder\n" % int(p.radius())
+		s += mt + "Fades[/color]  in %d months\n" % int(p.until - sim.sim_time)
+	s += mt + "Effect[/color]  %d tiles\n" % int(p.radius())
 	if p.type == "yitian":
-		s += mt + "Fötus-Gu[/color]  " + ("bereits erschienen" if p.used else "erscheint in %d Monaten" % maxi(0, int(24.0 - p.t))) + "\n"
+		s += mt + "Fetus Gu[/color]  " + ("already appeared" if p.used else "appears in %d months" % maxi(0, int(24.0 - p.t))) + "\n"
 	var n: int = 0
 	for u: Unit in sim.near_units(p.x, p.y, p.radius()):
 		if u.k == "p" and u.rank > 0:
 			n += 1
-	s += mt + "Gu-Meister[/color]  %d in der Nähe\n" % n
+	s += mt + "Gu Masters[/color]  %d nearby\n" % n
 	s += "\n[color=#9db09e]" + str(Lore.PLACE[p.type]["d"]) + "[/color]"
 	return s
 
@@ -1264,7 +1264,7 @@ func _open_tile(tx: int, ty: int) -> void:
 	var i: int = ty * W + tx
 	var f: int = sim.world.feat[i]
 	var title: String = GuData.TNAME[sim.world.tile[i]] + ((" · " + GuData.FNAME[f]) if f != 0 else "")
-	hud.open_insp(null, "", Color.WHITE, title, GuData.REGN[sim.world.region[i]] + " · Feld %d, %d" % [tx, ty] + (" · brennt" if sim.fire.has(i) else ""), Influence.tile_text(sim, tx, ty).strip_edges(), [])
+	hud.open_insp(null, "", Color.WHITE, title, GuData.REGN[sim.world.region[i]] + " · tile %d, %d" % [tx, ty] + (" · burning" if sim.fire.has(i) else ""), Influence.tile_text(sim, tx, ty).strip_edges(), [])
 	hud.layout_floaters()
 
 
@@ -1332,9 +1332,9 @@ func _open_world_info() -> void:
 		if b != null:
 			bl += 1
 	var era: String = sim.era_text()
-	var rows: Array = [["Jahr", sim.year()], ["Zeitalter", sim.age_data()["n"]], ["Ära", era if era != "" else "–"], ["Ehrwürdige", sim.ven.st.size()],
-		["Schicksals-Gu", "existiert" if sim.ven.fate_on else ("zerstört" if sim.ven.fate_broken else "–")], ["Seelen", ps], ["Gu-Meister", gm], ["Gu-Unsterbliche", imm], ["Clans und Sekten", cl], ["Dörfer", vl], ["Tiere", an], ["Wilde Gu", gu], ["Besondere Orte", sim.places.size()], ["Bäume", trees], ["Gebäude", bl]]
-	var s: String = _h("Weltinfo") + "[table=2]"
+	var rows: Array = [["Year", sim.year()], ["Age", sim.age_data()["n"]], ["Era", era if era != "" else "–"], ["Venerables", sim.ven.st.size()],
+		["Fate Gu", "exists" if sim.ven.fate_on else ("destroyed" if sim.ven.fate_broken else "–")], ["Souls", ps], ["Gu Masters", gm], ["Gu Immortals", imm], ["Clans and sects", cl], ["Villages", vl], ["Animals", an], ["Wild Gu", gu], ["Special places", sim.places.size()], ["Trees", trees], ["Buildings", bl]]
+	var s: String = _h("World Info") + "[table=2]"
 	for r: Array in rows:
 		s += "[cell][color=#9db09e]%s[/color]   [/cell][cell][b]%s[/b][/cell]" % [r[0], str(r[1])]
 	s += "[/table]"
@@ -1342,30 +1342,30 @@ func _open_world_info() -> void:
 
 
 func _open_chron() -> void:
-	var s: String = _h("Chronik der Welt")
+	var s: String = _h("World Chronicle")
 	if sim.log_entries.is_empty():
-		s += "Noch ist nichts geschehen."
+		s += "Nothing has happened yet."
 	for l: Dictionary in sim.log_entries:
 		var k: String = l["k"]
 		var col: Color = Color("#eef3ea") if k == "info" else GuData.KCOL.get(k, Color.WHITE)
-		s += "[color=#9db09e]Jahr %d[/color]  [color=#%s]%s[/color]\n" % [int(l["y"]), _c(col), Hud._esc(str(l["t"]))]
+		s += "[color=#9db09e]Year %d[/color]  [color=#%s]%s[/color]\n" % [int(l["y"]), _c(col), Hud._esc(str(l["t"]))]
 	hud.open_modal(s)
 
 
 func _open_rank() -> void:
 	var top: Array[Unit] = sim.strongest(15)
-	var s: String = _h("Rangliste der Stärksten")
+	var s: String = _h("Ranking of the Strongest")
 	if top.is_empty():
-		s += "Noch hat niemand seine Öffnung erweckt."
+		s += "No one has awakened their aperture yet."
 	var k: int = 1
 	for u: Unit in top:
 		var c: Clan = sim.clans[u.clan] if u.clan >= 0 else null
-		s += "[color=#9db09e]%d.[/color] %s[url=u%d][b]%s[/b][/url]\n    [color=#9db09e]%s · %s-Pfad · %s[/color]\n" % [k, _swatch(GuData.ESS_COL[u.rank]), u.id, u.pname(), (u.title + " · " + GuData.STAGE[u.stage]) if u.rank == 9 and u.title != "" else GuData.rank_stage_title(u.rank, u.stage, sim.quasi9(u)), GuData.PATH_NAME[u.path], "Dämonischer Einzelgänger" if u.rogue else (c.name if c != null else "ohne Clan")]
+		s += "[color=#9db09e]%d.[/color] %s[url=u%d][b]%s[/b][/url]\n    [color=#9db09e]%s · %s Path · %s[/color]\n" % [k, _swatch(GuData.ESS_COL[u.rank]), u.id, u.pname(), (u.title + " · " + GuData.STAGE[u.stage]) if u.rank == 9 and u.title != "" else GuData.rank_stage_title(u.rank, u.stage, sim.quasi9(u)), GuData.PATH_NAME[u.path], "Demonic rogue cultivator" if u.rogue else (c.name if c != null else "no clan")]
 		k += 1
-	s += "\n" + _h3("Essenzen der Ränge")
+	s += "\n" + _h3("Essences of the ranks")
 	for r: int in range(1, 10):
 		s += "%s[color=#9db09e]%d[/color] %s%s" % [_swatch(GuData.ESS_COL[r]), r, GuData.ESS_NAME[r], "\n"]
-	s += "[color=#9db09e]Je Rang vier Kleinstufen: %s. Ein Rang-6-Unsterblicher löscht Heere von Rang-5-Meistern mit einem Fingerschnipsen aus; gegen einen Ehrwürdigen (Rang 9) richtet niemand darunter etwas aus.[/color]" % ", ".join(GuData.STAGE)
+	s += "[color=#9db09e]Four stages per rank: %s. A rank 6 Immortal wipes out armies of rank 5 masters with a snap of his fingers; against a Venerable (rank 9) no one below can do anything.[/color]" % ", ".join(GuData.STAGE)
 	hud.open_modal(s)
 
 
@@ -1392,12 +1392,12 @@ func _open_clans() -> void:
 				topr = maxi(topr, u.rank)
 		rows.append([c, vs, pop, gm, topr, first])
 	rows.sort_custom(func(a: Array, b: Array) -> bool: return a[2] > b[2])
-	var s: String = _h("Clans und Sekten")
+	var s: String = _h("Clans and Sects")
 	if rows.is_empty():
-		s += "Noch hat kein Clan ein Dorf gegründet. Setze Menschen auf fruchtbares Land."
+		s += "No clan has founded a village yet. Place humans on fertile land."
 	for r: Array in rows:
 		var c: Clan = r[0]
-		s += "[color=#%s]■[/color] [url=v%d][b]%s[/b][/url]\n    [color=#9db09e]%d Dörfer · %d Seelen · %d Gu-Meister · stärkster Rang %d%s[/color]\n" % [_c(c.col), r[5], c.name, r[1], r[2], r[3], r[4], " · im Krieg" if not c.war.is_empty() else ""]
+		s += "[color=#%s]■[/color] [url=v%d][b]%s[/b][/url]\n    [color=#9db09e]%d villages · %d souls · %d Gu Masters · strongest rank %d%s[/color]\n" % [_c(c.col), r[5], c.name, r[1], r[2], r[3], r[4], " · at war" if not c.war.is_empty() else ""]
 	hud.open_modal(s)
 
 
@@ -1456,15 +1456,15 @@ func _on_meta(m: String) -> void:
 		_open_display()
 
 
-const LAWS: Array = [["war", "Fehden", "Clans erklären sich gegenseitig den Krieg."], ["tide", "Bestienfluten", "Wolfsfluten überfallen Dörfer."], ["immortal", "Unsterblichkeit", "Rang-5-Gu-Meister können zu Gu-Unsterblichen aufsteigen."], ["trib", "Drangsale", "Unsterbliche müssen regelmäßig Himmelsdrangsale überstehen."], ["will", "Himmelswille", "Der Himmel schlägt die Herausragendsten nieder."], ["walls", "Regionswände", "Sterbliche können die Wände nicht durchqueren."], ["growth", "Wachstum", "Geburten, Tiernachwuchs und Pflanzenwachstum."], ["fire", "Feuerausbreitung", "Feuer springt auf Nachbarfelder über."]]
+const LAWS: Array = [["war", "Feuds", "Clans declare war on each other."], ["tide", "Beast tides", "Wolf tides raid villages."], ["immortal", "Immortality", "Rank 5 Gu Masters can ascend to Gu Immortals."], ["trib", "Tribulations", "Immortals must regularly survive heavenly tribulations."], ["will", "Heaven's Will", "Heaven strikes down the most outstanding."], ["walls", "Region walls", "Mortals cannot cross the walls."], ["growth", "Growth", "Births, animal offspring and plant growth."], ["fire", "Fire spread", "Fire jumps to neighboring tiles."]]
 
 
 func _switch(on: bool) -> String:
-	return "[color=#5fbf8a][b]● AN[/b][/color]" if on else "[color=#c74634][b]○ AUS[/b][/color]"
+	return "[color=#5fbf8a][b]● ON[/b][/color]" if on else "[color=#c74634][b]○ OFF[/b][/color]"
 
 
 func _open_laws() -> void:
-	var s: String = _h("Weltgesetze") + "Tippe auf ein Gesetz, um es umzuschalten.\n\n[url=law:__off][color=#c74634][b]○ Alle Automatik aus[/b][/color][/url]      [url=law:__on][color=#5fbf8a][b]● Alles an[/b][/color][/url]\n\n"
+	var s: String = _h("World Laws") + "Tap a law to toggle it.\n\n[url=law:__off][color=#c74634][b]○ All automation off[/b][/color][/url]      [url=law:__on][color=#5fbf8a][b]● All on[/b][/color][/url]\n\n"
 	for l: Array in LAWS + Sim.LAWS_EXTRA:
 		s += "[url=law:%s]%s  [b]%s[/b][/url]\n    [color=#9db09e]%s[/color]\n" % [l[0], _switch(sim.laws[l[0]]), l[1], l[2]]
 	hud.open_modal(s)
@@ -1491,55 +1491,55 @@ func _cycle_layer() -> void:
 	show_terr = true
 	sim.terr_dirty = true
 	terr_t = 0.0
-	hud.show_hint("Kartenebene: " + World.LAYER_NAME[sim.world.layer], LAYER_DESC[sim.world.layer])
+	hud.show_hint("Map layer: " + World.LAYER_NAME[sim.world.layer], LAYER_DESC[sim.world.layer])
 
 
 const LAYER_DESC: PackedStringArray = [
-	"Jeder Clan in seiner Farbe. Ein Rand in fremder Farbe zeigt die Vormacht, der der Clan folgt; rot gestrichelt sind Kriegsgrenzen.",
-	"Die Dörfer der Clans, die Hauptstadt golden umrandet.",
-	"Die fünf Regionen und ihre Wände.",
-	"Wer herrscht wo: Bünde in der Farbe ihrer Vormacht, dämonische Mächte schraffiert, Herrschaftsgebiete der Ehrwürdigen leuchten."]
+	"Every clan in its own color. A border in another color shows the overlord the clan follows; red dashed lines are war borders.",
+	"The villages of the clans, the capital outlined in gold.",
+	"The five regions and their walls.",
+	"Who rules where: alliances in the color of their overlord, demonic powers hatched, the domains of the Venerables glow."]
 
 
 func _open_plans() -> void:
-	hud.open_modal(_h("Pläne und Kriege") + powers.plans_text())
+	hud.open_modal(_h("Plans and Wars") + powers.plans_text())
 
 
 func _open_display() -> void:
-	var s: String = _h("Anzeige")
-	s += "[url=disp:terr]%s  [b]Gebiete und Einfluss[/b][/url]\n    [color=#9db09e]Grenzen, Gebietsnamen und Legende der Mächte in jeder Zoomstufe.[/color]\n" % _switch(show_terr)
-	s += "[url=disp:layer][color=#9fd0ff][b]»[/b][/color]  [b]Kartenebene: %s[/b][/url]\n    [color=#9db09e]%s[/color]\n" % [World.LAYER_NAME[sim.world.layer], LAYER_DESC[sim.world.layer]]
-	s += "[url=disp:names]%s  [b]Dorfnamen[/b][/url]\n    [color=#9db09e]Banner mit Clan-Siegel und Einwohnerzahl.[/color]\n" % _switch(show_names)
+	var s: String = _h("Display")
+	s += "[url=disp:terr]%s  [b]Territories and influence[/b][/url]\n    [color=#9db09e]Borders, territory names and the legend of powers at every zoom level.[/color]\n" % _switch(show_terr)
+	s += "[url=disp:layer][color=#9fd0ff][b]»[/b][/color]  [b]Map layer: %s[/b][/url]\n    [color=#9db09e]%s[/color]\n" % [World.LAYER_NAME[sim.world.layer], LAYER_DESC[sim.world.layer]]
+	s += "[url=disp:names]%s  [b]Village names[/b][/url]\n    [color=#9db09e]Banners with clan seal and population.[/color]\n" % _switch(show_names)
 	hud.open_modal(s)
 
 
 func _open_ages() -> void:
-	var s: String = _h("Die zehn Zeitalter")
-	s += "Wie in WorldBox wechselt die Welt alle %d Jahre das Zeitalter. Jedes ändert Fruchtbarkeit, Kriegslust und Kultivierung.\n\n" % GuData.AGE_YEARS
+	var s: String = _h("The Ten Ages")
+	s += "As in WorldBox, the world changes its age every %d years. Each one changes fertility, warlike spirit and cultivation.\n\n" % GuData.AGE_YEARS
 	var cur: int = sim.age_index()
 	for i: int in range(GuData.AGES.size()):
 		var a: Dictionary = GuData.AGES[i]
 		var mark: String = "[color=#e8c70a]▶[/color] " if i == cur else "   "
-		s += "%s[url=age:%d][b]%s[/b][/url]\n    [color=#9db09e]Wachstum ×%.1f · Kriegslust ×%.1f · Kultivierung ×%.1f[/color]\n" % [mark, i, a["n"], a["grow"], a["war"], a["cult"]]
-	s += "\nJetzt: [b]%s[/b], " % sim.age_data()["n"] + ("nächstes Zeitalter in %d Jahren." % sim.years_to_next_age() if sim.laws["ages"] else "das Zeitalter ist angehalten (Weltgesetz „Zeitalter“).")
-	s += "\n[color=#9db09e]Tippe auf ein Zeitalter, um es sofort beginnen zu lassen.[/color]"
+		s += "%s[url=age:%d][b]%s[/b][/url]\n    [color=#9db09e]Growth ×%.1f · Warlike spirit ×%.1f · Cultivation ×%.1f[/color]\n" % [mark, i, a["n"], a["grow"], a["war"], a["cult"]]
+	s += "\nNow: [b]%s[/b], " % sim.age_data()["n"] + ("next age in %d years." % sim.years_to_next_age() if sim.laws["ages"] else "the age is paused (World Law “Ages”).")
+	s += "\n[color=#9db09e]Tap an age to start it immediately.[/color]"
 	hud.open_modal(s)
 
 
 func _open_help() -> void:
-	var s: String = _h("Lexikon")
-	s += _h3("Steuerung") + "Ein Finger verschiebt die Karte, zwei Finger zoomen. Am PC: ziehen mit der Maus, Mausrad zum Zoomen, Leertaste pausiert, T ändert die Zeit, Esc geht zurück, F5 speichert. Mit einem Pinsel-Werkzeug malst du. Ohne Werkzeug zeigt ein Tippen, wer dort lebt.\n"
-	s += _h3("Die fünf Regionen") + "Nordebenen (Steppe und Schnee), Südgrenze (Berge, Bambus, Herbstwälder), Westwüste (Sand und Oasen), Ostmeer (Inseln) und der Zentralkontinent mit seinen Sekten. Regionswände trennen sie; nur Gu-Unsterbliche fliegen hindurch.\n"
-	s += _h3("Kultivierung") + "Mit 14 Jahren wird die Öffnung geprüft. Wer erwacht, wird Rang-1-Gu-Meister mit Begabung A bis D. Jeder Rang hat vier Stufen. Gu-Meister verbrauchen Ursteine aus Adern und Geisterquellen und veredeln wilde Gu. Ab Rang 6 droht regelmäßig eine Drangsal; Rang 9 gibt es nur einmal zur selben Zeit.\n\n"
+	var s: String = _h("Encyclopedia")
+	s += _h3("Controls") + "One finger pans the map, two fingers zoom. On PC: drag with the mouse, mouse wheel to zoom, Space pauses, T changes the time speed, Esc goes back, F5 saves. With a brush tool you paint. Without a tool, a tap shows who lives there.\n"
+	s += _h3("The Five Regions") + "Northern Plains (steppe and snow), Southern Border (mountains, bamboo, autumn forests), Western Desert (sand and oases), Eastern Sea (islands) and the Central Continent with its sects. Region walls separate them; only Gu Immortals fly through.\n"
+	s += _h3("Cultivation") + "At 14 the aperture is tested. Whoever awakens becomes a rank 1 Gu Master with aptitude A to D. Each rank has four stages. Gu Masters consume primeval stones from veins and spirit springs and refine wild Gu. From rank 6 on, a tribulation looms regularly; there can only be one rank 9 at a time.\n\n"
 	for r: int in range(1, 10):
-		s += _swatch(GuData.ESS_COL[r]) + "Rang %d · %s\n" % [r, GuData.ESS_NAME[r]]
-	s += _h3("Völker") + "Neben den Menschen leben Variant-Menschen: Haar-, Stein-, Fischschuppen-, Feder-, Schnee-, Drachen-, Tier-, Pilz-, Schlamm- und Holzmenschen – jedes Volk mit eigener Heimat, Gestalt und Gabe. Nur Menschen können Ehrwürdige werden.\n"
-	s += _h3("Pfade und Mordzüge") + "Es gibt %d Pfade. Gu-Meister sammeln die sterblichen Gu ihres Pfades, indem sie wilde Gu fangen. Ab Rang 6 setzen Unsterbliche Mordzüge ihres Pfades ein, etwa den Mondsichel-Mordzug oder den Feuermeer-Mordzug. Rechtschaffene und Dämonische bekriegen sich; Dämonische werden oft zu mordenden Einzelgängern.\n" % GuData.PATH_NAME.size()
-	s += _h3("Unsterbliche Gu") + "Wilde Unsterbliche Gu leuchten golden. Nur Gu-Unsterbliche können sie fangen. Die Frühling-Herbst-Zikade lässt ihren Träger nach dem Tod jung wiedergeboren werden; andere schenken Glück, Zeit, Kraft, Tempo, Heilung oder Weisheit. Ödbestien tragen manchmal eines in sich.\n"
-	s += _h3("Bestien") + "Hundert-, Tausend- und Zehntausend-Bestienkönige führen Rudel. Ödbestien (Rang 6 bis 8) verteidigen ihr Revier und überfallen nahe Dörfer.\n"
-	s += _h3("Orte") + "Gesegnete Länder und Grottenhimmel stärken Unsterbliche und gebären Unsterbliche Gu. Traumreiche locken Gu-Meister an, Erbe schenken Macht oder Tod, der Himmelshof straft Dämonische. Tippe einen Ort an, um mehr zu erfahren.\n"
-	s += _h3("Schicksalsgabe") + "Das Geschenk oben rechts löst ein zufälliges Ereignis aus: ein Erbe, eine Frühling-Herbst-Zikade, Urstein-Regen, einen Glücksstern oder einen Bestienkönig.\n"
-	s += "\nDie Welt speichert sich jede Minute von selbst."
+		s += _swatch(GuData.ESS_COL[r]) + "Rank %d · %s\n" % [r, GuData.ESS_NAME[r]]
+	s += _h3("Races") + "Besides humans there are variant humans: hairy men, stone men, fish-scale men, feather men, snow men, dragon men, beast men, mushroom men, mud men and wood men – each race with its own homeland, shape and gift. Only humans can become Venerables.\n"
+	s += _h3("Paths and Killer Moves") + "There are %d paths. Gu Masters collect the mortal Gu of their path by catching wild Gu. From rank 6 on, Immortals use killer moves of their path, such as the Moon Crescent killer move or the Sea of Fire killer move. The righteous and the demonic wage war on each other; demonic cultivators often become murderous rogue cultivators.\n" % GuData.PATH_NAME.size()
+	s += _h3("Immortal Gu") + "Wild Immortal Gu glow golden. Only Gu Immortals can catch them. Spring Autumn Cicada lets its bearer be reborn young after death; others grant fortune, time, strength, speed, healing or wisdom. Desolate beasts sometimes carry one inside them.\n"
+	s += _h3("Beasts") + "Hundred, thousand and ten-thousand beast kings lead packs. Desolate beasts (rank 6 to 8) defend their territory and raid nearby villages.\n"
+	s += _h3("Places") + "Blessed lands and grotto-heavens strengthen Immortals and give birth to Immortal Gu. Dream realms lure Gu Masters, inheritances grant power or death, Heavenly Court punishes the demonic. Tap a place to learn more.\n"
+	s += _h3("Gift of Fate") + "The gift at the top right triggers a random event: an inheritance, a Spring Autumn Cicada, a rain of primeval stones, a lucky star or a beast king.\n"
+	s += "\nThe world saves itself automatically every minute."
 	hud.open_modal(s)
 
 
@@ -2223,7 +2223,7 @@ class ScreenLayer:
 				continue
 			var t2: String = "%s · R%d" % [u.given if u.sur == "" or u.fig == "" else u.sur + " " + u.given, u.rank]
 			if u.ow:
-				t2 = "Fremdweltdämon · R%d" % u.rank
+				t2 = "Otherworldly Demon · R%d" % u.rank
 			var tw2: float = font.get_string_size(t2, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 			var r2: Rect2 = Rect2(roundf(X2 - tw2 / 2.0 - 5.0), roundf(Y2 - 7.0), roundf(tw2 + 10.0), 13.0)
 			var clash2: bool = false
@@ -2393,7 +2393,7 @@ func _dev_shots(dir: String) -> void:
 	_apply_tab(0)
 	_click_tool(Powers.tool_by_id("t_deep"))
 	for k: int in range(5):
-		hud.toast("Testmeldung %d: Ein Gu-Meister durchbricht zum nächsten Rang." % k, "jade", sim.year())
+		hud.toast("Test message %d: a Gu Master breaks through to the next rank." % k, "jade", sim.year())
 	await _wait(0.3)
 	await _shot(dir + "/R.png")
 	_set_weather("")
