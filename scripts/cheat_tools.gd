@@ -36,60 +36,60 @@ static func add_tools(L: Array) -> void:
 	var T: int = TAB
 	L.append_array([
 		# 0: Schalter
-		{"id": "c_menu", "tab": T, "g": 0, "n": "Cheat-Menü", "d": "Alle Cheat-Schalter (Einzigartigkeit, unendliche Urstein-Essenz, Sofort-Kultivierung, keine Drangsale …), Spawn-Menge und Sofort-Aktionen.", "m": "act"},
-		{"id": "c_mult", "tab": T, "g": 0, "n": "Spawn-Menge", "d": "Wie viele Wesen jedes Setz-Werkzeug auf einmal setzt: ×1, ×5, ×10 oder ×50.", "m": "act"},
-		{"id": "c_uniq", "tab": T, "g": 0, "n": "Einzigartigkeit", "d": "Aus (Standard): Ehrwürdige, Figuren, Orte und Organisationen beliebig oft setzen – auch fünfmal Riesensonne. An: kanonische Grenzen.", "m": "act"},
+		{"id": "c_menu", "tab": T, "g": 0, "n": "Cheat Menu", "d": "All cheat switches (uniqueness, infinite primeval essence, instant cultivation, no tribulations …), spawn amount and instant actions.", "m": "act"},
+		{"id": "c_mult", "tab": T, "g": 0, "n": "Spawn Amount", "d": "How many beings each spawn tool places at once: ×1, ×5, ×10 or ×50.", "m": "act"},
+		{"id": "c_uniq", "tab": T, "g": 0, "n": "Uniqueness", "d": "Off (default): place Venerables, figures, places and organizations as often as you like – even five Giant Suns. On: canonical limits.", "m": "act"},
 		# 1: Rang, Pfad, Gesinnung
-		{"id": "c_rup", "tab": T, "g": 1, "n": "Rang +1", "d": "Tippe auf einen Menschen: Er steigt einen ganzen Rang auf (Sterbliche werden erweckt). Bis Rang 9.", "m": "tap"},
-		{"id": "c_rdown", "tab": T, "g": 1, "n": "Rang −1", "d": "Tippe auf einen Gu-Meister: Er fällt einen Rang zurück (bis zum Sterblichen).", "m": "tap"},
-		{"id": "c_rset", "tab": T, "g": 1, "n": "Rang setzen", "d": "Wähle Rang 0–9 und Stufe (Anfang, Mitte, Ober, Gipfel), dann tippe auf Menschen.", "m": "tap", "pick": true},
-		{"id": "c_path", "tab": T, "g": 1, "n": "Pfad ändern", "d": "Wähle einen der 48 Pfade, dann tippe auf Gu-Meister – auch Ehrwürdige wechseln ihren Pfad (und ihre Ära).", "m": "tap", "pick": true},
-		{"id": "c_align", "tab": T, "g": 1, "n": "Gesinnung umdrehen", "d": "Rechtschaffen wird dämonisch und umgekehrt.", "m": "tap"},
-		{"id": "c_apt", "tab": T, "g": 1, "n": "Begabung setzen", "d": "Wähle Extremkonstitution oder A–D, dann tippe auf Menschen.", "m": "tap", "pick": true},
+		{"id": "c_rup", "tab": T, "g": 1, "n": "Rank +1", "d": "Tap a human: they rise a full rank (mortals are awakened). Up to Rank 9.", "m": "tap"},
+		{"id": "c_rdown", "tab": T, "g": 1, "n": "Rank −1", "d": "Tap a Gu Master: they drop one rank (down to mortal).", "m": "tap"},
+		{"id": "c_rset", "tab": T, "g": 1, "n": "Set Rank", "d": "Choose Rank 0–9 and stage (initial, middle, upper, peak), then tap humans.", "m": "tap", "pick": true},
+		{"id": "c_path", "tab": T, "g": 1, "n": "Change Path", "d": "Choose one of the 48 paths, then tap Gu Masters – Venerables switch their path (and their era) too.", "m": "tap", "pick": true},
+		{"id": "c_align", "tab": T, "g": 1, "n": "Flip Alignment", "d": "Righteous becomes demonic and vice versa.", "m": "tap"},
+		{"id": "c_apt", "tab": T, "g": 1, "n": "Set Aptitude", "d": "Choose Extreme Physique or A–D, then tap humans.", "m": "tap", "pick": true},
 		# 2: Leben und Tod
-		{"id": "c_imm", "tab": T, "g": 2, "n": "Unsterblich", "d": "Tippe auf ein Wesen (noch einmal = aus): Es altert nicht und stirbt nie an Alter, Drangsal, Himmelswille oder Kalamität.", "m": "tap"},
-		{"id": "c_inv", "tab": T, "g": 2, "n": "Unverwundbar", "d": "Tippe auf ein Wesen (noch einmal = aus): Es nimmt keinen Schaden. Nur „Auslöschen“ trifft es noch.", "m": "tap"},
-		{"id": "c_god", "tab": T, "g": 2, "n": "Gottmodus", "d": "Unsterblich und unverwundbar zugleich, volle Heilung (noch einmal = aus).", "m": "tap"},
-		{"id": "c_heal", "tab": T, "g": 2, "n": "Volle Heilung", "d": "Heilt jedes Wesen im Pinsel vollständig, auch von Seuche und Leichen-Seuche.", "m": "paint"},
-		{"id": "c_young", "tab": T, "g": 2, "n": "Verjüngen", "d": "Tippe auf ein Wesen: Es ist wieder 18 Jahre alt, die Lebensspanne wächst mit.", "m": "tap"},
-		{"id": "c_old", "tab": T, "g": 2, "n": "Altern", "d": "Tippe auf ein Wesen: 50 Jahre älter.", "m": "tap"},
-		{"id": "c_clone", "tab": T, "g": 2, "n": "Klonen", "d": "Tippe auf ein Wesen: Eine genaue Kopie mit Rang, Pfad, Gu und Unsterblichen Gu erscheint daneben (auch Ehrwürdige).", "m": "tap"},
-		{"id": "c_revive", "tab": T, "g": 2, "n": "Wiederbeleben", "d": "Wähle einen gestorbenen Gu-Meister, Unsterblichen oder Ehrwürdigen (Standard: zuletzt gestorben), dann tippe dorthin, wo er zurückkehren soll.", "m": "tap", "pick": true},
+		{"id": "c_imm", "tab": T, "g": 2, "n": "Immortal", "d": "Tap a being (again = off): it does not age and never dies of old age, tribulation, Heaven's Will or calamity.", "m": "tap"},
+		{"id": "c_inv", "tab": T, "g": 2, "n": "Invulnerable", "d": "Tap a being (again = off): it takes no damage. Only “Annihilate” still hits it.", "m": "tap"},
+		{"id": "c_god", "tab": T, "g": 2, "n": "God Mode", "d": "Immortal and invulnerable at once, full heal (again = off).", "m": "tap"},
+		{"id": "c_heal", "tab": T, "g": 2, "n": "Full Heal", "d": "Fully heals every being under the brush, including plague and corpse plague.", "m": "paint"},
+		{"id": "c_young", "tab": T, "g": 2, "n": "Rejuvenate", "d": "Tap a being: it is 18 years old again, and its lifespan grows accordingly.", "m": "tap"},
+		{"id": "c_old", "tab": T, "g": 2, "n": "Age", "d": "Tap a being: 50 years older.", "m": "tap"},
+		{"id": "c_clone", "tab": T, "g": 2, "n": "Clone", "d": "Tap a being: an exact copy with rank, path, Gu and Immortal Gu appears next to it (Venerables too).", "m": "tap"},
+		{"id": "c_revive", "tab": T, "g": 2, "n": "Revive", "d": "Choose a dead Gu Master, Immortal or Venerable (default: most recently deceased), then tap where they should return.", "m": "tap", "pick": true},
 		# 3: Gu und Seele
-		{"id": "c_soul", "tab": T, "g": 3, "n": "Seelensuche", "d": "Tippe auf ein Wesen: alles über seine Seele – Werte, Gu, Unsterbliche Gu, Zustände, Pläne.", "m": "tap"},
-		{"id": "c_give", "tab": T, "g": 3, "n": "Gu geben", "d": "Wähle ein Unsterbliches oder sterbliches Gu, dann tippe auf Menschen – ohne Obergrenze.", "m": "tap", "pick": true},
-		{"id": "c_strip", "tab": T, "g": 3, "n": "Alle Gu nehmen", "d": "Tippe auf einen Gu-Meister: Er verliert alle Gu und Unsterblichen Gu.", "m": "tap"},
-		{"id": "c_name", "tab": T, "g": 3, "n": "Namen ändern", "d": "Tippe auf einen Menschen und gib ihm einen neuen Namen.", "m": "tap"},
-		{"id": "c_luck", "tab": T, "g": 3, "n": "Ewiges Glück", "d": "Tippe auf einen Menschen (noch einmal = aus): Großes Glück, das nie vergeht.", "m": "tap"},
-		{"id": "c_possess", "tab": T, "g": 3, "n": "Besessenheit", "d": "Tippe ein Wesen an, um es zu besetzen; danach lenkt jedes Tippen es (wie „Seelenbesitz“).", "m": "tap"},
+		{"id": "c_soul", "tab": T, "g": 3, "n": "Soul Search", "d": "Tap a being: everything about its soul – stats, Gu, Immortal Gu, states, plans.", "m": "tap"},
+		{"id": "c_give", "tab": T, "g": 3, "n": "Give Gu", "d": "Choose an Immortal or mortal Gu, then tap humans – no limit.", "m": "tap", "pick": true},
+		{"id": "c_strip", "tab": T, "g": 3, "n": "Take All Gu", "d": "Tap a Gu Master: they lose all Gu and Immortal Gu.", "m": "tap"},
+		{"id": "c_name", "tab": T, "g": 3, "n": "Rename", "d": "Tap a human and give them a new name.", "m": "tap"},
+		{"id": "c_luck", "tab": T, "g": 3, "n": "Eternal Luck", "d": "Tap a human (again = off): great luck that never fades.", "m": "tap"},
+		{"id": "c_possess", "tab": T, "g": 3, "n": "Possession", "d": "Tap a being to possess it; afterwards every tap steers it (like “Soul Possession”).", "m": "tap"},
 		# 4: Clans und Dörfer
-		{"id": "c_join", "tab": T, "g": 4, "n": "Zu Clan hinzufügen", "d": "Tippe zuerst auf einen Menschen, dann auf ein Dorf: Er gehört fortan zu diesem Clan.", "m": "pair"},
-		{"id": "c_lead", "tab": T, "g": 4, "n": "Zum Clanführer machen", "d": "Tippe auf ein Clan-Mitglied: Es wird Clan-Oberhaupt, auch wenn es nicht das stärkste ist.", "m": "tap"},
-		{"id": "c_war", "tab": T, "g": 4, "n": "Krieg erklären", "d": "Tippe zwei Dörfer verschiedener Clans an: sofortiger Krieg.", "m": "pair"},
-		{"id": "c_peace", "tab": T, "g": 4, "n": "Frieden schließen", "d": "Tippe zwei Dörfer an: Ihre Clans schließen Frieden.", "m": "pair"},
-		{"id": "c_ally", "tab": T, "g": 4, "n": "Bündnis schmieden", "d": "Tippe zwei Dörfer an: Ihre Clans verbünden sich.", "m": "pair"},
-		{"id": "c_take", "tab": T, "g": 4, "n": "Dorf übernehmen", "d": "Tippe zuerst auf ein Dorf des neuen Herrn, dann auf das Dorf, das ihm gehören soll – ohne Krieg.", "m": "pair"},
-		{"id": "c_disband", "tab": T, "g": 4, "n": "Clan auflösen", "d": "Tippe auf ein Dorf: Sein Clan zerfällt – jedes Dorf wird ein eigener Clan, ein Clan mit nur einem Dorf löst sich ganz auf.", "m": "tap"},
-		{"id": "c_vmax", "tab": T, "g": 4, "n": "Dorf voll ausbauen", "d": "Tippe auf ein Dorf: Ahnenhalle, zwölf Hütten, Felder, Gu-Veredelung, Türme und volle Vorräte.", "m": "tap"},
-		{"id": "c_res", "tab": T, "g": 4, "n": "Unendliche Vorräte", "d": "Tippe auf ein Dorf (noch einmal = aus): Nahrung, Holz und Ursteine gehen nie aus.", "m": "tap"},
-		{"id": "c_clanup", "tab": T, "g": 4, "n": "Clan +1 Rang", "d": "Tippe auf ein Dorf: Alle Gu-Meister seines Clans (Rang 1–7) steigen einen Rang auf.", "m": "tap"},
-		{"id": "c_pop", "tab": T, "g": 4, "n": "Bevölkerungs-Schub", "d": "Tippe auf ein Dorf: 20 neue erwachsene Bewohner.", "m": "tap"},
+		{"id": "c_join", "tab": T, "g": 4, "n": "Add to Clan", "d": "Tap a human first, then a village: from now on they belong to that clan.", "m": "pair"},
+		{"id": "c_lead", "tab": T, "g": 4, "n": "Make Clan Leader", "d": "Tap a clan member: they become clan leader, even if not the strongest.", "m": "tap"},
+		{"id": "c_war", "tab": T, "g": 4, "n": "Declare War", "d": "Tap two villages of different clans: immediate war.", "m": "pair"},
+		{"id": "c_peace", "tab": T, "g": 4, "n": "Make Peace", "d": "Tap two villages: their clans make peace.", "m": "pair"},
+		{"id": "c_ally", "tab": T, "g": 4, "n": "Forge Alliance", "d": "Tap two villages: their clans become allies.", "m": "pair"},
+		{"id": "c_take", "tab": T, "g": 4, "n": "Take Over Village", "d": "Tap a village of the new lord first, then the village that should belong to them – without war.", "m": "pair"},
+		{"id": "c_disband", "tab": T, "g": 4, "n": "Disband Clan", "d": "Tap a village: its clan breaks apart – every village becomes its own clan; a clan with only one village dissolves completely.", "m": "tap"},
+		{"id": "c_vmax", "tab": T, "g": 4, "n": "Max Out Village", "d": "Tap a village: ancestral hall, twelve huts, fields, Gu refinement, towers and full supplies.", "m": "tap"},
+		{"id": "c_res", "tab": T, "g": 4, "n": "Infinite Supplies", "d": "Tap a village (again = off): food, wood and primeval stones never run out.", "m": "tap"},
+		{"id": "c_clanup", "tab": T, "g": 4, "n": "Clan +1 Rank", "d": "Tap a village: all Gu Masters of its clan (Rank 1–7) rise one rank.", "m": "tap"},
+		{"id": "c_pop", "tab": T, "g": 4, "n": "Population Boost", "d": "Tap a village: 20 new adult residents.", "m": "tap"},
 		# 5: Masse
-		{"id": "c_army", "tab": T, "g": 5, "n": "Armee setzen", "d": "Wähle Größe und Rang, dann tippe auf die Karte: eine ganze Armee von Gu-Meistern für das nächste Dorf.", "m": "tap", "pick": true},
-		{"id": "c_r9rain", "tab": T, "g": 5, "n": "Rang-9-Regen", "d": "Fünf Ehrwürdige zufälliger Pfade steigen überall in der Welt herab (× Spawn-Menge, höchstens 60).", "m": "act"},
-		{"id": "c_worldup", "tab": T, "g": 5, "n": "Weltweite Erleuchtung", "d": "Jeder Gu-Meister der Welt (Rang 1–7) steigt einen Rang auf.", "m": "act"},
+		{"id": "c_army", "tab": T, "g": 5, "n": "Place Army", "d": "Choose size and rank, then tap the map: a whole army of Gu Masters for the nearest village.", "m": "tap", "pick": true},
+		{"id": "c_r9rain", "tab": T, "g": 5, "n": "Rank 9 Rain", "d": "Five Venerables of random paths descend all over the world (× spawn amount, at most 60).", "m": "act"},
+		{"id": "c_worldup", "tab": T, "g": 5, "n": "World Enlightenment", "d": "Every Gu Master in the world (Rank 1–7) rises one rank.", "m": "act"},
 		# 6: Zeit
-		{"id": "c_j1", "tab": T, "g": 6, "n": "Zeitsprung +1 Jahr", "d": "Die Welt läuft ein Jahr im Zeitraffer weiter.", "m": "act", "jump": 1},
-		{"id": "c_j10", "tab": T, "g": 6, "n": "Zeitsprung +10 Jahre", "d": "Zehn Jahre im Zeitraffer, mit Fortschrittsanzeige oben links.", "m": "act", "jump": 10},
-		{"id": "c_j100", "tab": T, "g": 6, "n": "Zeitsprung +100 Jahre", "d": "Hundert Jahre im Zeitraffer – Clans steigen auf und fallen, Ehrwürdige herrschen.", "m": "act", "jump": 100},
-		{"id": "c_age", "tab": T, "g": 6, "n": "Zeitalter setzen", "d": "Öffnet die zehn Zeitalter: Tippe eines an, um es sofort beginnen zu lassen.", "m": "act"},
-		{"id": "c_freeze", "tab": T, "g": 6, "n": "Wesen einfrieren", "d": "Alle Wesen erstarren (noch einmal = auftauen); die Zeit läuft weiter.", "m": "act"},
+		{"id": "c_j1", "tab": T, "g": 6, "n": "Time Skip +1 Year", "d": "The world runs one year ahead in fast motion.", "m": "act", "jump": 1},
+		{"id": "c_j10", "tab": T, "g": 6, "n": "Time Skip +10 Years", "d": "Ten years in fast motion, with a progress display at the top left.", "m": "act", "jump": 10},
+		{"id": "c_j100", "tab": T, "g": 6, "n": "Time Skip +100 Years", "d": "A hundred years in fast motion – clans rise and fall, Venerables rule.", "m": "act", "jump": 100},
+		{"id": "c_age", "tab": T, "g": 6, "n": "Set Age", "d": "Opens the ten ages: tap one to start it immediately.", "m": "act"},
+		{"id": "c_freeze", "tab": T, "g": 6, "n": "Freeze Beings", "d": "All beings freeze in place (again = thaw); time keeps running.", "m": "act"},
 		# 7: Himmel und Schicksal
-		{"id": "c_will", "tab": T, "g": 7, "n": "Himmelswille auf Ziel", "d": "Tippe auf einen Gu-Meister: Der Himmelswille richtet sich gegen ihn.", "m": "tap"},
-		{"id": "c_trib", "tab": T, "g": 7, "n": "Drangsal auslösen", "d": "Tippe auf einen Gu-Meister: Eine Himmelsdrangsal kommt über ihn.", "m": "tap"},
-		{"id": "c_ward", "tab": T, "g": 7, "n": "Drangsal abwenden", "d": "Tippe auf einen Gu-Meister: 100 Jahre keine Drangsal, kein Himmelswille, keine Kalamität.", "m": "tap"},
-		{"id": "c_fatebreak", "tab": T, "g": 7, "n": "Schicksals-Gu zerstören", "d": "Das Schicksals-Gu zerbricht, wo immer es ist – Rang 9 steht offen, der Himmelswille wird schwächer.", "m": "act"},
-		{"id": "c_fatefix", "tab": T, "g": 7, "n": "Schicksals-Gu wiederherstellen", "d": "Tippe auf die Karte: Ein neues Schicksals-Gu erscheint dort, die Fesseln des Schicksals sind wieder geknüpft.", "m": "tap"},
+		{"id": "c_will", "tab": T, "g": 7, "n": "Heaven's Will on Target", "d": "Tap a Gu Master: Heaven's Will turns against them.", "m": "tap"},
+		{"id": "c_trib", "tab": T, "g": 7, "n": "Trigger Tribulation", "d": "Tap a Gu Master: a heavenly tribulation descends on them.", "m": "tap"},
+		{"id": "c_ward", "tab": T, "g": 7, "n": "Ward Off Tribulation", "d": "Tap a Gu Master: 100 years without tribulation, Heaven's Will or calamity.", "m": "tap"},
+		{"id": "c_fatebreak", "tab": T, "g": 7, "n": "Destroy Fate Gu", "d": "Fate Gu shatters wherever it is – Rank 9 lies open, Heaven's Will grows weaker.", "m": "act"},
+		{"id": "c_fatefix", "tab": T, "g": 7, "n": "Restore Fate Gu", "d": "Tap the map: a new Fate Gu appears there, and the shackles of fate are bound again.", "m": "tap"},
 	])
 
 
@@ -149,7 +149,7 @@ func tap(t: Dictionary, wx: float, wy: float) -> String:
 		"c_disband", "c_vmax", "c_res", "c_clanup", "c_pop":
 			var v: Village = _vil_at(wx, wy)
 			if v == null:
-				return "Tippe auf ein Dorf."
+				return "Tap a village."
 			var c: Clan = sim.clans[v.clan]
 			match id:
 				"c_disband":
@@ -159,30 +159,30 @@ func tap(t: Dictionary, wx: float, wy: float) -> String:
 				"c_res":
 					if C.inf_v.has(v.id):
 						C.inf_v.erase(v.id)
-						return v.name + ": Vorräte wieder endlich."
+						return v.name + ": supplies are finite again."
 					C.inf_v[v.id] = true
 					C.month_villages()
 					sim.pillar(v.cx, v.cy, Color("#ffd23a"), 0.7)
-					return v.name + ": unendliche Vorräte."
+					return v.name + ": infinite supplies."
 				"c_clanup":
 					var n: int = C.rank_all(c.id)
 					sim.pillar(v.cx, v.cy, Color("#fff3c0"), 1.0)
-					sim.log_event("Alle %d Gu-Meister von %s steigen durch Götterhand auf." % [n, c.name], "gold", true)
-					return "%d Gu-Meister von %s steigen auf." % [n, c.name]
+					sim.log_event("All %d Gu Masters of %s ascend by divine hand." % [n, c.name], "gold", true)
+					return "%d Gu Masters of %s ascend." % [n, c.name]
 				_:
 					return C.populate(v, 20)
 		"c_army":
 			return C.army(wx, wy, army_n, army_r)
 		"c_revive":
 			if C.grave.is_empty():
-				return "Noch ist kein bemerkenswertes Wesen gestorben."
+				return "No notable being has died yet."
 			if not sim.world.in_map(int(wx), int(wy)):
 				return ""
 			var r: Unit = C.revive(grave_sel, wx, wy)
 			grave_sel = 0
 			if r == null:
 				return C.full_msg()
-			return r.pname() + " lebt wieder (" + GuData.rank_title(r.rank) + ")."
+			return r.pname() + " lives again (" + GuData.rank_title(r.rank) + ")."
 		"c_fatefix":
 			return C.fate_fix(wx, wy)
 		"c_possess":
@@ -190,7 +190,7 @@ func tap(t: Dictionary, wx: float, wy: float) -> String:
 	var persons: bool = not (id in ["c_imm", "c_inv", "c_god", "c_young", "c_old", "c_clone", "c_soul"])
 	var u: Unit = unit_at(wx, wy, persons)
 	if u == null:
-		return "Tippe auf einen Menschen." if persons else "Tippe auf ein Wesen."
+		return "Tap a human." if persons else "Tap a being."
 	match id:
 		"c_rup":
 			return C.rank_step(u, 1)
@@ -206,26 +206,26 @@ func tap(t: Dictionary, wx: float, wy: float) -> String:
 			return C.set_apt(u, apt_sel)
 		"c_imm":
 			var on: bool = C.toggle_ch(u, Cheats.CH_IMM)
-			sim.float_txt(u, "Unsterblich" if on else "sterblich", Color("#ffd23a"))
+			sim.float_txt(u, "Immortal" if on else "mortal", Color("#ffd23a"))
 			sim.ring(u.x, u.y - 2.0, 3.0, Color("#ffd23a"), 0.6)
-			return u.pname() + (" ist unsterblich." if on else " ist wieder sterblich.")
+			return u.pname() + (" is immortal." if on else " is mortal again.")
 		"c_inv":
 			var on2: bool = C.toggle_ch(u, Cheats.CH_INV)
-			sim.float_txt(u, "Unverwundbar" if on2 else "verwundbar", Color("#7ef0ff"))
+			sim.float_txt(u, "Invulnerable" if on2 else "vulnerable", Color("#7ef0ff"))
 			sim.ring(u.x, u.y - 2.0, 3.0, Color("#7ef0ff"), 0.6)
-			return u.pname() + (" ist unverwundbar." if on2 else " ist wieder verwundbar.")
+			return u.pname() + (" is invulnerable." if on2 else " is vulnerable again.")
 		"c_god":
 			var on3: bool = C.god(u)
-			sim.float_txt(u, "Gottmodus" if on3 else "Gottmodus aus", Color("#ffe27a"))
+			sim.float_txt(u, "God Mode" if on3 else "God Mode off", Color("#ffe27a"))
 			sim.pillar(u.x, u.y, Color("#ffe27a"), 0.6)
-			return u.pname() + (": Gottmodus an." if on3 else ": Gottmodus aus.")
+			return u.pname() + (": God Mode on." if on3 else ": God Mode off.")
 		"c_young":
 			return C.rejuvenate(u)
 		"c_old":
 			return C.age_up(u, 50.0)
 		"c_clone":
 			var c2: Unit = C.clone(u)
-			return C.full_msg() if c2 == null else c2.pname() + " ist geklont."
+			return C.full_msg() if c2 == null else c2.pname() + " has been cloned."
 		"c_soul":
 			_open_soul(u)
 			return ""
@@ -239,17 +239,17 @@ func tap(t: Dictionary, wx: float, wy: float) -> String:
 		"c_luck":
 			var on4: bool = C.toggle_ch(u, Cheats.CH_LUCK)
 			sim.spark(u.x, u.y - 2.0, Color("#9aff7a"), 8, 4.0)
-			return u.pname() + (": ewiges Glück." if on4 else ": Glück wie alle anderen.")
+			return u.pname() + (": eternal luck." if on4 else ": luck like everyone else.")
 		"c_lead":
 			return C.make_leader(u)
 		"c_will":
 			if u.rank <= 0:
-				return "Der Himmelswille richtet sich nur gegen Gu-Meister."
+				return "Heaven's Will only turns against Gu Masters."
 			sim.heavens_will(u)
 			return ""
 		"c_trib":
 			if u.rank <= 0:
-				return "Nur Gu-Meister erleiden Drangsale."
+				return "Only Gu Masters suffer tribulations."
 			sim.tribulation(u)
 			return ""
 		"c_ward":
@@ -257,8 +257,8 @@ func tap(t: Dictionary, wx: float, wy: float) -> String:
 			u.next_trib = maxf(u.next_trib, sim.uage(u) + 100.0)
 			u.fxm = true
 			sim.ring(u.x, u.y - 2.0, 4.0, Color("#bfe8ff"), 0.8)
-			sim.float_txt(u, "Himmelsschutz 100 Jahre", Color("#bfe8ff"))
-			return u.pname() + " steht 100 Jahre unter Himmelsschutz."
+			sim.float_txt(u, "Heaven's Protection 100 years", Color("#bfe8ff"))
+			return u.pname() + " is under Heaven's Protection for 100 years."
 	return ""
 
 
@@ -278,42 +278,42 @@ func paint(t: Dictionary, wx: float, wy: float, stroke_id: int) -> bool:
 func _pair_clans(id: String, wx: float, wy: float) -> String:
 	var v: Village = _vil_at(wx, wy)
 	if v == null:
-		return "Tippe auf ein Dorf."
+		return "Tap a village."
 	if sel_vil == null or not sel_vil.alive:
 		sel_vil = v
-		return sim.clans[v.clan].name + " gewählt – jetzt das zweite Dorf antippen."
+		return sim.clans[v.clan].name + " selected – now tap the second village."
 	var a: Clan = sim.clans[sel_vil.clan]
 	var b: Clan = sim.clans[v.clan]
 	sel_vil = null
 	if id == "c_take":
 		return sim.cheats.take_village(a, v)
 	if a == b:
-		return "Wähle zwei verschiedene Clans."
+		return "Choose two different clans."
 	match id:
 		"c_war":
 			sim.declare_war(a, b)
-			return a.name + " und " + b.name + " sind im Krieg."
+			return a.name + " and " + b.name + " are at war."
 		"c_peace":
 			sim.make_peace(a, b)
 			a.plans = a.plans.filter(func(p: Dictionary) -> bool: return int(p["o"]) != b.id)
 			b.plans = b.plans.filter(func(p: Dictionary) -> bool: return int(p["o"]) != a.id)
-			return a.name + " und " + b.name + " leben in Frieden."
+			return a.name + " and " + b.name + " live in peace."
 		_:
 			sim.make_ally(a, b)
-			return a.name + " und " + b.name + " sind verbündet."
+			return a.name + " and " + b.name + " are allied."
 
 
 func _join(wx: float, wy: float) -> String:
 	if sel_unit == null or sel_unit.hp <= 0.0:
 		var u: Unit = unit_at(wx, wy, true)
 		if u == null:
-			return "Tippe zuerst auf einen Menschen."
+			return "Tap a human first."
 		sel_unit = u
 		sim.ring(u.x, u.y - 1.5, 2.0, Color("#ffe27a"), 0.6)
-		return u.pname() + " gewählt – jetzt das Dorf antippen."
+		return u.pname() + " selected – now tap the village."
 	var v: Village = _vil_at(wx, wy)
 	if v == null:
-		return "Tippe auf ein Dorf."
+		return "Tap a village."
 	var msg: String = sim.cheats.join_clan(sel_unit, v)
 	sel_unit = null
 	return msg
@@ -333,13 +333,13 @@ func act(t: Dictionary) -> void:
 		"c_mult":
 			open_picker("c_mult")
 		"c_uniq":
-			_hint(t["n"], C.toggle("uniq") + (" – kanonische Grenzen." if C.is_on("uniq") else " – alles beliebig oft setzbar."))
+			_hint(t["n"], C.toggle("uniq") + (" – canonical limits." if C.is_on("uniq") else " – everything can be placed any number of times."))
 		"c_r9rain":
 			m._end_presim()
 			_hint(t["n"], C.r9_rain(mini(60, 5 * C.mult)))
 		"c_worldup":
 			m._end_presim()
-			_hint(t["n"], "%d Gu-Meister steigen auf." % C.rank_all(-1))
+			_hint(t["n"], "%d Gu Masters ascend." % C.rank_all(-1))
 		"c_age":
 			m._open_ages()
 		"c_freeze":
@@ -352,7 +352,7 @@ func act(t: Dictionary) -> void:
 func start_jump(years: float) -> void:
 	m._end_presim()
 	sim.cheats.jump(years)
-	_hint("Zeitsprung", "+%d Jahre im Zeitraffer – bis Jahr %d." % [int(years), sim.year() + int(sim.cheats.jump_left / 12.0)])
+	_hint("Time Skip", "+%d years in fast motion – until year %d." % [int(years), sim.year() + int(sim.cheats.jump_left / 12.0)])
 
 
 func _hint(n: String, d: String) -> void:
@@ -380,35 +380,35 @@ func _mark(on: bool) -> String:
 
 
 func _switch(on: bool) -> String:
-	return "[color=#5fbf8a][b]● AN[/b][/color]" if on else "[color=#c74634][b]○ AUS[/b][/color]"
+	return "[color=#5fbf8a][b]● ON[/b][/color]" if on else "[color=#c74634][b]○ OFF[/b][/color]"
 
 
 func _modal(s: String, done: bool = true) -> void:
 	if m == null:
 		return
-	m.hud.open_modal(s, [["Fertig", func() -> void: m.hud.close_modal(), "jade"]] if done else [])
+	m.hud.open_modal(s, [["Done", func() -> void: m.hud.close_modal(), "jade"]] if done else [])
 
 
 ## Cheat-Menü: alle globalen Schalter, Spawn-Menge, Sofort-Aktionen.
 func open_menu() -> void:
 	var C: Cheats = sim.cheats
-	var s: String = _h("Cheat-Menü") + "Die Schalter gelten für die ganze Welt und werden mit ihr gespeichert. Tippe zum Umschalten.\n"
-	s += _h3("Schalter")
+	var s: String = _h("Cheat Menu") + "The switches apply to the whole world and are saved with it. Tap to toggle.\n"
+	s += _h3("Switches")
 	for e: Array in Cheats.SWITCHES:
 		s += "[url=c:sw:%s]%s  [b]%s[/b][/url]\n    [color=#9db09e]%s[/color]\n" % [e[0], _switch(C.is_on(str(e[0]))), e[1], e[2]]
-	s += _h3("Spawn-Menge")
+	s += _h3("Spawn Amount")
 	var it: PackedStringArray = PackedStringArray()
 	for n: int in Cheats.MULTS:
 		it.append("[url=c:x:%d]%s [b]×%d[/b][/url]" % [n, _mark(C.mult == n), n])
-	s += "    ".join(it) + "\n[color=#9db09e]Jedes Setz-Werkzeug (Völker, Tiere, Gu-Meister, Ehrwürdige, Figuren, Gu) setzt so viele auf einmal.[/color]\n"
-	s += _h3("Sofort")
-	var acts: Array = [["j1", "+1 Jahr"], ["j10", "+10 Jahre"], ["j100", "+100 Jahre"], ["r9", "Rang-9-Regen"], ["up", "Weltweite Erleuchtung"],
-		["heal", "Alle heilen"], ["peace", "Weltfrieden"], ["war", "Alle gegen alle"], ["godall", "Alle Ehrwürdigen im Gottmodus"], ["fate", "Schicksals-Gu zerstören"]]
+	s += "    ".join(it) + "\n[color=#9db09e]Every spawn tool (races, animals, Gu Masters, Venerables, figures, Gu) places this many at once.[/color]\n"
+	s += _h3("Instant")
+	var acts: Array = [["j1", "+1 Year"], ["j10", "+10 Years"], ["j100", "+100 Years"], ["r9", "Rank 9 Rain"], ["up", "World Enlightenment"],
+		["heal", "Heal All"], ["peace", "World Peace"], ["war", "All Against All"], ["godall", "All Venerables in God Mode"], ["fate", "Destroy Fate Gu"]]
 	var al: PackedStringArray = PackedStringArray()
 	for a: Array in acts:
 		al.append("[url=c:do:%s][color=#9fd0ff]»[/color] [b]%s[/b][/url]" % [a[0], a[1]])
 	s += "\n".join(al) + "\n"
-	s += "\n[color=#9db09e]Wesen: %d / %d (technische Grenze) · Tote im Friedhof: %d · Ehrwürdige: %d[/color]" % [sim.units.size(), Cheats.HARD_MAX, C.grave.size(), sim.ven.st.size()]
+	s += "\n[color=#9db09e]Beings: %d / %d (technical limit) · Dead in graveyard: %d · Venerables: %d[/color]" % [sim.units.size(), Cheats.HARD_MAX, C.grave.size(), sim.ven.st.size()]
 	_modal(s)
 
 
@@ -424,17 +424,17 @@ func _menu_do(k: String) -> void:
 			start_jump(100.0)
 		"r9":
 			m._end_presim()
-			_hint("Rang-9-Regen", C.r9_rain(mini(60, 5 * C.mult)))
+			_hint("Rank 9 Rain", C.r9_rain(mini(60, 5 * C.mult)))
 		"up":
 			m._end_presim()
-			_hint("Weltweite Erleuchtung", "%d Gu-Meister steigen auf." % C.rank_all(-1))
+			_hint("World Enlightenment", "%d Gu Masters ascend." % C.rank_all(-1))
 		"heal":
 			var n: int = 0
 			for u: Unit in sim.units:
 				if u.hp > 0.0:
 					C.heal(u)
 					n += 1
-			_hint("Alle heilen", "%d Wesen sind geheilt." % n)
+			_hint("Heal All", "%d beings healed." % n)
 		"peace":
 			var n2: int = 0
 			for a: Clan in sim.clans:
@@ -442,8 +442,8 @@ func _menu_do(k: String) -> void:
 					sim.make_peace(a, sim.clans[e], true)
 					n2 += 1
 				a.plans = a.plans.filter(func(p: Dictionary) -> bool: return str(p["k"]) != "war")
-			sim.log_event("Weltfrieden: Alle Fehden enden.", "jade", true)
-			_hint("Weltfrieden", "%d Fehden beendet." % (n2 / 2))
+			sim.log_event("World peace: all feuds end.", "jade", true)
+			_hint("World Peace", "%d feuds ended." % (n2 / 2))
 		"war":
 			var live: Array[Clan] = []
 			for c: Clan in sim.clans:
@@ -452,17 +452,17 @@ func _menu_do(k: String) -> void:
 			for i: int in range(live.size()):
 				for j: int in range(i + 1, live.size()):
 					sim.declare_war(live[i], live[j], true)
-			sim.log_event("Alle Clans erklären einander die Fehde!", "war", true)
-			_hint("Alle gegen alle", "%d Clans im Krieg." % live.size())
+			sim.log_event("All clans declare feud on one another!", "war", true)
+			_hint("All Against All", "%d clans at war." % live.size())
 		"godall":
 			var n3: int = 0
 			for u2: Unit in sim.units:
 				if u2.k == "p" and u2.hp > 0.0 and u2.rank >= 9:
 					u2.ch |= Cheats.CH_IMM | Cheats.CH_INV
 					n3 += 1
-			_hint("Gottmodus", "%d Ehrwürdige sind unsterblich und unverwundbar." % n3)
+			_hint("God Mode", "%d Venerables are immortal and invulnerable." % n3)
 		"fate":
-			_hint("Schicksals-Gu", C.fate_break())
+			_hint("Fate Gu", C.fate_break())
 
 
 ## Auswahlfenster eines Werkzeugs (beim Wählen des Werkzeugs).
@@ -485,23 +485,23 @@ func open_picker(id: String) -> void:
 
 
 func _pick_rank() -> void:
-	var s: String = _h("Rang setzen") + "Wähle Rang und Stufe, dann tippe auf Menschen.\n" + _h3("Rang")
+	var s: String = _h("Set Rank") + "Choose rank and stage, then tap humans.\n" + _h3("Rank")
 	var it: PackedStringArray = PackedStringArray()
 	for r: int in range(0, 10):
-		var lbl: String = "Sterblich" if r == 0 else "%d" % r
+		var lbl: String = "Mortal" if r == 0 else "%d" % r
 		it.append("[url=c:r:%d]%s [color=#%s]■[/color] %s[/url]" % [r, _mark(rank_sel == r), GuData.ESS_COL[r].to_html(false) if r > 0 else "c8c0b0", ("[b][u]%s[/u][/b]" if rank_sel == r else "%s") % lbl])
 	s += it[0] + "\n" + "    ".join(it.slice(1, 6)) + "\n" + "    ".join(it.slice(6)) + "\n"
 	s += "[color=#9db09e]%s[/color]\n" % GuData.rank_title(rank_sel)
-	s += _h3("Stufe")
+	s += _h3("Stage")
 	var st: PackedStringArray = PackedStringArray()
 	for k: int in range(4):
 		st.append("[url=c:s:%d]%s %s[/url]" % [k, _mark(stage_sel == k), GuData.STAGE[k]])
-	s += "    ".join(st.slice(0, 2)) + "\n" + "    ".join(st.slice(2)) + "\n[color=#9db09e]Rang 9 hat keine Stufen. Neue Ehrwürdige errichten ihren Sitz und lassen ihren Pfad erblühen.[/color]"
+	s += "    ".join(st.slice(0, 2)) + "\n" + "    ".join(st.slice(2)) + "\n[color=#9db09e]Rank 9 has no stages. New Venerables establish their seat and make their path flourish.[/color]"
 	_modal(s)
 
 
 func _pick_path() -> void:
-	var s: String = _h("Pfad ändern") + "Tippe auf einen Pfad, dann auf Gu-Meister.\n"
+	var s: String = _h("Change Path") + "Tap a path, then Gu Masters.\n"
 	for g: Array in Lore.PATH_GROUPS:
 		s += _h3(str(g[0]))
 		var items: PackedStringArray = PackedStringArray()
@@ -512,14 +512,14 @@ func _pick_path() -> void:
 
 
 func _pick_apt() -> void:
-	var s: String = _h("Begabung setzen") + "Tippe auf eine Begabung, dann auf Menschen. Sterbliche werden dabei erweckt.\n\n"
-	for a: Array in [["X", "Extremkonstitution", "Kultivierung ×4; Sterbliche Gu-Meister sterben ohne Hilfe mit 20"], ["A", "A-Grad", "×2"], ["B", "B-Grad", "×1,4"], ["C", "C-Grad", "×1"], ["D", "D-Grad", "×0,6"]]:
+	var s: String = _h("Set Aptitude") + "Tap an aptitude, then humans. Mortals are awakened in the process.\n\n"
+	for a: Array in [["X", "Extreme Physique", "Cultivation ×4; mortal Gu Masters die at 20 without help"], ["A", "A-grade", "×2"], ["B", "B-grade", "×1.4"], ["C", "C-grade", "×1"], ["D", "D-grade", "×0.6"]]:
 		s += "[url=c:a:%s]%s [b]%s[/b][/url]  [color=#9db09e]%s[/color]\n" % [a[0], _mark(apt_sel == a[0]), a[1], a[2]]
 	_modal(s)
 
 
 func _pick_gu() -> void:
-	var s: String = _h("Gu geben") + "Tippe auf ein Gu, dann auf Menschen. Ohne Obergrenze.\n"
+	var s: String = _h("Give Gu") + "Tap a Gu, then humans. No limit.\n"
 	for r: int in [10, 9, 8, 7, 6]:
 		var items: PackedStringArray = PackedStringArray()
 		for e: Dictionary in Lore.IGU:
@@ -527,8 +527,8 @@ func _pick_gu() -> void:
 				var on: bool = give_sel == "i:" + str(e["id"])
 				items.append("[url=c:gi:%s][color=#%s]■[/color] %s[/url]" % [e["id"], GuData.PATH_COL[int(e["p"])].to_html(false), ("[b][u]%s[/u][/b]" if on else "%s") % str(e["n"])])
 		if not items.is_empty():
-			s += _h3("Unsterbliche Gu · Rang %d" % r) + "   ".join(items) + "\n"
-	s += _h3("Sterbliche Gu nach Pfad") + "[color=#9db09e]Tippe auf einen Pfad, um seine Gu zu zeigen.[/color]\n"
+			s += _h3("Immortal Gu · Rank %d" % r) + "   ".join(items) + "\n"
+	s += _h3("Mortal Gu by Path") + "[color=#9db09e]Tap a path to show its Gu.[/color]\n"
 	var ps: PackedStringArray = PackedStringArray()
 	for p: int in range(GuData.PATH_NAME.size()):
 		ps.append("[url=c:gp:%d][color=#%s]■[/color] %s[/url]" % [p, GuData.PATH_COL[p].to_html(false), ("[b][u]%s[/u][/b]" if p == give_open else "%s") % GuData.PATH_NAME[p]])
@@ -538,30 +538,30 @@ func _pick_gu() -> void:
 		var gi: PackedStringArray = PackedStringArray()
 		for k: int in range(mg.size()):
 			gi.append("[url=c:gm:%d:%d]%s[/url]" % [give_open, k, ("[b][u]%s[/u][/b]" if give_sel == "m:" + mg[k] else "%s") % mg[k]])
-		s += "\n[color=#%s][b]%s-Pfad:[/b][/color] " % [GuData.PATH_COL[give_open].to_html(false), GuData.PATH_NAME[give_open]] + "   ".join(gi) + "\n"
+		s += "\n[color=#%s][b]%s Path:[/b][/color] " % [GuData.PATH_COL[give_open].to_html(false), GuData.PATH_NAME[give_open]] + "   ".join(gi) + "\n"
 	_modal(s)
 
 
 func _pick_grave() -> void:
 	var C: Cheats = sim.cheats
-	var s: String = _h("Wiederbeleben") + "Wähle einen Toten, dann tippe auf die Karte. Ohne Wahl kehrt der zuletzt Gestorbene zurück.\n\n"
+	var s: String = _h("Revive") + "Choose a dead one, then tap the map. Without a choice, the most recently deceased returns.\n\n"
 	if C.grave.is_empty():
-		s += "[color=#9db09e]Noch ist kein Gu-Meister, Unsterblicher oder Ehrwürdiger gestorben.[/color]"
+		s += "[color=#9db09e]No Gu Master, Immortal or Venerable has died yet.[/color]"
 	for k: int in range(C.grave.size()):
 		var e: Dictionary = C.grave[k]
 		var d: Dictionary = e["u"]
 		var nm: String = (str(d.get("sur", "")) + " " + str(d.get("given", ""))).strip_edges()
 		var rk: int = int(d.get("rank", 0))
-		s += "[url=c:d:%d]%s [color=#%s]■[/color] [b]%s[/b][/url] [color=#9db09e]%s · %s-Pfad · gestorben Jahr %d%s[/color]\n" % [k, _mark(grave_sel == k), GuData.ESS_COL[rk].to_html(false), nm, str(d.get("title", "")) if rk >= 9 and str(d.get("title", "")) != "" else GuData.rank_title(rk), GuData.PATH_NAME[clampi(int(d.get("path", 0)), 0, GuData.PATH_NAME.size() - 1)], int(e.get("y", 0)), (" – " + str(e["why"])) if str(e.get("why", "")) != "" else ""]
+		s += "[url=c:d:%d]%s [color=#%s]■[/color] [b]%s[/b][/url] [color=#9db09e]%s · %s Path · died in year %d%s[/color]\n" % [k, _mark(grave_sel == k), GuData.ESS_COL[rk].to_html(false), nm, str(d.get("title", "")) if rk >= 9 and str(d.get("title", "")) != "" else GuData.rank_title(rk), GuData.PATH_NAME[clampi(int(d.get("path", 0)), 0, GuData.PATH_NAME.size() - 1)], int(e.get("y", 0)), (" – " + str(e["why"])) if str(e.get("why", "")) != "" else ""]
 	_modal(s)
 
 
 func _pick_army() -> void:
-	var s: String = _h("Armee setzen") + "Wähle Größe und Rang, dann tippe auf die Karte. Die Armee schließt sich dem nächsten Dorf an (sonst gründet sie einen Clan).\n" + _h3("Größe")
+	var s: String = _h("Place Army") + "Choose size and rank, then tap the map. The army joins the nearest village (otherwise it founds a clan).\n" + _h3("Size")
 	var it: PackedStringArray = PackedStringArray()
 	for n: int in [5, 10, 25, 50, 100, 250]:
 		it.append("[url=c:an:%d]%s [b]%d[/b][/url]" % [n, _mark(army_n == n), n])
-	s += "   ".join(it) + "\n" + _h3("Rang")
+	s += "   ".join(it) + "\n" + _h3("Rank")
 	var rk: PackedStringArray = PackedStringArray()
 	for r: int in range(1, 9):
 		rk.append("[url=c:ar:%d]%s [color=#%s]■[/color] %d[/url]" % [r, _mark(army_r == r), GuData.ESS_COL[r].to_html(false), r])
@@ -570,32 +570,32 @@ func _pick_army() -> void:
 
 
 func _pick_mult() -> void:
-	var s: String = _h("Spawn-Menge") + "Wie viele Wesen setzt jedes Setz-Werkzeug auf einmal?\n\n"
+	var s: String = _h("Spawn Amount") + "How many beings should each spawn tool place at once?\n\n"
 	for n: int in Cheats.MULTS:
 		s += "[url=c:x:%d]%s [b]×%d[/b][/url]\n" % [n, _mark(sim.cheats.mult == n), n]
-	s += "\n[color=#9db09e]Obergrenze der Simulation: %d Wesen (jetzt %d).[/color]" % [Cheats.HARD_MAX, sim.units.size()]
+	s += "\n[color=#9db09e]Simulation limit: %d beings (now %d).[/color]" % [Cheats.HARD_MAX, sim.units.size()]
 	_modal(s)
 
 
 func _open_soul(u: Unit) -> void:
 	if m == null:
 		return
-	m.hud.open_modal(_h("Seelensuche: " + u.pname()) + sim.cheats.soul_text(u), [
-		["Folgen", func() -> void:
+	m.hud.open_modal(_h("Soul Search: " + u.pname()) + sim.cheats.soul_text(u), [
+		["Follow", func() -> void:
 			m.hud.close_modal()
 			m.sel_unit = u
 			m.follow = true
 			m._open_unit(), "jade"],
-		["Schließen", func() -> void: m.hud.close_modal(), ""]])
+		["Close", func() -> void: m.hud.close_modal(), ""]])
 
 
 func _open_rename(u: Unit) -> void:
 	if m == null:
 		return
-	m.hud.open_input(_h("Namen ändern") + "Neuer Name für [b]%s[/b] (Familienname und Vorname, durch ein Leerzeichen getrennt):" % Hud._esc(u.pname()), u.pname(), "Umbenennen", func(txt: String) -> void:
+	m.hud.open_input(_h("Rename") + "New name for [b]%s[/b] (surname and given name, separated by a space):" % Hud._esc(u.pname()), u.pname(), "Rename", func(txt: String) -> void:
 		if u.hp > 0.0:
 			sim.cheats.rename(u, txt)
-			_hint("Namen ändern", u.pname()))
+			_hint("Rename", u.pname()))
 
 
 ## Links „c:…“ aus den Cheat-Fenstern.
@@ -611,11 +611,11 @@ func meta(mm: String) -> void:
 			_refresh_bar()
 		"x":
 			C.set_mult(int(v))
-			if m.hud.modal_title.text == "Spawn-Menge":
+			if m.hud.modal_title.text == "Spawn Amount":
 				_pick_mult()
 			else:
 				open_menu()
-			_hint("Spawn-Menge", "×%d – jedes Setz-Werkzeug setzt %d Wesen." % [C.mult, C.mult])
+			_hint("Spawn Amount", "×%d – each spawn tool places %d beings." % [C.mult, C.mult])
 			_refresh_bar()
 		"do":
 			_menu_do(v)
@@ -623,7 +623,7 @@ func meta(mm: String) -> void:
 			rank_sel = clampi(int(v), 0, 9)
 			_select("c_rset")
 			_pick_rank()
-			_hint("Rang setzen", GuData.rank_title(rank_sel) + (" · " + GuData.STAGE[stage_sel] if rank_sel > 0 and rank_sel < 9 else "") + ". Tippe auf Menschen.")
+			_hint("Set Rank", GuData.rank_title(rank_sel) + (" · " + GuData.STAGE[stage_sel] if rank_sel > 0 and rank_sel < 9 else "") + ". Tap humans.")
 		"s":
 			stage_sel = clampi(int(v), 0, 3)
 			_select("c_rset")
@@ -632,17 +632,17 @@ func meta(mm: String) -> void:
 			path_sel = clampi(int(v), 0, GuData.PATH_NAME.size() - 1)
 			_select("c_path")
 			m.hud.close_modal()
-			_hint("Pfad ändern", GuData.PATH_NAME[path_sel] + "-Pfad. Tippe auf Gu-Meister.")
+			_hint("Change Path", GuData.PATH_NAME[path_sel] + " Path. Tap Gu Masters.")
 		"a":
 			apt_sel = v
 			_select("c_apt")
 			m.hud.close_modal()
-			_hint("Begabung setzen", ("Extremkonstitution" if v == "X" else v + "-Grad") + ". Tippe auf Menschen.")
+			_hint("Set Aptitude", ("Extreme Physique" if v == "X" else v + "-grade") + ". Tap humans.")
 		"gi":
 			give_sel = "i:" + v
 			_select("c_give")
 			m.hud.close_modal()
-			_hint("Gu geben", Lore.igu_name(v) + ". Tippe auf Menschen.")
+			_hint("Give Gu", Lore.igu_name(v) + ". Tap humans.")
 		"gp":
 			give_open = -1 if give_open == int(v) else clampi(int(v), 0, GuData.PATH_NAME.size() - 1)
 			_pick_gu()
@@ -652,12 +652,12 @@ func meta(mm: String) -> void:
 			give_sel = "m:" + mg[idx]
 			_select("c_give")
 			m.hud.close_modal()
-			_hint("Gu geben", mg[idx] + ". Tippe auf Menschen.")
+			_hint("Give Gu", mg[idx] + ". Tap humans.")
 		"d":
 			grave_sel = clampi(int(v), 0, maxi(0, C.grave.size() - 1))
 			_select("c_revive")
 			m.hud.close_modal()
-			_hint("Wiederbeleben", "Tippe auf die Karte, wo der Tote zurückkehren soll.")
+			_hint("Revive", "Tap the map where the dead one should return.")
 		"an":
 			army_n = clampi(int(v), 1, 500)
 			_select("c_army")
@@ -864,7 +864,7 @@ func dev_test() -> void:
 		C.jump_chunk(2000)
 		chunks += 1
 		if chunks % 10 == 0:
-			print("  jump … Jahr %d · %d Wesen · %d ms" % [sim.year(), sim.units.size(), Time.get_ticks_msec() - tj])
+			print("  jump … year %d · %d beings · %d ms" % [sim.year(), sim.units.size(), Time.get_ticks_msec() - tj])
 	var r9: int = 0
 	var ss: int = 0
 	for u2: Unit in sim.units:

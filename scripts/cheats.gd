@@ -14,15 +14,15 @@ const GRAVE_MAX: int = 40
 const IMM_SAVE: PackedStringArray = ["Alter", "Himmelsdrangsal", "Himmelswille", "Irdische Kalamität", "Aufstieg gescheitert", "Extremkonstitution", "Hunger", "zerfallen"]
 ## Globale Schalter für das Cheat-Menü: [Schlüssel, Name, Beschreibung]. „walls“ ist das Weltgesetz „Regionswände“ (umgekehrt).
 const SWITCHES: Array = [
-	["uniq", "Einzigartigkeit", "An: kanonische Grenzen – jeder Ehrwürdige, jede Figur, jeder einzigartige Ort und jede Organisation nur einmal, Organisationen nur in ihrer Region, Orte mit Abstand. Aus (Standard): alles beliebig oft und überall."],
-	["stones", "Unendliche Urstein-Essenz", "Jedes Dorf hat immer genug Ursteine – Gu-Meister kultivieren nie gebremst."],
-	["res", "Unendliche Vorräte", "Alle Dörfer haben stets volle Nahrung, Holz und Ursteine."],
-	["cult10", "Sofort-Kultivierung ×10", "Alle Gu-Meister kultivieren zehnmal so schnell."],
-	["notrib", "Keine Drangsale", "Unsterbliche werden nicht mehr von Drangsalen heimgesucht; niemand stirbt an Drangsal oder Irdischer Kalamität."],
-	["nowill", "Gnädiger Himmelswille", "Der Himmelswille schlägt noch zu, tötet aber niemanden."],
-	["noage", "Keine Lebensspanne", "Niemand stirbt an Altersschwäche oder an einer Extremkonstitution."],
-	["walls", "Freie Regionswände", "Jeder durchquert die Regionswände (Weltgesetz „Regionswände“ aus)."],
-	["freeze", "Wesen einfrieren", "Alle Wesen erstarren an Ort und Stelle; die Zeit läuft weiter (Alter, Kultivierung, Dörfer)."],
+	["uniq", "Uniqueness", "On: canonical limits – every Venerable, figure, unique place and organization only once, organizations only in their region, places kept apart. Off (default): everything any number of times and anywhere."],
+	["stones", "Infinite Primeval Essence", "Every village always has enough primeval stones – Gu Masters never cultivate at a slowed pace."],
+	["res", "Infinite Supplies", "All villages always have full food, wood and primeval stones."],
+	["cult10", "Instant Cultivation ×10", "All Gu Masters cultivate ten times as fast."],
+	["notrib", "No Tribulations", "Immortals are no longer struck by tribulations; nobody dies of tribulation or Earthly Calamity."],
+	["nowill", "Merciful Heaven's Will", "Heaven's Will still strikes, but kills no one."],
+	["noage", "No Lifespan", "Nobody dies of old age or of an Extreme Physique."],
+	["walls", "Open Region Walls", "Everyone can cross the region walls (world law “Region Walls” off)."],
+	["freeze", "Freeze Beings", "All beings freeze in place; time keeps running (age, cultivation, villages)."],
 ]
 const ROMAN: PackedStringArray = ["", "", " II", " III", " IV", " V", " VI", " VII", " VIII", " IX", " X"]
 
@@ -82,7 +82,7 @@ func toggle(k: String) -> String:
 	set_switch(k, not is_on(k))
 	for s: Array in SWITCHES:
 		if s[0] == k:
-			return "%s: %s" % [s[1], "an" if is_on(k) else "aus"]
+			return "%s: %s" % [s[1], "on" if is_on(k) else "off"]
 	return ""
 
 
@@ -96,7 +96,7 @@ func room(n: int = 1) -> bool:
 
 
 func full_msg() -> String:
-	return "Die Welt ist voll: %d Wesen – mehr verträgt die Simulation nicht (Grenze %d)." % [sim.units.size(), HARD_MAX]
+	return "The world is full: %d beings – the simulation cannot take more (limit %d)." % [sim.units.size(), HARD_MAX]
 
 
 # ---------------- Mehrfache Einzigartige ----------------
@@ -268,15 +268,15 @@ func _vd(u: Unit) -> Dictionary:
 
 
 func _ven_title(u: Unit) -> String:
-	return ("Dämonen-Ehrwürdiger" if u.align == 1 else "Unsterblicher Ehrwürdiger") + " des " + GuData.PATH_NAME[clampi(u.path, 0, GuData.PATH_NAME.size() - 1)] + "-Pfades"
+	return ("Demon Venerable" if u.align == 1 else "Immortal Venerable") + " of the " + GuData.PATH_NAME[clampi(u.path, 0, GuData.PATH_NAME.size() - 1)] + " Path"
 
 
 ## Rang (0..9) und Stufe (0..3) direkt setzen. Gibt einen Hinweistext zurück.
 func set_rank(u: Unit, r: int, stage: int = 0) -> String:
 	if u.k != "p":
-		return "Nur Menschen und Variant-Menschen haben einen Rang."
+		return "Only humans and variant humans have a rank."
 	if u.undead:
-		return "Wandelnde Leichen kultivieren nicht."
+		return "Walking corpses do not cultivate."
 	r = clampi(r, 0, 9)
 	var old: int = u.rank
 	if r == 0:
@@ -290,8 +290,8 @@ func set_rank(u: Unit, r: int, stage: int = 0) -> String:
 			u.title = ""
 		u.fly = GuData.RACE_FLY[u.race]
 		sim.set_stats(u, false)
-		sim.float_txt(u, "Sterblicher", Color("#c8c0b0"))
-		return u.pname() + " ist wieder ein Sterblicher."
+		sim.float_txt(u, "Mortal", Color("#c8c0b0"))
+		return u.pname() + " is a mortal again."
 	if old == 0:
 		u.awk = true
 		sim.awaken(u, true)
@@ -309,7 +309,7 @@ func set_rank(u: Unit, r: int, stage: int = 0) -> String:
 		u.fly = GuData.RACE_FLY[u.race]
 		if r >= 6:
 			u.next_trib = maxf(u.next_trib, sim.uage(u) + 10.0)
-		sim.float_txt(u, "Rang %d" % r, GuData.ESS_COL[r])
+		sim.float_txt(u, "Rank %d" % r, GuData.ESS_COL[r])
 	u.stage = clampi(stage, 0, 3) if r < 9 else 0
 	u.prog = 0.0
 	sim.set_stats(u, false)
@@ -320,20 +320,20 @@ func set_rank(u: Unit, r: int, stage: int = 0) -> String:
 		u.life = maxf(u.life, sim.uage(u) + 1000.0)
 		sim.pillar(u.x, u.y, GuData.ESS_COL[9], 1.2)
 		sim.ven.register(u, _vd(u))
-		sim.log_event(u.pname() + " wird durch Götterhand zum Rang-9-" + u.title + ".", "gold", true)
+		sim.log_event(u.pname() + " becomes a Rank 9 " + u.title + " by divine hand.", "gold", true)
 	sim.terr_dirty = true
 	return "%s: %s%s" % [u.pname(), GuData.rank_title(r), (" · " + GuData.STAGE[u.stage]) if r < 9 else ""]
 
 
 func rank_step(u: Unit, d: int) -> String:
 	if u.k != "p":
-		return "Nur Menschen und Variant-Menschen haben einen Rang."
+		return "Only humans and variant humans have a rank."
 	return set_rank(u, clampi(u.rank + d, 0, 9), 0)
 
 
 func set_path(u: Unit, p: int) -> String:
 	if u.k != "p" or u.rank <= 0:
-		return "Nur erweckte Gu-Meister haben einen Pfad."
+		return "Only awakened Gu Masters have a path."
 	p = clampi(p, 0, GuData.PATH_NAME.size() - 1)
 	u.path = p
 	if u.gus.is_empty():
@@ -346,16 +346,16 @@ func set_path(u: Unit, p: int) -> String:
 		var s: Dictionary = sim.ven.state(u)
 		if not s.is_empty():
 			s["p"] = p
-			s["att"] = "Höchster Großmeister des %s-Pfades" % GuData.PATH_NAME[p]
+			s["att"] = "Supreme Grandmaster of the %s Path" % GuData.PATH_NAME[p]
 	sim.spark(u.x, u.y - 2.0, GuData.PATH_COL[p], 10, 5.0)
-	sim.float_txt(u, GuData.PATH_NAME[p] + "-Pfad", GuData.PATH_COL[p])
+	sim.float_txt(u, GuData.PATH_NAME[p] + " Path", GuData.PATH_COL[p])
 	sim.terr_dirty = true
-	return u.pname() + " folgt nun dem " + GuData.PATH_NAME[p] + "-Pfad."
+	return u.pname() + " now follows the " + GuData.PATH_NAME[p] + " Path."
 
 
 func flip_align(u: Unit) -> String:
 	if u.k != "p":
-		return "Tippe auf einen Menschen."
+		return "Tap a human."
 	u.align = 1 - u.align
 	if u.align == 0 and u.rogue:
 		u.rogue = false
@@ -364,20 +364,20 @@ func flip_align(u: Unit) -> String:
 	var s: Dictionary = sim.ven.state(u)
 	if not s.is_empty():
 		s["al"] = u.align
-	sim.float_txt(u, "dämonisch" if u.align == 1 else "rechtschaffen", Color("#ff8a7a") if u.align == 1 else Color("#9fe0b0"))
-	return u.pname() + " ist jetzt " + ("dämonisch." if u.align == 1 else "rechtschaffen.")
+	sim.float_txt(u, "demonic" if u.align == 1 else "righteous", Color("#ff8a7a") if u.align == 1 else Color("#9fe0b0"))
+	return u.pname() + " is now " + ("demonic." if u.align == 1 else "righteous.")
 
 
 func set_apt(u: Unit, a: String) -> String:
 	if u.k != "p":
-		return "Tippe auf einen Menschen."
+		return "Tap a human."
 	if u.rank == 0:
 		u.awk = true
 		sim.awaken(u, true)
 	u.apt = a
 	u.phys_x = a == "X"
-	sim.float_txt(u, "Extremkonstitution" if a == "X" else a + "-Grad", Color("#ffe27a"))
-	return u.pname() + ": Begabung " + ("Extremkonstitution" if a == "X" else a + "-Grad") + "."
+	sim.float_txt(u, "Extreme Physique" if a == "X" else a + "-grade", Color("#ffe27a"))
+	return u.pname() + ": aptitude " + ("Extreme Physique" if a == "X" else a + "-grade") + "."
 
 
 ## Schaltet einen Merker (CH_*) um; true = jetzt an.
@@ -412,7 +412,7 @@ func heal(u: Unit) -> void:
 func rejuvenate(u: Unit) -> String:
 	if u.k != "p":
 		u.birth = sim.sim_time
-		return u.pname() + " ist wieder jung."
+		return u.pname() + " is young again."
 	var a: float = sim.uage(u)
 	var na: float = 18.0 if a > 18.0 else maxf(0.0, a - 5.0)
 	u.birth = sim.sim_time - na * 12.0
@@ -420,14 +420,14 @@ func rejuvenate(u: Unit) -> String:
 	if u.phys_x and u.rank < 6:
 		u.life = maxf(u.life, 40.0)
 	sim.pillar(u.x, u.y, Color("#9affb0"), 0.5)
-	sim.float_txt(u, "%d Jahre jung" % int(na), Color("#9affb0"))
-	return "%s ist jetzt %d Jahre alt." % [u.pname(), int(na)]
+	sim.float_txt(u, "%d years young" % int(na), Color("#9affb0"))
+	return "%s is now %d years old." % [u.pname(), int(na)]
 
 
 func age_up(u: Unit, years: float) -> String:
 	u.birth -= years * 12.0
-	sim.float_txt(u, "+%d Jahre" % int(years), Color("#c8c0b0"))
-	return "%s ist jetzt %d Jahre alt (Lebensspanne %d)." % [u.pname(), int(sim.uage(u)), int(u.life)]
+	sim.float_txt(u, "+%d years" % int(years), Color("#c8c0b0"))
+	return "%s is now %d years old (lifespan %d)." % [u.pname(), int(sim.uage(u)), int(u.life)]
 
 
 ## Genaue Kopie eines Wesens neben dem Original.
@@ -500,14 +500,14 @@ func revive(idx: int, x: float, y: float) -> Unit:
 		sim.ven.register(u, _vd(u))
 	sim.pillar(x, y, Color("#e8e0ff"), 1.0)
 	sim.ring(x, y, 5.0, Color("#e8e0ff"), 0.8)
-	sim.log_event(u.pname() + " (" + GuData.rank_title(u.rank) + ") wird von den Toten zurückgeholt.", "violet", true)
+	sim.log_event(u.pname() + " (" + GuData.rank_title(u.rank) + ") is brought back from the dead.", "violet", true)
 	return u
 
 
 ## Gu geben: sel = "i:<Id>" (Unsterbliches Gu, ohne Obergrenze) oder "m:<Name>" (sterbliches Gu).
 func give(u: Unit, sel: String) -> String:
 	if u.k != "p":
-		return "Nur Menschen können Gu tragen."
+		return "Only humans can carry Gu."
 	if sel.begins_with("m:"):
 		var g: String = sel.substr(2)
 		if u.rank == 0:
@@ -516,11 +516,11 @@ func give(u: Unit, sel: String) -> String:
 		if not u.gus.has(g):
 			u.gus.append(g)
 		sim.float_txt(u, "+" + g, Color("#cfe8ff"))
-		return u.pname() + " erhält " + g + "."
+		return u.pname() + " receives " + g + "."
 	var id: String = sel.substr(2)
 	var e: Dictionary = Lore.igu(id)
 	if e.is_empty():
-		return "Wähle zuerst ein Gu."
+		return "Choose a Gu first."
 	if str(e["fx"]) in ["fetus", "destiny", "life", "eternal"] or u.igu.size() < 6:
 		sim.give_igu(u, id)
 	elif not u.igu.has(id):
@@ -531,19 +531,19 @@ func give(u: Unit, sel: String) -> String:
 		sim.ven.fate_on = true
 	sim.float_txt(u, str(e["n"]), GuData.PATH_COL[int(e.get("p", 0))])
 	sim.pillar(u.x, u.y, GuData.PATH_COL[int(e.get("p", 0))], 0.5)
-	return u.pname() + " erhält " + str(e["n"]) + "."
+	return u.pname() + " receives " + str(e["n"]) + "."
 
 
 func strip(u: Unit) -> String:
 	if u.k != "p":
-		return "Tippe auf einen Menschen."
+		return "Tap a human."
 	var n: int = u.gus.size() + u.igu.size()
 	u.gus = PackedStringArray()
 	u.igu = PackedStringArray()
 	sim.apply_igu(u)
 	sim.set_stats(u, false)
 	sim.puff(u.x, u.y - 2.0, Color("#6a5a7a"), 6)
-	return "%s verliert %d Gu." % [u.pname(), n]
+	return "%s loses %d Gu." % [u.pname(), n]
 
 
 func rename(u: Unit, text: String) -> void:
@@ -562,7 +562,7 @@ func rename(u: Unit, text: String) -> void:
 
 func join_clan(u: Unit, v: Village) -> String:
 	if u.k != "p":
-		return "Nur Menschen schließen sich Clans an."
+		return "Only humans join clans."
 	u.rogue = false
 	sim.join_village(u, v)
 	u.tgt = null
@@ -571,20 +571,20 @@ func join_clan(u: Unit, v: Village) -> String:
 	var c: Clan = sim.clans[v.clan]
 	sim.ring(u.x, u.y, 3.0, c.col, 0.6)
 	sim.terr_dirty = true
-	return u.pname() + " gehört jetzt zu " + c.name + " (" + v.name + ")."
+	return u.pname() + " now belongs to " + c.name + " (" + v.name + ")."
 
 
 func make_leader(u: Unit) -> String:
 	if u.k != "p" or u.clan < 0 or u.clan >= sim.clans.size():
-		return "Tippe auf ein Clan-Mitglied."
+		return "Tap a clan member."
 	var c: Clan = sim.clans[u.clan]
 	leads[c.id] = u.id
 	c.lead = u
 	if u.vil >= 0 and u.vil < sim.villages.size():
 		sim.villages[u.vil].lead = u
 	sim.pillar(u.x, u.y, c.col, 0.7)
-	sim.log_event(u.pname() + " wird durch Götterhand Oberhaupt von " + c.name + ".", "jade", true)
-	return u.pname() + " führt jetzt " + c.name + "."
+	sim.log_event(u.pname() + " becomes leader of " + c.name + " by divine hand.", "jade", true)
+	return u.pname() + " now leads " + c.name + "."
 
 
 # ---------------- Masse ----------------
@@ -627,7 +627,7 @@ func army(x: float, y: float, n: int, r: int) -> String:
 		for u2: Unit in made:
 			sim.join_village(u2, v)
 	sim.ring(x, y, 4.0 + sqrt(float(n)), GuData.ESS_COL[r], 0.9)
-	sim.log_event("Eine Armee aus %d %s erscheint%s." % [made.size(), "Gu-Meistern" if r <= 5 else "Gu-Unsterblichen", (" für " + sim.clans[v.clan].name) if v != null else ""], "war", true)
+	sim.log_event("An army of %d %s appears%s." % [made.size(), "Gu Masters" if r <= 5 else "Gu Immortals", (" for " + sim.clans[v.clan].name) if v != null else ""], "war", true)
 	sim.terr_dirty = true
 	return "%d × %s%s" % [made.size(), GuData.rank_title(r), (" · " + sim.clans[v.clan].name) if v != null else ""]
 
@@ -642,13 +642,13 @@ func r9_rain(n: int) -> String:
 			break
 		var p: Vector2 = sim.random_tile(func(i: int) -> bool: return GuData.buildable(sim.world.tile[i]), 400)
 		if p.x < 0.0:
-			why = "Kein Land für Ehrwürdige."
+			why = "No land for Venerables."
 			break
 		var msg: String = sim.spawn_custom_venerable(randi() % GuData.PATH_NAME.size(), randi() % 2, p.x, p.y)
 		if msg == "":
 			got += 1
 	sim.flash(0.4)
-	return "%d Ehrwürdige steigen herab.%s" % [got, (" " + why) if why != "" else ""]
+	return "%d Venerables descend.%s" % [got, (" " + why) if why != "" else ""]
 
 
 ## Alle Gu-Meister (Rang 1–7) der Welt bzw. eines Clans (cid >= 0) steigen einen Rang auf.
@@ -663,7 +663,7 @@ func rank_all(cid: int = -1) -> int:
 		n += 1
 	if cid < 0 and n > 0:
 		sim.flash(0.3)
-		sim.log_event("Eine Welle der Erleuchtung: %d Gu-Meister steigen auf." % n, "gold", true)
+		sim.log_event("A wave of enlightenment: %d Gu Masters ascend." % n, "gold", true)
 	return n
 
 
@@ -677,7 +677,7 @@ func populate(v: Village, n: int) -> String:
 		sim.join_village(u, v)
 	v.food += n * 2.0
 	sim.puff(v.cx, v.cy, Color("#fff6d8"), 12)
-	return "%d neue Bewohner in %s." % [n, v.name]
+	return "%d new residents in %s." % [n, v.name]
 
 
 ## Dorf auf die höchste Stufe: Ahnenhalle, volle Hütten und Felder, Gu-Veredelung, Türme, volle Vorräte.
@@ -706,7 +706,7 @@ func village_max(v: Village) -> String:
 	sim.recount(v)
 	sim.pillar(v.cx, v.cy, Color("#ffe27a"), 1.0)
 	sim.terr_dirty = true
-	return "%s: %d Hütten, %d Felder%s, %d Türme." % [v.name, v.houses, v.farms, ", Gu-Veredelung" if v.forge else "", v.towers]
+	return "%s: %d huts, %d fields%s, %d towers." % [v.name, v.houses, v.farms, ", Gu refinement" if v.forge else "", v.towers]
 
 
 ## Clan auflösen: jedes Dorf wird ein eigener Clan; ein Clan mit nur einem Dorf zerfällt ganz.
@@ -723,9 +723,9 @@ func disband(c: Clan) -> String:
 				u.clan = -1
 				u.vil = -1
 				u.col_clan = -1
-		sim.kill_clan(c, "wurde durch Götterhand aufgelöst.")
+		sim.kill_clan(c, "was dissolved by divine hand.")
 		sim.terr_dirty = true
-		return c.name + " ist zerfallen; seine Mitglieder ziehen als Clanlose umher."
+		return c.name + " has fallen apart; its members roam as clanless wanderers."
 	for v3: Village in vs:
 		var nc: Clan = sim.new_clan(v3.reg, sim.rand_sur(v3.reg), v3.race)
 		nc.align = c.align
@@ -738,19 +738,19 @@ func disband(c: Clan) -> String:
 		if u3.k == "p" and u3.clan == c.id:
 			u3.clan = -1
 			u3.col_clan = -1
-	sim.kill_clan(c, "wurde durch Götterhand aufgelöst – %d Dörfer gehen eigene Wege." % vs.size())
+	sim.kill_clan(c, "was dissolved by divine hand – %d villages go their own way." % vs.size())
 	sim.terr_dirty = true
-	return "%s zerfällt in %d Clans." % [c.name, vs.size()]
+	return "%s splits into %d clans." % [c.name, vs.size()]
 
 
 func take_village(c: Clan, v: Village) -> String:
 	if v.clan == c.id:
-		return v.name + " gehört schon zu " + c.name + "."
+		return v.name + " already belongs to " + c.name + "."
 	var oc: Clan = sim.clans[v.clan]
 	sim.ven.absorb_village(v, c)
 	sim.pillar(v.cx, v.cy, c.col, 0.8)
-	sim.log_event(v.name + " geht durch Götterhand von " + oc.name + " an " + c.name + ".", "war", true)
-	return v.name + " gehört jetzt zu " + c.name + "."
+	sim.log_event(v.name + " passes from " + oc.name + " to " + c.name + " by divine hand.", "war", true)
+	return v.name + " now belongs to " + c.name + "."
 
 
 # ---------------- Himmel ----------------
@@ -777,22 +777,22 @@ func fate_break() -> String:
 			sim.set_stats(u, false)
 			n += 1
 	if n == 0 and sim.ven.fate_broken:
-		return "Das Schicksals-Gu ist längst zerstört."
-	sim.ven._fate_shatter("Der Himmel selbst zerschmettert das Schicksals-Gu!")
-	return "Das Schicksals-Gu ist zerstört – Rang 9 steht offen."
+		return "Fate Gu was destroyed long ago."
+	sim.ven._fate_shatter("Heaven itself shatters Fate Gu!")
+	return "Fate Gu is destroyed – Rank 9 lies open."
 
 
 func fate_fix(x: float, y: float) -> String:
 	sim.ven.fate_broken = false
 	if fate_exists():
 		sim.ven.fate_on = true
-		return "Das Schicksals-Gu existiert bereits – die Fesseln des Schicksals sind wieder geknüpft."
+		return "Fate Gu already exists – the shackles of fate are bound again."
 	var g: Unit = sim.spawn_wild_igu(x, y, "fate_gu")
 	g.hp = g.mhp
 	sim.ven.fate_on = true
 	sim.pillar(x, y, GuData.PATH_COL[28], 1.4)
-	sim.log_event("Das Schicksals-Gu wird neu geschmiedet – das Schicksal bindet die Welt wieder.", "gold", true)
-	return "Das Schicksals-Gu ist wiederhergestellt."
+	sim.log_event("Fate Gu is forged anew – fate binds the world once more.", "gold", true)
+	return "Fate Gu is restored."
 
 
 # ---------------- Texte ----------------
@@ -801,23 +801,23 @@ func fate_fix(x: float, y: float) -> String:
 func unit_lines(u: Unit) -> String:
 	var s: String = ""
 	if (u.ch & CH_IMM) != 0 and (u.ch & CH_INV) != 0:
-		s += "\n[color=#ffd23a]Gottmodus – unsterblich und unverwundbar[/color]"
+		s += "\n[color=#ffd23a]God Mode – immortal and invulnerable[/color]"
 	elif (u.ch & CH_IMM) != 0:
-		s += "\n[color=#ffd23a]Unsterblich – altert nicht, stirbt nicht an Alter, Drangsal oder Himmelswille[/color]"
+		s += "\n[color=#ffd23a]Immortal – does not age, does not die of old age, tribulation or Heaven's Will[/color]"
 	elif (u.ch & CH_INV) != 0:
-		s += "\n[color=#7ef0ff]Unverwundbar – nimmt keinen Schaden[/color]"
+		s += "\n[color=#7ef0ff]Invulnerable – takes no damage[/color]"
 	if (u.ch & CH_LUCK) != 0:
-		s += "\n[color=#9aff7a]Ewiges Glück[/color]"
+		s += "\n[color=#9aff7a]Eternal Luck[/color]"
 	if u.k == "p" and u.clan >= 0 and int(leads.get(u.clan, -1)) == u.id:
-		s += "\n[color=#62d8a4]Von Götterhand eingesetztes Clan-Oberhaupt[/color]"
+		s += "\n[color=#62d8a4]Clan leader appointed by divine hand[/color]"
 	if u.frz > sim.sim_time + 1e5:
-		s += "\n[color=#d8f4ff]Eingefroren (Cheat)[/color]"
+		s += "\n[color=#d8f4ff]Frozen (cheat)[/color]"
 	return s
 
 
 func village_line(v: Village) -> String:
 	if inf_v.has(v.id) or bool(flags["res"]):
-		return "[color=#9db09e]Cheat[/color]  [color=#ffd23a]Unendliche Vorräte[/color]\n"
+		return "[color=#9db09e]Cheat[/color]  [color=#ffd23a]Infinite Supplies[/color]\n"
 	return ""
 
 
@@ -825,57 +825,57 @@ func village_line(v: Village) -> String:
 func soul_text(u: Unit) -> String:
 	var mt: String = "[color=#9db09e]"
 	var s: String = ""
-	s += mt + "Id[/color]  %d · %s\n" % [u.id, "Mensch (" + GuData.RACE_NAME[u.race] + ")" if u.k == "p" else str(GuData.SPEC[u.sp]["n"])]
-	s += mt + "Alter[/color]  %.1f / %d Jahre · geboren in Jahr %d\n" % [sim.uage(u), int(u.life), int(u.birth / 12.0) + 1]
-	s += mt + "Leben[/color]  %d / %d · Angriff %d · Reichweite %.1f · Tempo %.1f\n" % [int(u.hp), int(u.mhp), int(u.atk), u.rng, u.speed]
+	s += mt + "Id[/color]  %d · %s\n" % [u.id, "Human (" + GuData.RACE_NAME[u.race] + ")" if u.k == "p" else str(GuData.SPEC[u.sp]["n"])]
+	s += mt + "Age[/color]  %.1f / %d years · born in year %d\n" % [sim.uage(u), int(u.life), int(u.birth / 12.0) + 1]
+	s += mt + "Health[/color]  %d / %d · Attack %d · Range %.1f · Speed %.1f\n" % [int(u.hp), int(u.mhp), int(u.atk), u.rng, u.speed]
 	if u.k == "p":
-		s += mt + "Rang[/color]  %s%s · Fortschritt %d %%\n" % [GuData.rank_title(u.rank), (" · " + GuData.STAGE[u.stage]) if u.rank > 0 and u.rank < 9 else "", int(u.prog * 100.0)]
+		s += mt + "Rank[/color]  %s%s · Progress %d %%\n" % [GuData.rank_title(u.rank), (" · " + GuData.STAGE[u.stage]) if u.rank > 0 and u.rank < 9 else "", int(u.prog * 100.0)]
 		if u.rank > 0:
-			s += mt + "Pfad[/color]  %s · Begabung %s · %s\n" % [GuData.PATH_NAME[clampi(u.path, 0, GuData.PATH_NAME.size() - 1)], "Extremkonstitution" if u.apt == "X" else u.apt, "dämonisch" if u.align == 1 or u.rogue else "rechtschaffen"]
+			s += mt + "Path[/color]  %s · Aptitude %s · %s\n" % [GuData.PATH_NAME[clampi(u.path, 0, GuData.PATH_NAME.size() - 1)], "Extreme Physique" if u.apt == "X" else u.apt, "demonic" if u.align == 1 or u.rogue else "righteous"]
 		var c: Clan = sim.clans[u.clan] if u.clan >= 0 and u.clan < sim.clans.size() else null
 		var v: Village = sim.villages[u.vil] if u.vil >= 0 and u.vil < sim.villages.size() else null
-		s += mt + "Clan[/color]  %s%s%s\n" % [c.name if c != null else "ohne Clan", (" · " + v.name) if v != null else "", " · Einzelgänger" if u.rogue else ""]
+		s += mt + "Clan[/color]  %s%s%s\n" % [c.name if c != null else "no clan", (" · " + v.name) if v != null else "", " · rogue cultivator" if u.rogue else ""]
 		if u.title != "":
-			s += mt + "Titel[/color]  " + u.title + "\n"
+			s += mt + "Title[/color]  " + u.title + "\n"
 		if u.fig != "":
-			s += mt + "Figur[/color]  " + u.fig + "\n"
+			s += mt + "Figure[/color]  " + u.fig + "\n"
 		if u.rank >= 6:
-			s += mt + "Drangsal[/color]  " + ("nie (Himmelsfragment)" if u.notrib else "in %d Jahren" % maxi(0, int(u.next_trib - sim.uage(u)))) + "\n"
-		s += mt + "Glück[/color]  %d %% · Siege %d · Beruf %s\n" % [int(u.luck * 100.0), u.kills, u.job if u.job != "" else "–"]
+			s += mt + "Tribulation[/color]  " + ("never (Heaven Fragment)" if u.notrib else "in %d years" % maxi(0, int(u.next_trib - sim.uage(u)))) + "\n"
+		s += mt + "Luck[/color]  %d %% · Kills %d · Job %s\n" % [int(u.luck * 100.0), u.kills, u.job if u.job != "" else "–"]
 		var mul: float = u.ig_cult * cult * sim.ven.cult_mul(u) * (2.2 if u.luck > 0.0 else 1.0)
-		s += mt + "Kultivierung[/color]  ×%.1f (Unsterbliche Gu ×%.1f)\n" % [mul, u.ig_cult]
-		s += "\n[color=#e8c70a][b]GU (%d)[/b][/color]\n" % u.gus.size() + (", ".join(u.gus) if not u.gus.is_empty() else "keine") + "\n"
-		s += "\n[color=#ffd24a][b]UNSTERBLICHE GU (%d)[/b][/color]\n" % u.igu.size()
+		s += mt + "Cultivation[/color]  ×%.1f (Immortal Gu ×%.1f)\n" % [mul, u.ig_cult]
+		s += "\n[color=#e8c70a][b]GU (%d)[/b][/color]\n" % u.gus.size() + (", ".join(u.gus) if not u.gus.is_empty() else "none") + "\n"
+		s += "\n[color=#ffd24a][b]IMMORTAL GU (%d)[/b][/color]\n" % u.igu.size()
 		for id: String in u.igu:
 			var e: Dictionary = Lore.igu(id)
-			s += "• %s [color=#9db09e](Rang %d, %s-Pfad – %s)[/color]\n" % [str(e.get("n", id)), int(e.get("r", 6)), GuData.PATH_NAME[int(e.get("p", 0))], str(Lore.FX_TEXT.get(str(e.get("fx", "gen")), ""))]
+			s += "• %s [color=#9db09e](Rank %d, %s Path – %s)[/color]\n" % [str(e.get("n", id)), int(e.get("r", 6)), GuData.PATH_NAME[int(e.get("p", 0))], str(Lore.FX_TEXT.get(str(e.get("fx", "gen")), ""))]
 		if u.igu.is_empty():
-			s += "keine\n"
+			s += "none\n"
 		var st: Dictionary = sim.ven.state(u)
 		if not st.is_empty():
-			s += "\n[color=#ffd24a][b]EHRWÜRDIGER[/b][/color]\n%s\nPhase %s · Region %s · Vasallen %d · Blutlinie %d Mitglieder\n" % [str(st.get("doing", "")), str(st.get("ph", "")), GuData.REGN[clampi(int(st.get("goal", 4)), 0, GuData.REGN.size() - 1)] if int(st.get("goal", -1)) >= 0 else "–", (st.get("vas", []) as Array).size(), sim.ven.lineage_size(st)]
+			s += "\n[color=#ffd24a][b]VENERABLE[/b][/color]\n%s\nPhase %s · Region %s · Vassals %d · Bloodline %d members\n" % [str(st.get("doing", "")), str(st.get("ph", "")), GuData.REGN[clampi(int(st.get("goal", 4)), 0, GuData.REGN.size() - 1)] if int(st.get("goal", -1)) >= 0 else "–", (st.get("vas", []) as Array).size(), sim.ven.lineage_size(st)]
 	var fl: PackedStringArray = PackedStringArray()
 	if (u.ch & CH_IMM) != 0:
-		fl.append("unsterblich")
+		fl.append("immortal")
 	if (u.ch & CH_INV) != 0:
-		fl.append("unverwundbar")
+		fl.append("invulnerable")
 	if (u.ch & CH_LUCK) != 0:
-		fl.append("ewiges Glück")
+		fl.append("eternal luck")
 	if u.bless > 0:
-		fl.append("gesegnet")
+		fl.append("blessed")
 	elif u.bless < 0:
-		fl.append("verflucht")
+		fl.append("cursed")
 	if u.prot > sim.sim_time:
-		fl.append("Himmelsschutz")
+		fl.append("Heaven's Protection")
 	if u.sick > 0.0:
-		fl.append("Seuche")
+		fl.append("plague")
 	if u.undead:
-		fl.append("wandelnde Leiche")
+		fl.append("walking corpse")
 	if u.poss:
-		fl.append("besessen")
+		fl.append("possessed")
 	if u.ow:
-		fl.append("Fremdweltdämon")
-	s += "\n" + mt + "Zustände[/color]  " + (", ".join(fl) if not fl.is_empty() else "keine")
+		fl.append("Otherworld Demon")
+	s += "\n" + mt + "States[/color]  " + (", ".join(fl) if not fl.is_empty() else "none")
 	return s
 
 
