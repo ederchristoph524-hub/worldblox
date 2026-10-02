@@ -81,6 +81,7 @@ const INF_R: int = 12
 var terr_center: Dictionary = {}
 var terr_ms: float = 0.0  ## Dauer des letzten update_territory (Entwickler)
 var gen_ms: Dictionary = {}  ## Entwickler: Zeiten der letzten Generierung (ms)
+var terr_phase_us: PackedInt32Array = [0, 0, 0, 0, 0, 0, 0]  ## Entwickler: Rechenzeit je Phase der letzten Gebiets-Berechnung
 const REG_COL: Array[Color] = [Color("#e8e0a0"), Color("#5ac85a"), Color("#e8a040"), Color("#40a8e8"), Color("#c070e8")]
 
 
@@ -130,6 +131,7 @@ func alloc() -> void:
 	if resized:
 		_alloc_images()
 	_jphase = -1
+	_veil = PackedInt32Array()
 	tile = PackedByteArray()
 	tile.resize(N)
 	feat = PackedByteArray()
@@ -250,6 +252,7 @@ static func is_blank(mode: String) -> bool:
 ## "ocean", "flat", "island", "continents": leere Welt zum freien Bauen.
 func generate(S: int, mode: String = "gu") -> void:
 	var t0: int = Time.get_ticks_usec()
+	gen_ms.clear()
 	alloc()
 	var open_sea: PackedByteArray = PackedByteArray()
 	var blank: bool = is_blank(mode)
@@ -274,8 +277,10 @@ func generate(S: int, mode: String = "gu") -> void:
 ## Land ist Grasland (Höhe 0,5), Wasser tiefes Meer (Höhe 0,2); Flachwasser und Strand setzt _finish.
 func _base_blank(S: int, mode: String) -> void:
 	region.fill(4)
-	var nw: FastNoiseLite = _noise(S + 17, 0.035, 3)
-	var nc: FastNoiseLite = _noise(S + 29, 0.011, 4)
+	# Rauschen in Bezugsgröße 256 (gleiche Formen in jeder Kartengröße)
+	var kf: float = 256.0 / W
+	var nw: FastNoiseLite = _noise(S + 17, 0.035 * kf, 3)
+	var nc: FastNoiseLite = _noise(S + 29, 0.011 * kf, 4)
 	var cx: float = (W - 1) * 0.5
 	var cy: float = (H - 1) * 0.5
 	var rad: float = W * 0.22
@@ -286,7 +291,7 @@ func _base_blank(S: int, mode: String) -> void:
 			match mode:
 				"flat":
 					# eine Ebene bis auf einen schmalen, leicht welligen Meeressaum
-					var edge: float = minf(minf(x, W - 1 - x), minf(y, H - 1 - y))
+					var edge: float = minf(minf(x, W - 1 - x), minf(y, H - 1 - y)) * kf
 					land = edge >= 6.0 + (n01(nw, x, y) - 0.5) * 5.0
 				"island":
 					# eine runde, organisch gewellte Insel in der Mitte
@@ -309,19 +314,21 @@ func _base_blank(S: int, mode: String) -> void:
 
 ## Grundgelände der Zufallswelt (Regionen, Höhen, Kacheln) – unveränderter Algorithmus.
 func _base_random(S: int) -> void:
-	var nw: FastNoiseLite = _noise(S + 5, 0.022, 4)
-	var nw2: FastNoiseLite = _noise(S + 9, 0.022, 4)
-	var ne: FastNoiseLite = _noise(S, 0.025, 5)
-	var ne2: FastNoiseLite = _noise(S + 33, 0.06, 3)
-	var nedge: FastNoiseLite = _noise(S + 123, 0.03, 3)
-	var nr1: FastNoiseLite = _noise(S + 71, 0.028, 4)
-	var nr4: FastNoiseLite = _noise(S + 91, 0.022, 4)
-	var nisl: FastNoiseLite = _noise(S + 201, 0.05, 4)
+	# Frequenzen und Verwacklung in Bezugsgröße 256: die Welt sieht in jeder Kartengröße gleich gegliedert aus
+	var kf: float = 256.0 / W
+	var nw: FastNoiseLite = _noise(S + 5, 0.022 * kf, 4)
+	var nw2: FastNoiseLite = _noise(S + 9, 0.022 * kf, 4)
+	var ne: FastNoiseLite = _noise(S, 0.025 * kf, 5)
+	var ne2: FastNoiseLite = _noise(S + 33, 0.06 * kf, 3)
+	var nedge: FastNoiseLite = _noise(S + 123, 0.03 * kf, 3)
+	var nr1: FastNoiseLite = _noise(S + 71, 0.028 * kf, 4)
+	var nr4: FastNoiseLite = _noise(S + 91, 0.022 * kf, 4)
+	var nisl: FastNoiseLite = _noise(S + 201, 0.05 * kf, 4)
 	for y: int in range(H):
 		for x: int in range(W):
 			var i: int = y * W + x
-			var wob: float = (n01(nw, x, y) - 0.5) * 46.0
-			var wob2: float = (n01(nw2, x + 40, y) - 0.5) * 40.0
+			var wob: float = (n01(nw, x, y) - 0.5) * 46.0 / kf
+			var wob2: float = (n01(nw2, x + 40 / kf, y) - 0.5) * 40.0 / kf
 			var r: int
 			if y < H * 0.26 + wob:
 				r = 0
@@ -835,6 +842,7 @@ func begin_territory(villages: Array, clans: Array, head: PackedInt32Array = Pac
 	_jphase = 0
 	_jpos = 0
 	_jus = 0
+	terr_phase_us.fill(0)
 
 
 ## Ein Stück der Gebiets-Berechnung (höchstens etwa budget_us Mikrosekunden); true = fertig und hochgeladen.
@@ -844,6 +852,8 @@ func territory_step(budget_us: int) -> bool:
 	var t0: int = Time.get_ticks_usec()
 	var tend: int = t0 + budget_us
 	while _jphase >= 0 and Time.get_ticks_usec() < tend:
+		var tp: int = Time.get_ticks_usec()
+		var ph: int = _jphase
 		match _jphase:
 			0:
 				_job_init()
@@ -859,6 +869,7 @@ func territory_step(budget_us: int) -> bool:
 				_job_pixels(tend)
 			6:
 				_job_finish()
+		terr_phase_us[ph] += Time.get_ticks_usec() - tp
 	_jus += Time.get_ticks_usec() - t0
 	if _jphase < 0:
 		terr_ms = _jus / 1000.0
@@ -893,6 +904,13 @@ func _job_init() -> void:
 	_jbest.fill(1 << 30)
 	_jinf_s = PackedInt32Array()
 	_jinf_s.resize(N)
+	# Rechteck um alle Dorfgebiete samt Einflusszone: nur dort arbeiten die folgenden Phasen Kachel für Kachel
+	_jbx0 = W
+	_jby0 = H
+	_jbx1 = -1
+	_jby1 = -1
+	_jcm = PackedByteArray()
+	_jcm.resize(CXN * CXN)
 	_jvclan = PackedInt32Array()
 	_jvclan.resize(_jv.size())
 	for v: Village in _jv:
@@ -923,6 +941,13 @@ func _job_claim(tend: int) -> void:
 		var vid: int = v.id
 		var vcl: int = v.clan
 		var kinf: float = 255.0 / INF_R
+		_jbx0 = mini(_jbx0, maxi(0, cx - R - 1))
+		_jby0 = mini(_jby0, maxi(0, cy - R - 1))
+		_jbx1 = maxi(_jbx1, mini(W - 1, cx + R + 1))
+		_jby1 = maxi(_jby1, mini(H - 1, cy + R + 1))
+		for mcy: int in range(maxi(0, cy - R - 1) / CHK, mini(H - 1, cy + R + 1) / CHK + 1):
+			for mcx: int in range(maxi(0, cx - R - 1) / CHK, mini(W - 1, cx + R + 1) / CHK + 1):
+				_jcm[mcy * CXN + mcx] = 1
 		for dy: int in range(maxi(-R, -cy), mini(R, H - 1 - cy) + 1):
 			var dy2: int = dy * dy
 			var span: int = int(sqrt(float(R2 - dy2)))
@@ -961,7 +986,7 @@ func _job_claim(tend: int) -> void:
 	_jcn = PackedInt32Array()
 	_jcn.resize(nc)
 	_jphase = 2
-	_jpos = 0
+	_jpos = _jby0
 
 
 ## 2) Schlüssel je Kachel (Ebene 0: Clan, 1: Dorf, 3: Vormacht), Clan je Kachel, Schwerpunkte.
@@ -972,28 +997,32 @@ func _job_keys(tend: int) -> void:
 	var ii: PackedInt32Array = _jinfl
 	var hd: PackedInt32Array = _jhd
 	var vc: PackedInt32Array = _jvclan
-	while _jpos < H:
+	while _jpos <= _jby1:
 		var y: int = _jpos
 		_jpos += 1
 		var row: int = y * W
-		for x: int in range(W):
-			var i: int = row + x
-			var t: int = tt[i]
-			if t < 0:
-				var ik: int = ii[i]
-				if ik >= 0 and hd[ik] < 0:
-					ii[i] = -1
+		var cyr: int = (y / CHK) * CXN
+		for cx: int in range(CXN):
+			if _jcm[cyr + cx] == 0:
 				continue
-			ii[i] = -1
-			var k: int = vc[t]
-			_jCL[i] = k
-			var key: int = t if by_vil else (hd[k] if by_head else k)
-			if key < 0:
-				key = k
-			_jK[i] = key
-			_jcsx[k] += x
-			_jcsy[k] += y
-			_jcn[k] += 1
+			for x: int in range(cx * CHK, mini(W, cx * CHK + CHK)):
+				var i: int = row + x
+				var t: int = tt[i]
+				if t < 0:
+					var ik: int = ii[i]
+					if ik >= 0 and hd[ik] < 0:
+						ii[i] = -1
+					continue
+				ii[i] = -1
+				var k: int = vc[t]
+				_jCL[i] = k
+				var key: int = t if by_vil else (hd[k] if by_head else k)
+				if key < 0:
+					key = k
+				_jK[i] = key
+				_jcsx[k] += x
+				_jcsy[k] += y
+				_jcn[k] += 1
 		if Time.get_ticks_usec() >= tend:
 			return
 	_jphase = 3
@@ -1064,7 +1093,7 @@ func _job_colors() -> void:
 	_jbk.resize(N)
 	_jany_war = false
 	_jphase = 4
-	_jpos = 0
+	_jpos = _jby0
 
 
 ## 4) Rand-Art je Kachel: 1 Außenrand, 2 weiche Innengrenze (Clans derselben Macht bzw. Dörfer eines Clans), 3 Kriegsgrenze.
@@ -1073,50 +1102,52 @@ func _job_borders(tend: int) -> void:
 	var by_head: bool = _jlayer == 3
 	var K: PackedInt32Array = _jK
 	var CL: PackedInt32Array = _jCL
-	while _jpos < H:
+	while _jpos <= _jby1:
 		var y: int = _jpos
 		_jpos += 1
 		var row: int = y * W
-		for x: int in range(W):
-			var i: int = row + x
-			var key: int = K[i]
-			if key < 0:
+		var cyr: int = (y / CHK) * CXN
+		for cx: int in range(CXN):
+			if _jcm[cyr + cx] == 0:
 				continue
-			# vier Nachbarn; außerhalb der Karte zählt als fremd
-			var kl: int = K[i - 1] if x > 0 else -1
-			var kr: int = K[i + 1] if x < W - 1 else -1
-			var ku: int = K[i - W] if y > 0 else -1
-			var kd: int = K[i + W] if y < H - 1 else -1
-			if kl == key and kr == key and ku == key and kd == key:
-				if by_head:
-					var ki0: int = CL[i]
-					if CL[i - 1] != ki0 or CL[i + 1] != ki0 or CL[i - W] != ki0 or CL[i + W] != ki0:
-						_jbk[i] = 2
-				continue
-			var ki: int = CL[i]
-			var war: Dictionary = (_jc[ki] as Clan).war
-			var b: int = 0
-			for j: int in [i - 1 if x > 0 else -1, i + 1 if x < W - 1 else -1, i - W if y > 0 else -1, i + W if y < H - 1 else -1]:
-				var kj: int = K[j] if j >= 0 else -1
-				if kj == key:
+			for x: int in range(cx * CHK, mini(W, cx * CHK + CHK)):
+				var i: int = row + x
+				var key: int = K[i]
+				if key < 0:
 					continue
-				if kj < 0:
-					b = maxi(b, 1)
+				# vier Nachbarn; außerhalb der Karte zählt als fremd
+				var kl: int = K[i - 1] if x > 0 else -1
+				var kr: int = K[i + 1] if x < W - 1 else -1
+				var ku: int = K[i - W] if y > 0 else -1
+				var kd: int = K[i + W] if y < H - 1 else -1
+				if kl == key and kr == key and ku == key and kd == key:
+					if by_head:
+						var ki0: int = CL[i]
+						if CL[i - 1] != ki0 or CL[i + 1] != ki0 or CL[i - W] != ki0 or CL[i + W] != ki0:
+							_jbk[i] = 2
 					continue
-				var cj: int = CL[j]
-				if cj != ki and war.has(cj):
-					b = 3
-				elif by_vil and cj == ki:
-					b = maxi(b, 2)
-				else:
-					b = maxi(b, 1)
-			_jbk[i] = b
-			if b == 3:
-				_jany_war = true
+				var ki: int = CL[i]
+				var war: Dictionary = (_jc[ki] as Clan).war
+				var b: int = 0
+				for j: int in [i - 1 if x > 0 else -1, i + 1 if x < W - 1 else -1, i - W if y > 0 else -1, i + W if y < H - 1 else -1]:
+					var kj: int = K[j] if j >= 0 else -1
+					if kj == key:
+						continue
+					if kj < 0:
+						b = maxi(b, 1)
+						continue
+					var cj: int = CL[j]
+					if cj != ki and war.has(cj):
+						b = 3
+					elif by_vil and cj == ki:
+						b = maxi(b, 2)
+					else:
+						b = maxi(b, 1)
+				_jbk[i] = b
+				if b == 3:
+					_jany_war = true
 		if Time.get_ticks_usec() >= tend:
 			return
-	_jimg = PackedInt32Array()
-	_jimg.resize(N)
 	_jfill = PackedInt32Array()
 	_jfill.resize(N)
 	_jedge = PackedInt32Array()
@@ -1126,10 +1157,60 @@ func _job_borders(tend: int) -> void:
 		_jwar.resize(N)
 	_jphase = 5
 	_jpos = 0
+	_jvstate = 0
+
+
+## Schleier über herrenlosem Land (ohne Wände): zwischengespeichert, je Berechnung nur ein Streifen aufgefrischt
+## (große Karten); ändert sich die Farbe (Ebene), wird er ganz neu aufgebaut – alles in Häppchen.
+var _veil: PackedInt32Array
+var _veil_c: int = 0
+var _veil_y: int = 0
+var _veil_full: bool = false
+var _jvstate: int = 0
+var _jvy1: int = 0
+## Blöcke (CHK × CHK), die ein Dorfgebiet samt Einflusszone berühren – nur dort wird Kachel für Kachel gerechnet
+var _jcm: PackedByteArray
+var _jbx0: int = 0
+var _jby0: int = 0
+var _jbx1: int = -1
+var _jby1: int = -1
+
+
+## true = Schleier für diese Berechnung fertig (dann liegt eine Kopie in _jimg).
+func _veil_step(tend: int) -> bool:
+	if _jvstate == 0:
+		if _veil.size() != N or _veil_c != _jveil:
+			_veil = PackedInt32Array()
+			_veil.resize(N)
+			_veil_c = _jveil
+			_veil_y = 0
+			_veil_full = false
+		_jvy1 = mini(H, _veil_y + maxi(16, H / 8)) if _veil_full else H
+		_jvstate = 1
+	var vl: PackedInt32Array = _veil
+	var tl: PackedByteArray = tile
+	var vc: int = _veil_c
+	while _veil_y < _jvy1:
+		var row: int = _veil_y * W
+		_veil_y += 1
+		for i: int in range(row, row + W):
+			var t: int = tl[i]
+			vl[i] = vc if (t > GuData.SHAL and t != GuData.WALL) else 0
+		if Time.get_ticks_usec() >= tend:
+			return false
+	if _veil_y >= H:
+		_veil_y = 0
+		_veil_full = true
+	_jimg = _veil.duplicate()
+	_jvstate = 2
+	_jpos = _jby0
+	return true
 
 
 ## 5) Pixel: Rand, Innenlinie, Fläche (Mächte-Ebene: dämonische Mächte schraffiert), Einflusszone, Schleier.
 func _job_pixels(tend: int) -> void:
+	if _jvstate < 2 and not _veil_step(tend):
+		return
 	var by_head: bool = _jlayer == 3
 	var K: PackedInt32Array = _jK
 	var bk: PackedByteArray = _jbk
@@ -1139,50 +1220,56 @@ func _job_pixels(tend: int) -> void:
 	var w_on: int = _rgba(Color("#ff3b2a"), 1.0)
 	var w_off: int = _rgba(Color("#3a0806"), 0.85)
 	var w_glow: int = _rgba(Color("#ff5a3a"), 0.45)
-	while _jpos < H:
+	while _jpos <= _jby1:
 		var y: int = _jpos
 		_jpos += 1
 		var row: int = y * W
-		for x: int in range(W):
-			var i: int = row + x
-			var key: int = K[i]
-			if key < 0:
-				var ik: int = ii[i]
-				if ik >= 0:
-					img[i] = _jc_infl[ik * 8 + mini(7, _jinf_s[i] >> 5)]
-				elif tile[i] > GuData.SHAL and tile[i] != GuData.WALL:
-					img[i] = _jveil
+		var cyr: int = (y / CHK) * CXN
+		for cx: int in range(CXN):
+			if _jcm[cyr + cx] == 0:
 				continue
-			var b: int = bk[i]
-			fl[i] = _jc_fill[key]
-			if b != 0:
-				_edge_tile(x, y, i, key, by_head)
-			if b == 1 or b == 3:
-				img[i] = _jc_out[key]
-				if b == 3:
-					_jwar[i] = w_on if (((x + y) >> 1) & 1) == 0 else w_off
-				continue
-			if b == 2:
-				img[i] = _jc_csoft[_jCL[i]] if by_head else _jc_soft[key]
-				continue
-			# Innenlinie neben einem Außenrand
-			var nb: int = 0
-			if x > 0:
-				nb = bk[i - 1]
-			if x < W - 1:
-				nb = maxi(nb, bk[i + 1])
-			if y > 0:
-				nb = maxi(nb, bk[i - W])
-			if y < H - 1:
-				nb = maxi(nb, bk[i + W])
-			if nb == 1 or nb == 3:
-				img[i] = _jc_in[key]
-				if nb == 3:
-					_jwar[i] = w_glow
-			elif by_head and (x + y) % 5 == 0:
-				img[i] = _jc_hatch[key]
-			else:
-				img[i] = _jc_fill[key]
+			for x: int in range(cx * CHK, mini(W, cx * CHK + CHK)):
+				var i: int = row + x
+				var key: int = K[i]
+				if key < 0:
+					var ik: int = ii[i]
+					if ik >= 0:
+						img[i] = _jc_infl[ik * 8 + mini(7, _jinf_s[i] >> 5)]
+					elif tile[i] > GuData.SHAL and tile[i] != GuData.WALL:
+						img[i] = _jveil
+					else:
+						img[i] = 0
+					continue
+				var b: int = bk[i]
+				fl[i] = _jc_fill[key]
+				if b != 0:
+					_edge_tile(x, y, i, key, by_head)
+				if b == 1 or b == 3:
+					img[i] = _jc_out[key]
+					if b == 3:
+						_jwar[i] = w_on if (((x + y) >> 1) & 1) == 0 else w_off
+					continue
+				if b == 2:
+					img[i] = _jc_csoft[_jCL[i]] if by_head else _jc_soft[key]
+					continue
+				# Innenlinie neben einem Außenrand
+				var nb: int = 0
+				if x > 0:
+					nb = bk[i - 1]
+				if x < W - 1:
+					nb = maxi(nb, bk[i + 1])
+				if y > 0:
+					nb = maxi(nb, bk[i - W])
+				if y < H - 1:
+					nb = maxi(nb, bk[i + W])
+				if nb == 1 or nb == 3:
+					img[i] = _jc_in[key]
+					if nb == 3:
+						_jwar[i] = w_glow
+				elif by_head and (x + y) % 5 == 0:
+					img[i] = _jc_hatch[key]
+				else:
+					img[i] = _jc_fill[key]
 		if Time.get_ticks_usec() >= tend:
 			return
 	_jphase = 6

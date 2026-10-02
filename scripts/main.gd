@@ -125,6 +125,8 @@ func _ready() -> void:
 			_dev_mapshots(a.substr(11))
 		if a.begins_with("--mapimg="):
 			_dev_mapimg(a.substr(9))
+		if a == "--sizetest":
+			_dev_sizetest()
 		if a.begins_with("--terrshots="):
 			_dev_terrshots(a.substr(12))
 		if a.begins_with("--gfxshots="):
@@ -1687,8 +1689,16 @@ class EntityLayer:
 		# Wesen (Kontur etwa 1 Bildschirmpixel breit, im Fernblick keine)
 		var ol: float = 0.0 if z * GuMain.PS < 0.5 else clampf(0.9 / (z * GuMain.PS), 0.4, 0.9)
 		Sprites.outline_col = Color(Sprites.OUTLINE, clampf((z * GuMain.PS - 0.6) / 1.0, 0.0, 0.92))
+		# Übersicht großer Karten (eine Figur kleiner als etwa ein Bildschirmpixel): gewöhnliche Wesen nur als Farbtupfen
+		var dots: bool = z * GuMain.PS < 0.33
 		for u: Unit in sim.units:
 			if u.x < vx0 or u.x > vx1 or u.y < vy0 or u.y > vy1:
+				continue
+			if dots and u.rank < 6 and u.fig == "" and u.beh != GuData.B_KING:
+				if u.beh == GuData.B_GU:
+					continue
+				var dc: Color = (sim.clans[u.clan].col if u.clan >= 0 else Color("#8e8676")) if u.k == "p" else Color(0.5, 0.42, 0.32)
+				draw_rect(Rect2(u.x - 0.7, u.y - 2.0, 1.4, 2.0), dc)
 				continue
 			if u.k == "p":
 				var cl: Color = sim.clans[u.clan].col if u.clan >= 0 else (Color("#3a2a3a") if u.rogue else Color("#8e8676"))
@@ -1841,9 +1851,9 @@ class CloudLayer:
 	func _ready() -> void:
 		reset()
 
-	## Wolken passend zur Kartengröße (7 je 256er-Fläche) verteilen; Bilder werden wiederverwendet.
+	## Wolken passend zur Kartengröße (7 auf der 256er-Karte, mit der Kantenlänge mehr) verteilen; Bilder werden wiederverwendet.
 	func reset() -> void:
-		var want: int = clampi(roundi(7.0 * GuData.area_f()), 5, 40)
+		var want: int = clampi(roundi(7.0 * GuData.len_f()), 5, 24)
 		while list.size() < want:
 			var ims: Array[Image] = _make_cloud()
 			list.append({"x": 0.0, "y": 0.0, "tex": ImageTexture.create_from_image(ims[0]), "dark": ImageTexture.create_from_image(ims[1]), "sh": _shadow(ims[0]), "sp": 1.0 + randf() * 1.5})
@@ -2760,6 +2770,63 @@ func _dev_blanktest() -> void:
 
 
 ## Entwickler: -- --fresh --blankshots=<ordner> – Übersichtsbilder der leeren Welten (ohne --headless).
+## Entwickler: -- --fresh --sizetest – jede Kartengröße: neue Welt, ein Jahr, Speichern/Laden im Speicher über
+## einen Größenwechsel hinweg, ein alter v5-Spielstand (256), Kamera-Übersicht; endet mit SIZETEST DONE.
+func _dev_sizetest() -> void:
+	while loading:
+		await get_tree().process_frame
+	_end_presim()
+	var ok: bool = true
+	for sz: int in GuData.SIZES:
+		for mode: String in ["gu", "random", "island"]:
+			await _start_new_world(mode != "island", mode, {"size": sz, "presim": false})
+			for k: int in range(240):
+				sim.step(Sim.DT)
+			sim.world.update_territory(sim.villages, sim.clans, Influence.head)
+			for f: int in range(3):
+				await get_tree().process_frame
+			var d: Dictionary = JSON.parse_string(JSON.stringify(sim.serialize()))
+			var nu: int = 0
+			for u: Unit in sim.units:
+				if u.hp > 0.0:
+					nu += 1
+			var tl: PackedByteArray = sim.world.tile.duplicate()
+			# andere Größe dazwischen, dann zurück laden
+			await _start_new_world(false, "flat", {"size": 256 if sz != 256 else 640, "life": "none"})
+			var lok: bool = sim.deserialize(d)
+			var same_t: bool = sim.world.tile == tl
+			var nu2: int = sim.units.size()
+			_on_resize()
+			z = min_z
+			cam = Vector2(W / 2.0, H / 2.0)
+			_clamp_cam()
+			for f2: int in range(3):
+				await get_tree().process_frame
+			var o: Vector2 = world_origin()
+			var fits: bool = o.x >= -0.5 and o.y >= -0.5 and o.x + W * z <= get_viewport_rect().size.x + 0.5 and o.y + H * z <= view_h() + 0.5
+			var same: bool = lok and GuData.W == sz and same_t and nu2 == nu and sim.world.near_img.get_width() == sz and detail.CXN == sz / World.CHK
+			if not same:
+				print("  tile=%s units=%d/%d img=%d cxn=%d" % [str(same_t), nu2, nu, sim.world.near_img.get_width(), detail.CXN])
+			print("SIZETEST %d %s load=%s same=%s fits=%s units=%d villages=%d landmarks=%d" % [sz, mode, str(lok), str(same), str(fits), sim.units.size(), sim.villages.size(), sim.world.landmarks.size()])
+			ok = ok and same and fits
+	# alter Spielstand (v5, ohne Größe, 256er-Gu-Karte)
+	await _start_new_world(true, "gu", {"size": 256, "presim": false})
+	var d5: Dictionary = JSON.parse_string(JSON.stringify(sim.serialize()))
+	d5["v"] = 5
+	d5.erase("size")
+	await _start_new_world(false, "flat", {"size": 512, "life": "none"})
+	var l5: bool = sim.deserialize(d5)
+	var hof: Vector2 = sim._landmark("Himmlischer Hof")
+	print("SIZETEST v5 load=%s size=%d hof=%s" % [str(l5), GuData.W, str(hof)])
+	ok = ok and l5 and GuData.W == 256 and hof == Vector2(124.5, 130.5)
+	# falsche Größe wird abgelehnt
+	d5["v"] = 6
+	d5["size"] = 512
+	ok = ok and not sim.deserialize(d5)
+	print("SIZETEST DONE ok=%s" % str(ok))
+	get_tree().quit()
+
+
 ## Entwickler: -- --fresh --mapimg=<ordner> [--mapsizes=512,256] [--mapmode=gu] – nur Karten erzeugen und das
 ## Fernbild 1:1 als PNG speichern (läuft headless, schnell zum Gestalten der Karte).
 func _dev_mapimg(dir: String) -> void:
@@ -2800,8 +2867,9 @@ func _dev_mapimg(dir: String) -> void:
 ## Entwickler: -- --fresh --mapshots=<ordner> – Gu-Weltkarte in jeder Kartengröße (Übersicht), Zufalls- und leere
 ## Welten in der Standardgröße, mittlerer Zoom; druckt MAPPERF-Zeilen (Generierung, Zeichnen, Simulationsschritt).
 func _dev_mapshots(dir: String) -> void:
-	while loading or presim_on:
+	while loading:
 		await get_tree().process_frame
+	_end_presim()
 	var only: String = ""
 	for a: String in OS.get_cmdline_user_args():
 		if a.begins_with("--mapsizes="):
@@ -2824,8 +2892,14 @@ func _dev_mapshots(dir: String) -> void:
 			sim.step(Sim.DT)
 			steps += 1
 		var st_ms: float = (Time.get_ticks_usec() - t0) / 1000.0 / steps
-		sim.world.update_territory(sim.villages, sim.clans, Influence.head)
-		print("MAPPERF size=%d gen=%s step_ms=%.2f units=%d villages=%d terr_ms=%.1f" % [sz, str(gm), st_ms, sim.units.size(), sim.villages.size(), sim.world.terr_ms])
+		var tbest: float = 1e9
+		var tph: PackedInt32Array = PackedInt32Array()
+		for rep: int in range(3):
+			sim.world.update_territory(sim.villages, sim.clans, Influence.head)
+			if sim.world.terr_ms < tbest:
+				tbest = sim.world.terr_ms
+				tph = sim.world.terr_phase_us.duplicate()
+		print("MAPPERF size=%d gen=%s step_ms=%.2f units=%d villages=%d terr_ms=%.1f phases_us=%s" % [sz, str(gm), st_ms, sim.units.size(), sim.villages.size(), tbest, str(tph)])
 		await _wait(0.4)
 		await _shot(dir + "/gu_%d_j3.png" % sz)
 		var vbest: Village = null

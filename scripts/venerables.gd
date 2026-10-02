@@ -77,7 +77,9 @@ func vname(u: Unit) -> String:
 func radius(s: Dictionary) -> float:
 	if float(s["sx"]) < 0.0 or str(s["ph"]) != "rule":
 		return 14.0 if str(s["ph"]) == "travel" else 22.0
-	return clampf(R_MIN + 3.0 * (sim.sim_time - float(s["seat_t"])) / 12.0, R_MIN, R_MAX)
+	# Herrschaftsgebiet wächst mit der Kartengröße mit (gleicher Anteil an der Welt)
+	var k: float = GuData.len_f()
+	return clampf((R_MIN + 3.0 * (sim.sim_time - float(s["seat_t"])) / 12.0) * k, R_MIN * k, R_MAX * k)
 
 
 func col(s: Dictionary) -> Color:
@@ -217,9 +219,11 @@ func _region_center(r: int) -> Vector2:
 	var sx: float = 0.0
 	var sy: float = 0.0
 	var n: int = 0
-	for y: int in range(2, H, 4):
-		for x: int in range(2, W, 4):
-			var i: int = y * W + x
+	var w: int = GuData.W
+	var st: int = maxi(4, w / 64)
+	for y: int in range(2, GuData.H, st):
+		for x: int in range(2, w, st):
+			var i: int = y * w + x
 			if sim.world.region[i] == r and GuData.is_land(sim.world.tile[i]) and sim.world.tile[i] != GuData.WALL:
 				sx += x
 				sy += y
